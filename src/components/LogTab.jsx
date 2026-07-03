@@ -81,11 +81,10 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
               <span className="hint">{periodRange}</span>
             </div>
             <div className="kpi">
-              <KpiBox title="13주 누적 과금 → 추정 등급" best hint={undefined}>{won(cum)}</KpiBox>
+              <KpiBox title="13주 누적 과금 → 추정 등급" best hint={<>추정 등급: <b style={{ color: "var(--accent2)" }}>{estGrade(cum)}</b></>}>{won(cum)}</KpiBox>
               <KpiBox title="총 과금(실적, MVP)">{won(st.ach)}</KpiBox>
               <KpiBox title="엠작 구매 실지출"><CostLabel n={st.spend} /></KpiBox>
             </div>
-            <div className="hint" style={{ marginTop: -8 }}>추정 등급: <b style={{ color: "var(--accent2)" }}>{estGrade(cum)}</b></div>
             <div className="kpi">
               <KpiBox title="총 마일리지 소모"><MilUse n={st.mil} /></KpiBox>
               <KpiBox title="총 판매 메소(실수령)">{eok(st.meso)} <span className="muted">메소</span></KpiBox>
@@ -233,6 +232,16 @@ function MvpCal({ ledger, days, mileageR, selectedDate, onSelect }) {
   );
 }
 
+// 상세 섹션 래퍼 — DayDetail 밖(모듈 스코프)에 두어 리렌더 시 입력 포커스가 유지되도록 한다.
+function Sec({ label, n, children }) {
+  return (
+    <>
+      <div className="ddsec">{label}{n > 0 && <span className="muted" style={{ fontWeight: 400 }}> · {n}건</span>}</div>
+      {n > 0 ? children : <div className="ddnone">내역 없음</div>}
+    </>
+  );
+}
+
 // ===== 선택 날짜 상세 (편집) =====
 function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
   const buys = ledger.buys.filter((x) => x.date === date);
@@ -240,13 +249,6 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
   const cashes = ledger.cashes.filter((x) => x.date === date);
   const spends = ledger.spends.filter((x) => x.date === date);
   const cnt = buys.length + sells.length + cashes.length + spends.length;
-
-  const Sec = ({ label, n, children }) => (
-    <>
-      <div className="ddsec">{label}{n > 0 && <span className="muted" style={{ fontWeight: 400 }}> · {n}건</span>}</div>
-      {n > 0 ? children : <div className="ddnone">내역 없음</div>}
-    </>
-  );
 
   return (
     <div style={{ marginTop: 16 }}>
