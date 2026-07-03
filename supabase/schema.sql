@@ -11,6 +11,9 @@ create table if not exists public.user_data (
   updated_at timestamptz  not null default now()
 );
 
+-- authenticated 역할에 테이블 권한 부여 (RLS와 별개로 역할 GRANT가 있어야 API 접근 가능)
+grant select, insert, update, delete on public.user_data to authenticated;
+
 -- 행 단위 접근 통제 (보안 핵심): 로그인한 본인 행만 읽기/쓰기 가능
 alter table public.user_data enable row level security;
 

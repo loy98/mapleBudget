@@ -29,6 +29,9 @@ export default function App() {
   const [cloudReady, setCloudReady] = useState(false);
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
   const upsertTimer = useRef(null);
+  const upsertingRef = useRef(false); // 업로드 진행 중 플래그(중복/역전 저장 방지)
+  const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
+  const dataRef = useRef(null);       // 항상 최신 스냅샷(업로드 payload)
 
   // 파생 계산 (기존 render()의 순수 버전)
   const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
@@ -42,52 +45,75 @@ export default function App() {
   const setCharges = (charges) => setCalcState((s) => ({ ...s, charges }));
   const setItems = (items) => setCalcState((s) => ({ ...s, items }));
 
+  // 세션 객체 대신 userId(원시값)로 이펙트를 키잉 → 토큰 갱신/중복 이벤트로 재실행되지 않음.
+  const userId = session?.user?.id ?? null;
+  // 최신 스냅샷을 매 렌더 갱신 → 디바운스 업로드가 항상 최신값을 쓴다.
+  dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
+
   // 세션 구독
   useEffect(() => onAuthChange(setSession), []);
 
-  // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당)
+  // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
+  // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
   useEffect(() => {
-    if (!session) { setCloudReady(false); return; }
+    if (!userId) { setCloudReady(false); return; }
     let cancelled = false;
     (async () => {
       try {
         setSyncState("syncing");
-        const cloud = await fetchUserData(session.user.id);
+        const cloud = await fetchUserData(userId);
         if (cancelled) return;
-        const merged = mergeSnapshots(localSnapshot(), cloud);
-        const c = parseCalcState(merged.calc);
+        const local = localSnapshot();
+        const { snapshot, conflict } = mergeSnapshots(local, cloud);
+        let finalSnap = snapshot;
+        if (conflict) {
+          // 이 기기 게스트 데이터와 클라우드 설정이 모두 있음 → 어느 설정을 쓸지 선택(거래는 이미 합쳐짐).
+          const useCloud = window.confirm(
+            "클라우드에 저장된 설정/자주 쓰는 아이템이 있습니다.\n\n" +
+            "확인 = 클라우드 설정 사용 (이 기기 설정은 덮어씀)\n" +
+            "취소 = 이 기기 설정을 클라우드에 올림\n\n" +
+            "※ 거래 기록은 어느 쪽을 고르든 모두 합쳐집니다."
+          );
+          if (!useCloud) finalSnap = { ...snapshot, calc: local.calc, my_items: local.my_items };
+        }
+        if (cancelled) return;
+        const c = parseCalcState(finalSnap.calc);
         setCalcState({ settings: c.settings, charges: c.charges, items: c.items });
-        setMyItems(normalizeMyItems(merged.my_items));
-        setLedger(normalizeLedger(merged.ledger));
+        setMyItems(normalizeMyItems(finalSnap.my_items));
+        setLedger(normalizeLedger(finalSnap.ledger));
         setCloudReady(true); // 이후 데이터 변경분은 클라우드로 업로드
       } catch (e) {
         console.error("[cloud] 초기 동기화 실패", e);
-        setSyncState("error");
+        if (!cancelled) setSyncState("error");
       }
     })();
     return () => { cancelled = true; };
-  }, [session]);
+  }, [userId]);
 
-  // 데이터 변경 → 디바운스 upsert (로그인 & 초기 동기화 완료 후에만). 최초 1회는 병합본 업로드(=이관).
+  // 데이터 변경 → 디바운스 후 직렬화 upsert. 업로드 중 변경이 오면(dirty) 끝나고 최신값으로 한 번 더 저장.
+  // 항상 dataRef.current(최신)를 쓰고 in-flight를 하나로 제한 → 느린 옛 저장이 새 저장을 덮어쓰지 않음.
   useEffect(() => {
-    if (!session || !cloudReady) return;
+    if (!userId || !cloudReady) return;
     clearTimeout(upsertTimer.current);
-    setSyncState("syncing");
     upsertTimer.current = setTimeout(async () => {
+      if (upsertingRef.current) { dirtyRef.current = true; return; }
+      upsertingRef.current = true;
+      setSyncState("syncing");
       try {
-        await upsertUserData(session.user.id, {
-          calc: serializeCalcState(settings, charges, items),
-          my_items: myItems,
-          ledger,
-        });
+        do {
+          dirtyRef.current = false;
+          await upsertUserData(userId, dataRef.current);
+        } while (dirtyRef.current);
         setSyncState("saved");
       } catch (e) {
         console.error("[cloud] 저장 실패", e);
         setSyncState("error");
+      } finally {
+        upsertingRef.current = false;
       }
     }, 800);
     return () => clearTimeout(upsertTimer.current);
-  }, [settings, charges, items, myItems, ledger, session, cloudReady]);
+  }, [settings, charges, items, myItems, ledger, userId, cloudReady]);
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
