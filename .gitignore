@@ -3,6 +3,10 @@ dist
 dev-dist
 .DS_Store
 
+# 환경변수 (Supabase URL/anon key 등) — 로컬 전용
+.env.local
+.env*.local
+
 # Dev scaffolding / orchestration state
 .omc
 _archive

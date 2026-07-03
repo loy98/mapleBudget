@@ -21,8 +21,11 @@ function writeJSON(key, val) {
 }
 
 // ===== 계산기 설정 + 충전 방식 + 계산기 아이템 =====
-export function loadCalcState() {
-  const d = readJSON(KEY);
+// 직렬화/파싱은 순수 함수로 분리해 localStorage와 Supabase가 같은 형태를 공유한다.
+export function serializeCalcState(settings, charges, items) {
+  return { ...settings, charge: charges, items };
+}
+export function parseCalcState(d) {
   if (!d) {
     return { settings: { ...DEFAULT_SETTINGS }, charges: DEFAULT_CHARGES.map((c) => ({ ...c })), items: DEFAULT_CALC_ITEMS.map((i) => ({ ...i })) };
   }
@@ -34,23 +37,27 @@ export function loadCalcState() {
   const items = d.items && d.items.length ? d.items : [];
   return { settings, charges, items };
 }
-
+export function loadCalcState() {
+  return parseCalcState(readJSON(KEY));
+}
 export function saveCalcState(settings, charges, items) {
-  writeJSON(KEY, { ...settings, charge: charges, items });
+  writeJSON(KEY, serializeCalcState(settings, charges, items));
 }
 
 // ===== 자주 쓰는 아이템 =====
-export function loadMyItems() {
-  const d = readJSON(ITEMS_KEY);
+export function normalizeMyItems(d) {
   if (d && d.length) return d;
   return DEFAULT_ITEMS.map((x) => ({ ...x }));
+}
+export function loadMyItems() {
+  return normalizeMyItems(readJSON(ITEMS_KEY));
 }
 export const saveMyItems = (items) => writeJSON(ITEMS_KEY, items);
 
 // ===== 거래 원장 =====
-export function loadLedger() {
-  const d = readJSON(LKEY) || {};
-  const led = { buys: d.buys || [], sells: d.sells || [], cashes: d.cashes || [], spends: d.spends || [] };
+export function normalizeLedger(d) {
+  const src = d || {};
+  const led = { buys: src.buys || [], sells: src.sells || [], cashes: src.cashes || [], spends: src.spends || [] };
   ["buys", "sells", "cashes", "spends"].forEach((k) => led[k].forEach((x) => { if (!x.id) x.id = uid(); }));
   // 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
   // meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.
@@ -61,7 +68,24 @@ export function loadLedger() {
   });
   return led;
 }
+export function loadLedger() {
+  return normalizeLedger(readJSON(LKEY));
+}
 export const saveLedger = (ledger) => writeJSON(LKEY, ledger);
+
+// ===== 클라우드 동기화용 스냅샷 (Supabase user_data 컬럼 형태와 동일) =====
+export function localSnapshot() {
+  return {
+    calc: readJSON(KEY) || {},
+    my_items: readJSON(ITEMS_KEY) || [],
+    ledger: readJSON(LKEY) || { buys: [], sells: [], cashes: [], spends: [] },
+  };
+}
+export function writeLocalSnapshot({ calc, my_items, ledger }) {
+  if (calc) writeJSON(KEY, calc);
+  if (my_items) writeJSON(ITEMS_KEY, my_items);
+  if (ledger) writeJSON(LKEY, ledger);
+}
 
 export function loadCalMode() {
   try {
