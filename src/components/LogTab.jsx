@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
 import { WD_MVP, WD_SUN } from "../lib/constants.js";
 import { won, pct, eok, mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, weekStartSun, uid, manW, estGrade } from "../lib/util.js";
-import { weeklyAch, cumNow, ledgerStats, dayInfo } from "../lib/ledger.js";
-import { DateInput, YMPicker, KpiBox, CostLabel, PlLabel, MilUse } from "./ui.jsx";
+import { weeklyAch, cumNow, ledgerStats, dayInfo, cashWonOf, mesoWeeks } from "../lib/ledger.js";
+import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, KpiBox, CostLabel, PlLabel, MilUse } from "./ui.jsx";
 import { loadCalMode, saveCalMode } from "../lib/storage.js";
 
 const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
@@ -11,6 +11,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const [sub, setSub] = useState("view");
   const [periodMode, setPeriodMode] = useState("w13");
   const [statMonth, setStatMonth] = useState(curMonth());
+  const [statWeek, setStatWeek] = useState(() => fmtD(weekStartThu(new Date())));
   const [calMode, setCalModeState] = useState(loadCalMode);
   const [calCursor, setCalCursor] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -33,13 +34,33 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const match = useMemo(() => {
     if (periodMode === "all") return () => true;
     if (periodMode === "month") { const m = statMonth || curMonth(); return (dt) => (dt || "").indexOf(m) === 0; }
+    if (periodMode === "week") {
+      const ws = statWeek;
+      const we = fmtD(addDays(new Date(statWeek + "T00:00:00"), 6));
+      return (dt) => (dt || "") >= ws && (dt || "") <= we;
+    }
     const s = fmtD(start13());
     return (dt) => (dt || "") >= s;
-  }, [periodMode, statMonth]);
+  }, [periodMode, statMonth, statWeek]);
   const st = useMemo(() => ledgerStats(ledger, match, env), [ledger, match, calc]);
   const cum = useMemo(() => cumNow(ledger, calc.mileageR), [ledger, calc.mileageR]);
   const days = useMemo(() => dayInfo(ledger, calc.mileageR), [ledger, calc.mileageR]);
+  // today를 deps에 포함해 날짜(주 경계 포함)가 바뀌면 최근 13주/주차 목록이 갱신되게 한다.
+  const today = todayStr();
+  const mWeeks = useMemo(() => mesoWeeks(ledger, calc.f), [ledger, calc.f, today]);
   const uncashed = st.meso - st.cashMeso;
+
+  // 주차 선택 목록 (MVP 주: 목~수, 최근 26주 최신순)
+  const weekOptions = useMemo(() => {
+    const base = weekStartThu(new Date());
+    const curKey = fmtD(base);
+    const arr = [];
+    for (let i = 0; i < 26; i++) {
+      const ws = addDays(base, -i * 7), we = addDays(ws, 6), key = fmtD(ws);
+      arr.push({ key, label: mmdd(ws) + "~" + mmdd(we), cur: key === curKey });
+    }
+    return arr;
+  }, [today]);
 
   const soldNames = useMemo(() => {
     const names = {};
@@ -47,9 +68,11 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
     return Object.keys(names);
   }, [ledger.buys]);
 
+  const selWeek = weekOptions.find((w) => w.key === statWeek);
   const periodRange =
     periodMode === "w13" ? mmdd(start13()) + " ~ " + mmdd(new Date()) + " · 최근 13주"
     : periodMode === "month" ? (statMonth || curMonth()) + " 한 달"
+    : periodMode === "week" ? (selWeek ? selWeek.label : statWeek) + " · 한 주(목~수)"
     : "전체 기간";
 
   const mvLabel = (statMonth || curMonth());
@@ -60,9 +83,6 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
         <button className={"subtab" + (sub === "view" ? " on" : "")} onClick={() => setSub("view")}>달력 &amp; 통계</button>
         <button className={"subtab" + (sub === "entry" ? " on" : "")} onClick={() => setSub("entry")}>거래 입력</button>
       </div>
-      <datalist id="myItemsDL">{myItems.map((m, i) => <option key={i} value={m.name} />)}</datalist>
-      <datalist id="soldItemsDL">{soldNames.map((n) => <option key={n} value={n} />)}</datalist>
-
       {sub === "view" && (
         <div>
           {/* 통계 */}
@@ -70,13 +90,16 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
             <h2><span className="n">📊</span>통계</h2>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <div className="pseg">
-                {[["w13", "최근 13주"], ["all", "전체"], ["month", "특정 월"]].map(([p, l]) => (
+                {[["w13", "최근 13주"], ["all", "전체"], ["month", "특정 월"], ["week", "특정 주차"]].map(([p, l]) => (
                   <button key={p} className={"pbtn" + (periodMode === p ? " on" : "")} onClick={() => setPeriodMode(p)}>{l}</button>
                 ))}
               </div>
               {periodMode === "month" && (
                 <YMPicker value={statMonth} anchorLabel={mvLabel.split("-")[0] + "년 " + +mvLabel.split("-")[1] + "월 ▾"}
                   onChange={(v) => { setStatMonth(v); setCalCursor(new Date(+v.split("-")[0], +v.split("-")[1] - 1, 1)); setCalMode("month"); }} />
+              )}
+              {periodMode === "week" && (
+                <WeekPicker value={statWeek} weeks={weekOptions} onChange={setStatWeek} />
               )}
               <span className="hint">{periodRange}</span>
             </div>
@@ -86,14 +109,48 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
               <KpiBox title="엠작 구매 실지출"><CostLabel n={st.spend} /></KpiBox>
             </div>
             <div className="kpi">
+              <KpiBox title="판매 메소 (실수령)">{eok(st.meso)} <span className="muted">메소</span></KpiBox>
+              <KpiBox title="현금화한 메소">{eok(st.cashMeso)} <span className="muted">메소</span></KpiBox>
+              <KpiBox title="현금화 필요 메소 (판매−현금화)" hint={uncashed < 0 ? <>현금화가 판매보다 {eok(-uncashed)} 많음</> : undefined}>
+                {eok(Math.max(0, uncashed))} <span className="muted">메소</span>
+              </KpiBox>
+            </div>
+            <div className="kpi">
               <KpiBox title="총 마일리지 소모"><MilUse n={st.mil} /></KpiBox>
-              <KpiBox title="총 판매 메소(실수령)">{eok(st.meso)} <span className="muted">메소</span></KpiBox>
               <KpiBox title="엠작 손익 (현금화−구매)"><PlLabel p={st.profit} /></KpiBox>
+              <KpiBox title="현금화율 (현금화/판매)">{pct(st.ratio * 100)}</KpiBox>
             </div>
             <div className="note">
               구매 {st.buys}건 · 판매 {st.sells}건 · 현금화 {st.cashes}건 · 기타 캐시사용 {st.spends}건({won(st.extra)}).
-              실지출은 계산기 평균 충전 할인({pct(calc.effD * 100)}) 반영. 미현금화 메소 약 <b>{eok(uncashed > 0 ? uncashed : 0)}</b>.
+              실지출은 계산기 평균 충전 할인({pct(calc.effD * 100)}) 반영.
             </div>
+
+            <div className="subhead" style={{ marginTop: 18 }}>주차별 메소 현황 (최근 13주 · 목~수)</div>
+            <div className="calwrap">
+              <table>
+                <thead><tr><th>주 (목~수)</th><th>판매 메소</th><th>현금화 메소</th><th>현금화 필요</th></tr></thead>
+                <tbody>
+                  {mWeeks.map((w) => {
+                    const wk = fmtD(w.ws), isCur = wk === fmtD(weekStartThu(new Date()));
+                    const empty = !w.sold && !w.cashed;
+                    return (
+                      <tr key={wk} className={isCur ? "curwk" : ""}>
+                        <td>
+                          <button className="linklike" onClick={() => { setPeriodMode("week"); setStatWeek(wk); }}>
+                            {mmdd(w.ws)}~{mmdd(w.we)}
+                          </button>
+                          {isCur && <span className="nowtag" style={{ marginLeft: 6 }}>이번주</span>}
+                        </td>
+                        <td className="num">{empty ? "–" : eok(w.sold)}</td>
+                        <td className="num">{empty ? "–" : eok(w.cashed)}</td>
+                        <td className={"num " + (w.need > 0.0001 ? "bad" : "good")}>{empty ? "–" : eok(w.need)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="hint" style={{ marginTop: 4 }}>주차를 누르면 위 통계가 그 주 기준으로 바뀝니다. '현금화 필요'는 판매 실수령 메소에서 현금화한 메소를 뺀 값이에요.</div>
           </div>
 
           {/* 달력 */}
@@ -128,6 +185,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
             {selectedDate && (
               <DayDetail
                 date={selectedDate} ledger={ledger} env={env}
+                myItems={myItems} soldNames={soldNames}
                 patchEntry={patchEntry} delEntry={delEntry} addEntryOn={addEntryOn}
               />
             )}
@@ -138,7 +196,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
       {sub === "entry" && (
         <EntryForm
           draft={draft} setDraft={setDraft} entryDate={entryDate} setEntryDate={setEntryDate}
-          myItems={myItems}
+          myItems={myItems} soldNames={soldNames}
           onCommit={(n, date) => {
             setSelectedDate(date);
             setSub("view");
@@ -243,7 +301,7 @@ function Sec({ label, n, children }) {
 }
 
 // ===== 선택 날짜 상세 (편집) =====
-function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
+function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry, addEntryOn }) {
   const buys = ledger.buys.filter((x) => x.date === date);
   const sells = ledger.sells.filter((x) => x.date === date);
   const cashes = ledger.cashes.filter((x) => x.date === date);
@@ -264,9 +322,9 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
               return (
                 <tr key={b.id}>
                   <td><DateInput value={b.date} width={140} onChange={(v) => patchEntry("buys", b.id, { date: v })} /></td>
-                  <td><input list="myItemsDL" value={b.item || ""} style={{ width: 120 }} onChange={(e) => patchEntry("buys", b.id, { item: e.target.value })} /></td>
-                  <td><input type="number" value={b.qty != null ? b.qty : 1} style={{ width: 54 }} onChange={(e) => patchEntry("buys", b.id, { qty: +e.target.value })} /></td>
-                  <td><input type="number" value={b.price != null ? b.price : ""} style={{ width: 88 }} onChange={(e) => patchEntry("buys", b.id, { price: +e.target.value })} /></td>
+                  <td><ItemCombo value={b.item || ""} width={120} options={myItems} onChange={(v) => patchEntry("buys", b.id, { item: v })} /></td>
+                  <td><NumInput noStepper width={54} value={b.qty != null ? b.qty : 1} onChange={(v) => patchEntry("buys", b.id, { qty: v })} /></td>
+                  <td><NumInput noStepper width={88} value={b.price != null ? b.price : ""} onChange={(v) => patchEntry("buys", b.id, { price: v })} /></td>
                   <td className="mil-cell"><input type="checkbox" checked={!!b.mil} onChange={(e) => patchEntry("buys", b.id, { mil: e.target.checked })} /></td>
                   <td className="num">{won(ach)}</td>
                   <td><button className="del" onClick={() => delEntry("buys", b.id)}>×</button></td>
@@ -283,9 +341,9 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
             {sells.map((sl) => (
               <tr key={sl.id}>
                 <td><DateInput value={sl.date} width={140} onChange={(v) => patchEntry("sells", sl.id, { date: v })} /></td>
-                <td><input list="soldItemsDL" value={sl.item || ""} style={{ width: 120 }} onChange={(e) => patchEntry("sells", sl.id, { item: e.target.value })} /></td>
-                <td><input type="number" value={sl.qty != null ? sl.qty : 1} style={{ width: 54 }} onChange={(e) => patchEntry("sells", sl.id, { qty: +e.target.value })} /></td>
-                <td><input type="number" step="0.01" value={sl.meso != null ? sl.meso : ""} style={{ width: 88 }} onChange={(e) => patchEntry("sells", sl.id, { meso: +e.target.value })} /></td>
+                <td><ItemCombo value={sl.item || ""} width={120} options={soldNames} onChange={(v) => patchEntry("sells", sl.id, { item: v })} /></td>
+                <td><NumInput noStepper width={54} value={sl.qty != null ? sl.qty : 1} onChange={(v) => patchEntry("sells", sl.id, { qty: v })} /></td>
+                <td><NumInput noStepper width={88} step={0.01} value={sl.meso != null ? sl.meso : ""} onChange={(v) => patchEntry("sells", sl.id, { meso: v })} /></td>
                 <td className="num">{eok((+sl.qty || 0) * (+sl.meso || 0) * (1 - env.fee))}</td>
                 <td><button className="del" onClick={() => delEntry("sells", sl.id)}>×</button></td>
               </tr>
@@ -295,14 +353,14 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
       </Sec>
       <Sec label="🏦 현금화" n={cashes.length}>
         <div className="tblx"><table>
-          <thead><tr><th>날짜</th><th>메소(억)</th><th>판매 현금</th><th>억당</th><th></th></tr></thead>
+          <thead><tr><th>날짜</th><th>메소(억)</th><th>억당(원)</th><th>판매 현금(자동)</th><th></th></tr></thead>
           <tbody>
             {cashes.map((cc) => (
               <tr key={cc.id}>
                 <td><DateInput value={cc.date} width={140} onChange={(v) => patchEntry("cashes", cc.id, { date: v })} /></td>
-                <td><input type="number" step="0.01" value={cc.meso != null ? cc.meso : ""} style={{ width: 88 }} onChange={(e) => patchEntry("cashes", cc.id, { meso: +e.target.value })} /></td>
-                <td><input type="number" step="1000" value={cc.won != null ? cc.won : ""} style={{ width: 110 }} onChange={(e) => patchEntry("cashes", cc.id, { won: +e.target.value })} /></td>
-                <td className="num">{+cc.meso > 0 ? won((+cc.won || 0) / +cc.meso) + "/억" : "–"}</td>
+                <td><NumInput noStepper width={88} step={0.01} value={cc.meso != null ? cc.meso : ""} onChange={(v) => patchEntry("cashes", cc.id, { meso: v })} /></td>
+                <td><NumInput noStepper width={110} step={1000} value={cc.rate != null ? cc.rate : ""} onChange={(v) => patchEntry("cashes", cc.id, { rate: v })} /></td>
+                <td className="num">{cc.meso && cc.rate ? won(cashWonOf(cc)) : "–"}</td>
                 <td><button className="del" onClick={() => delEntry("cashes", cc.id)}>×</button></td>
               </tr>
             ))}
@@ -316,7 +374,7 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
             {spends.map((sp) => (
               <tr key={sp.id}>
                 <td><DateInput value={sp.date} width={140} onChange={(v) => patchEntry("spends", sp.id, { date: v })} /></td>
-                <td><input type="number" step="1000" value={sp.amount != null ? sp.amount : ""} style={{ width: 110 }} onChange={(e) => patchEntry("spends", sp.id, { amount: +e.target.value })} /></td>
+                <td><NumInput noStepper width={110} step={1000} value={sp.amount != null ? sp.amount : ""} onChange={(v) => patchEntry("spends", sp.id, { amount: v })} /></td>
                 <td><input value={sp.memo || ""} style={{ width: 120 }} onChange={(e) => patchEntry("spends", sp.id, { memo: e.target.value })} /></td>
                 <td><button className="del" onClick={() => delEntry("spends", sp.id)}>×</button></td>
               </tr>
@@ -327,7 +385,7 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
       <div className="row-actions">
         <button className="btn sm" onClick={() => addEntryOn("buys", { item: "", qty: 1, price: "", mil: false })}>+ 구매</button>
         <button className="btn sm" onClick={() => addEntryOn("sells", { item: "", qty: 1, meso: "" })}>+ 판매</button>
-        <button className="btn sm" onClick={() => addEntryOn("cashes", { meso: "", won: "" })}>+ 현금화</button>
+        <button className="btn sm" onClick={() => addEntryOn("cashes", { meso: "", rate: "" })}>+ 현금화</button>
         <button className="btn sm" onClick={() => addEntryOn("spends", { amount: "", memo: "" })}>+ 캐시사용</button>
       </div>
     </div>
@@ -335,7 +393,7 @@ function DayDetail({ date, ledger, env, patchEntry, delEntry, addEntryOn }) {
 }
 
 // ===== 거래 입력 (드래프트) =====
-function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, onCommit, ledger, setLedger }) {
+function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldNames, onCommit, ledger, setLedger }) {
   const upd = (kind, i, patch) =>
     setDraft({ ...draft, [kind]: draft[kind].map((x, j) => (j === i ? { ...x, ...patch } : x)) });
   const del = (kind, i) => setDraft({ ...draft, [kind]: draft[kind].filter((_, j) => j !== i) });
@@ -347,13 +405,13 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, onCommit
     const next = { ...ledger };
     const buys = draft.buys.filter((x) => x.item || x.price);
     const sells = draft.sells.filter((x) => x.item || x.meso);
-    const cashes = draft.cashes.filter((x) => x.meso || x.won);
+    const cashes = draft.cashes.filter((x) => x.meso || x.rate);
     const spends = draft.spends.filter((x) => x.amount);
     n = buys.length + sells.length + cashes.length + spends.length;
     if (n === 0) { alert("입력된 항목이 없습니다."); return; }
     next.buys = [...ledger.buys, ...buys.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, price: x.price, mil: x.mil }))];
     next.sells = [...ledger.sells, ...sells.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, meso: x.meso }))];
-    next.cashes = [...ledger.cashes, ...cashes.map((x) => ({ id: uid(), date, meso: x.meso, won: x.won }))];
+    next.cashes = [...ledger.cashes, ...cashes.map((x) => ({ id: uid(), date, meso: x.meso, rate: x.rate }))];
     next.spends = [...ledger.spends, ...spends.map((x) => ({ id: uid(), date, amount: x.amount, memo: x.memo }))];
     setLedger(next);
     setDraft(EMPTY_DRAFT);
@@ -374,12 +432,12 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, onCommit
           <tbody>
             {draft.buys.map((x, i) => (
               <tr key={i}>
-                <td><input list="myItemsDL" value={x.item || ""} onChange={(e) => {
-                  const mi = myItems.find((m) => m.name === e.target.value);
-                  upd("buys", i, mi && !x.price ? { item: e.target.value, price: +mi.cash } : { item: e.target.value });
+                <td><ItemCombo value={x.item || ""} options={myItems} onChange={(name) => {
+                  const mi = myItems.find((m) => m.name === name);
+                  upd("buys", i, mi && !x.price ? { item: name, price: +mi.cash } : { item: name });
                 }} /></td>
-                <td><input type="number" value={x.qty != null ? x.qty : 1} style={{ width: 54 }} onChange={(e) => upd("buys", i, { qty: +e.target.value })} /></td>
-                <td><input type="number" value={x.price != null ? x.price : ""} style={{ width: 88 }} onChange={(e) => upd("buys", i, { price: +e.target.value })} /></td>
+                <td><NumInput noStepper width={54} value={x.qty != null ? x.qty : 1} onChange={(v) => upd("buys", i, { qty: v })} /></td>
+                <td><NumInput noStepper width={88} value={x.price != null ? x.price : ""} onChange={(v) => upd("buys", i, { price: v })} /></td>
                 <td className="mil-cell"><input type="checkbox" checked={!!x.mil} onChange={(e) => upd("buys", i, { mil: e.target.checked })} /></td>
                 <td><button className="del" onClick={() => del("buys", i)}>×</button></td>
               </tr>
@@ -396,9 +454,9 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, onCommit
           <tbody>
             {draft.sells.map((x, i) => (
               <tr key={i}>
-                <td><input list="soldItemsDL" value={x.item || ""} onChange={(e) => upd("sells", i, { item: e.target.value })} /></td>
-                <td><input type="number" value={x.qty != null ? x.qty : 1} style={{ width: 54 }} onChange={(e) => upd("sells", i, { qty: +e.target.value })} /></td>
-                <td><input type="number" step="0.01" value={x.meso != null ? x.meso : ""} style={{ width: 88 }} onChange={(e) => upd("sells", i, { meso: +e.target.value })} /></td>
+                <td><ItemCombo value={x.item || ""} options={soldNames} onChange={(v) => upd("sells", i, { item: v })} /></td>
+                <td><NumInput noStepper width={54} value={x.qty != null ? x.qty : 1} onChange={(v) => upd("sells", i, { qty: v })} /></td>
+                <td><NumInput noStepper width={88} step={0.01} value={x.meso != null ? x.meso : ""} onChange={(v) => upd("sells", i, { meso: v })} /></td>
                 <td><button className="del" onClick={() => del("sells", i)}>×</button></td>
               </tr>
             ))}
@@ -409,19 +467,23 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, onCommit
 
       <div className="draftblock">
         <div className="bt">🏦 현금화 (메소 → 현금)</div>
+        <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 8 }}>
+          현금화한 메소(억)와 억당 판매 비율(원/억)을 입력하면 판매 현금이 자동 계산됩니다.
+        </div>
         <table>
-          <thead><tr><th>메소(억)</th><th>판매 현금(원)</th><th></th></tr></thead>
+          <thead><tr><th>메소(억)</th><th>억당(원)</th><th>판매 현금(자동)</th><th></th></tr></thead>
           <tbody>
             {draft.cashes.map((x, i) => (
               <tr key={i}>
-                <td><input type="number" step="0.01" value={x.meso != null ? x.meso : ""} style={{ width: 88 }} onChange={(e) => upd("cashes", i, { meso: +e.target.value })} /></td>
-                <td><input type="number" step="1000" value={x.won != null ? x.won : ""} style={{ width: 110 }} onChange={(e) => upd("cashes", i, { won: +e.target.value })} /></td>
+                <td><NumInput noStepper width={88} step={0.01} value={x.meso != null ? x.meso : ""} onChange={(v) => upd("cashes", i, { meso: v })} /></td>
+                <td><NumInput noStepper width={110} step={1000} value={x.rate != null ? x.rate : ""} onChange={(v) => upd("cashes", i, { rate: v })} /></td>
+                <td className="num">{x.meso && x.rate ? won(cashWonOf(x)) : "–"}</td>
                 <td><button className="del" onClick={() => del("cashes", i)}>×</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="row-actions"><button className="btn sm" onClick={() => add("cashes", { meso: "", won: "" })}>+ 현금화 항목</button></div>
+        <div className="row-actions"><button className="btn sm" onClick={() => add("cashes", { meso: "", rate: "" })}>+ 현금화 항목</button></div>
       </div>
 
       <div className="draftblock">
@@ -434,7 +496,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, onCommit
           <tbody>
             {draft.spends.map((x, i) => (
               <tr key={i}>
-                <td><input type="number" step="1000" value={x.amount != null ? x.amount : ""} style={{ width: 110 }} onChange={(e) => upd("spends", i, { amount: +e.target.value })} /></td>
+                <td><NumInput noStepper width={110} step={1000} value={x.amount != null ? x.amount : ""} onChange={(v) => upd("spends", i, { amount: v })} /></td>
                 <td><input value={x.memo || ""} onChange={(e) => upd("spends", i, { memo: e.target.value })} /></td>
                 <td><button className="del" onClick={() => del("spends", i)}>×</button></td>
               </tr>

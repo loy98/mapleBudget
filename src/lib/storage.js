@@ -52,6 +52,13 @@ export function loadLedger() {
   const d = readJSON(LKEY) || {};
   const led = { buys: d.buys || [], sells: d.sells || [], cashes: d.cashes || [], spends: d.spends || [] };
   ["buys", "sells", "cashes", "spends"].forEach((k) => led[k].forEach((x) => { if (!x.id) x.id = uid(); }));
+  // 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
+  // meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.
+  led.cashes.forEach((c) => {
+    if ((c.rate == null || c.rate === "") && c.won != null && +c.meso > 0) {
+      c.rate = +c.won / +c.meso;
+    }
+  });
   return led;
 }
 export const saveLedger = (ledger) => writeJSON(LKEY, ledger);

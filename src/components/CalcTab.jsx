@@ -105,8 +105,8 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                 {charges.map((r, i) => (
                   <tr key={i}>
                     <td><input value={r.name} onChange={(e) => setCharge(i, { name: e.target.value })} /></td>
-                    <td><input type="number" step="0.1" style={{ width: 58 }} value={r.rate} onChange={(e) => setCharge(i, { rate: +e.target.value })} /></td>
-                    <td><input type="number" step="10000" style={{ width: 88 }} value={r.limit} onChange={(e) => setCharge(i, { limit: +e.target.value })} /></td>
+                    <td><NumInput noStepper width={58} step={0.1} value={r.rate} onChange={(v) => setCharge(i, { rate: v })} /></td>
+                    <td><NumInput noStepper width={88} step={10000} value={r.limit} onChange={(v) => setCharge(i, { limit: v })} /></td>
                     <td><button className="del" onClick={() => delCharge(i)}>×</button></td>
                   </tr>
                 ))}
@@ -235,7 +235,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                           <input value={it.icon || ""} style={{ width: 64 }} placeholder="🫐/URL" onChange={(e) => setMyItem(i, { icon: e.target.value })} />
                         </td>
                         <td><input value={it.name || ""} onChange={(e) => setMyItem(i, { name: e.target.value })} /></td>
-                        <td><input type="number" step="100" style={{ width: 100 }} value={it.cash || ""} onChange={(e) => setMyItem(i, { cash: +e.target.value })} /></td>
+                        <td><NumInput noStepper width={100} step={100} value={it.cash || ""} onChange={(v) => setMyItem(i, { cash: v })} /></td>
                         <td className="mil-cell"><input type="checkbox" checked={it.mAllowed !== false} onChange={(e) => setMyItem(i, { mAllowed: e.target.checked })} /></td>
                         <td><button className="del" onClick={() => delMyItem(i)}>×</button></td>
                       </tr>
@@ -263,8 +263,8 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                     return (
                       <tr key={i} className={r.win ? "win" : ""}>
                         <td><input placeholder="아이템명" value={it.name || ""} onChange={(e) => setItem(i, { name: e.target.value })} /></td>
-                        <td><input type="number" step="100" placeholder="예:5900" value={it.cash || ""} onChange={(e) => setItem(i, { cash: e.target.value })} /></td>
-                        <td><input type="number" step="0.01" placeholder="예:0.9" value={it.sell || ""} onChange={(e) => setItem(i, { sell: e.target.value })} /></td>
+                        <td><NumInput noStepper step={100} placeholder="예:5900" value={it.cash || ""} onChange={(v) => setItem(i, { cash: v })} /></td>
+                        <td><NumInput noStepper step={0.01} placeholder="예:0.9" value={it.sell || ""} onChange={(v) => setItem(i, { sell: v })} /></td>
                         <td className="mil-cell">
                           {it.mAllowed !== false ? (
                             <input type="checkbox" checked={!!it.mil} onChange={(e) => setItem(i, { mil: e.target.checked })} />
