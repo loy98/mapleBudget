@@ -29,6 +29,37 @@ export function cumNow(ledger, mileageR) {
   return c;
 }
 
+// 현금화 판매현금: 억당(rate) 기반이면 메소×억당, 아니면(구 데이터) 저장된 won 사용
+export function cashWonOf(c) {
+  if (c.rate != null && c.rate !== "") return (+c.meso || 0) * (+c.rate || 0);
+  return +c.won || 0;
+}
+
+// 한 주(목~수)의 메소 현황: 판매 실수령 / 현금화 / 현금화 필요(판매−현금화)
+export function weeklyMeso(ledger, ws, fee) {
+  const we = addDays(ws, 6);
+  const ss = fmtD(ws), es = fmtD(we);
+  let sold = 0, cashed = 0;
+  ledger.sells.forEach((sl) => {
+    if (sl.date >= ss && sl.date <= es) sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+  });
+  ledger.cashes.forEach((c) => {
+    if (c.date >= ss && c.date <= es) cashed += +c.meso || 0;
+  });
+  return { sold, cashed, need: sold - cashed };
+}
+
+// 최근 13주 주차별 메소 현황
+export function mesoWeeks(ledger, fee) {
+  const s = start13();
+  const arr = [];
+  for (let w = 0; w < 13; w++) {
+    const ws = addDays(s, w * 7);
+    arr.push({ ws, we: addDays(ws, 6), ...weeklyMeso(ledger, ws, fee) });
+  }
+  return arr;
+}
+
 // ===== 기간 통계 =====
 export function ledgerStats(ledger, match, { fee, effD, mileageR }) {
   const st = { ach: 0, spend: 0, mil: 0, meso: 0, cashMeso: 0, cashWon: 0, extra: 0, buys: 0, sells: 0, cashes: 0, spends: 0 };
@@ -52,7 +83,7 @@ export function ledgerStats(ledger, match, { fee, effD, mileageR }) {
   ledger.cashes.forEach((c) => {
     if (match(c.date)) {
       st.cashMeso += +c.meso || 0;
-      st.cashWon += +c.won || 0;
+      st.cashWon += cashWonOf(c);
       st.cashes++;
     }
   });

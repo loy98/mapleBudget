@@ -4,21 +4,42 @@ import { fmtD, todayStr, addDays } from "../lib/util.js";
 import { WD_SUN } from "../lib/constants.js";
 
 // ===== 숫자 입력 (테마 스테퍼) =====
+// 편집 중에는 자유롭게 지울 수 있고(완전 삭제 가능), 다 지운 채 포커스를 벗어나면 0으로,
+// 다 지우고 숫자를 입력하면 그 값으로 확정된다. 값은 문자열로 전달(계산부는 +x||0로 처리).
 export function NumInput({ value, onChange, step = 1, width, noStepper, placeholder }) {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState("");
+  const display = value === "" || value == null ? "" : String(value);
+  const shown = focused ? draft : display;
+
+  const emit = (raw) => {
+    const clean = raw.replace(/[^\d.]/g, "");
+    setDraft(clean);
+    onChange(clean);
+  };
+  const onBlur = () => {
+    setFocused(false);
+    if (draft.trim() === "" || !isFinite(+draft)) onChange(0);
+  };
+
   const inp = (
     <input
-      type="number"
-      step={step}
-      value={value}
+      type="text"
+      inputMode="decimal"
+      value={shown}
       placeholder={placeholder}
       style={width ? { width } : undefined}
-      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => { setDraft(display); setFocused(true); }}
+      onBlur={onBlur}
+      onChange={(e) => emit(e.target.value)}
     />
   );
   if (noStepper || width) return inp;
   const bump = (dir) => {
-    const v = +value || 0;
-    onChange(String(v + dir * step));
+    const base = +(focused ? draft : value) || 0;
+    const nv = String(base + dir * step);
+    setDraft(nv);
+    onChange(nv);
   };
   return (
     <span className="numwrap">
@@ -65,6 +86,112 @@ export function CSelect({ value, onChange, options, style }) {
           ))}
       </div>
     </span>
+  );
+}
+
+// ===== 아이템 콤보 (자유 입력 + 항상 열리는 목록, 테마 통일) =====
+export function ItemCombo({ value, onChange, options, width, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ left: 0, top: 0, width: 160 });
+  const wrapRef = useRef(null);
+  const inpRef = useRef(null);
+  const popRef = useRef(null);
+  const opts = (options || [])
+    .map((o) => (typeof o === "string" ? { name: o } : o))
+    .filter((o) => o && o.name);
+
+  const openPop = () => {
+    const r = inpRef.current.getBoundingClientRect();
+    setPos({ left: window.scrollX + r.left, top: window.scrollY + r.bottom + 4, width: r.width });
+    setOpen(true);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => {
+      if (
+        popRef.current && !popRef.current.contains(e.target) &&
+        wrapRef.current && !wrapRef.current.contains(e.target)
+      ) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  return (
+    <span className="icombo" ref={wrapRef} style={width ? { width } : undefined}>
+      <input
+        ref={inpRef}
+        className="icombo-inp"
+        value={value || ""}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={openPop}
+      />
+      <button type="button" className="icombo-tgl" tabIndex={-1} onClick={() => (open ? setOpen(false) : openPop())}>▾</button>
+      {open && opts.length > 0 &&
+        createPortal(
+          <div ref={popRef} className="icombo-pop" style={{ left: pos.left, top: pos.top, minWidth: pos.width }}>
+            {opts.map((o) => (
+              <div
+                key={o.name}
+                className={"icombo-opt" + (o.name === value ? " sel" : "")}
+                onMouseDown={(e) => { e.preventDefault(); onChange(o.name); setOpen(false); }}
+              >
+                {o.icon ? <IconView icon={o.icon} /> : null}
+                <span>{o.name}</span>
+              </div>
+            ))}
+          </div>,
+          document.body
+        )}
+    </span>
+  );
+}
+
+// ===== 주차 피커 (MVP 주: 목~수) =====
+export function WeekPicker({ value, onChange, weeks }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ left: 0, top: 0 });
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => {
+      if (popRef.current && !popRef.current.contains(e.target) && e.target !== btnRef.current) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const sel = weeks.find((w) => w.key === value);
+  return (
+    <>
+      <button
+        ref={btnRef}
+        className="btn ghost sm"
+        onClick={() => {
+          const r = btnRef.current.getBoundingClientRect();
+          setPos({ left: window.scrollX + r.left, top: window.scrollY + r.bottom + 6 });
+          setOpen(!open);
+        }}
+      >
+        {sel ? sel.label : "주 선택"} ▾
+      </button>
+      {open &&
+        createPortal(
+          <div ref={popRef} className="wkpop" style={{ left: pos.left, top: pos.top }}>
+            {weeks.map((w) => (
+              <div
+                key={w.key}
+                className={"wkc" + (w.key === value ? " sel" : "")}
+                onClick={() => { onChange(w.key); setOpen(false); }}
+              >
+                {w.label}{w.cur ? <span className="nowtag" style={{ marginLeft: 6 }}>이번주</span> : null}
+              </div>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
