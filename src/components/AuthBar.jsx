@@ -40,13 +40,13 @@ export default function AuthBar({ session, syncState }) {
 
   return (
     <div className="authbar">
-      <button className="btn sm" onClick={() => setOpen((v) => !v)}>☁ 동기화 로그인</button>
+      <button className="btn sm" onClick={() => setOpen((v) => !v)}>로그인</button>
       {open && (
         <div className="authpop">
           <button className="btn ghost sm" onClick={google}>Google로 계속</button>
           <div className="author">또는 이메일 링크</div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: 180 }} />
+          <div className="emailrow">
+            <input placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
             <button className="btn sm" onClick={sendLink} disabled={busy}>보내기</button>
           </div>
           {sent && <div className="hint" style={{ marginTop: 6 }}>메일로 보낸 로그인 링크를 눌러주세요.</div>}
