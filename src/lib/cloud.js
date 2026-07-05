@@ -1,4 +1,5 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
+import { clearCloudSynced } from "./storage.js";
 
 export { cloudEnabled };
 
@@ -22,6 +23,7 @@ export function signInWithEmail(email) {
   });
 }
 export function signOut() {
+  clearCloudSynced(); // 재로그인 시 게스트↔클라우드 선택을 다시 판별하도록 마커 제거
   return supabase.auth.signOut();
 }
 
