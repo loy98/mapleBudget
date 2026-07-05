@@ -13,8 +13,10 @@
 
 ## 검증 프로토콜 (코드 변경은 예외 없이 2단계)
 
-1. **Claude 자체 검수** — `npm run build` + 로직/엣지케이스 확인. 가능하면 dev 서버 띄워 **실제 동작까지** 확인(빌드는 통과해도 런타임에서 깨질 수 있음).
-2. **Codex 재검수** — `codex:rescue`(또는 `/codex:review`)로 diff 재검수 → 지적사항 반영(이견 시 보수적으로 수정).
+1. **Claude 자체 검수** — `npm run build` + 로직/엣지케이스 확인. **가능하면 dev 서버(프리뷰)를 띄워 실제 런타임까지 확인**(빌드는 통과해도 런타임에서 깨질 수 있음).
+   - 상태 분기는 `localStorage`를 조작해 재현: **새 게스트**(키 삭제), **기존 유저**(커스텀 값 심기), 로그인 경로. 값이 코드 폴백인지 DB에서 온 건지 구분해야 하면 **로컬 constants를 sentinel(예: 1111)로 바꿔** 새 게스트가 DB값을 받는지 확인 후 **원복**.
+   - **프로덕션 Supabase에 sentinel/테스트 값을 쓰지 말 것**(모든 유저가 읽는 shared state 오염). 테스트는 로컬 constants sentinel 또는 `fetchAppConfig` 반환값 임시 주입으로 하고 반드시 되돌린다.
+2. **Codex 재검수** — `codex:rescue`(또는 `/codex:review`)로 diff 재검수 → 지적사항 반영(이견 시 보수적으로 수정). **PASS 받을 때까지 반복**(수정 후 재검수).
 - `.ts/.tsx/.js/.jsx/.py` 등 코드 변경에 적용. 단순 문서·설정 변경은 예외.
 
 ## 아키텍처 방향
@@ -23,13 +25,17 @@
 - **다인용 클라우드 동기화**: **Supabase**. `user_data` 1행(JSONB: calc/my_items/ledger) + **RLS(본인 행만)**. 인증 = **Google 로그인 + 이메일 매직링크**.
 - **데이터 계층 공유**: `storage.js`의 순수 함수(`parseCalcState`/`serializeCalcState`/`normalizeLedger`/`normalizeMyItems`)를 localStorage와 클라우드가 함께 사용. 기존 저장 키를 유지해 구버전 데이터 승계.
 - **설정 주입**: 공개 설정(`VITE_SUPABASE_URL`, publishable key)은 저장소 `.env`에 커밋(브라우저 노출이 정상, 보안은 RLS가 담당). **시크릿(service key, SMTP/앱 비밀번호 등)은 절대 커밋 금지.**
+- **앱 공용 설정(시세성 기본값)**: `app_config` 테이블(1행, JSONB `config`; RLS = 누구나 SELECT / 쓰기정책 없음)에서 `mesoRate`/`giftRatio`/`marketRatio`·`chargeMethods`·`defaultItems`를 로드(`fetchAppConfig`). **DB에서 고치면 재배포 없이 반영**, fetch 실패/오프라인은 `constants.js` 폴백. 대시보드(service role)로만 수정.
+  - **적용 규칙**: 충전 프리셋 목록은 전역(모두). 시세/기본아이템은 **저장 이력 없는 새 게스트에게만**(freshRef+configAppliedRef, auth 해석 후 게스트만). `config.force` 배열에 든 키는 **모든 유저에게 강제 덮어씀**(force). 상세는 프로젝트 메모리 `app-config-db`.
+- **동기화 불변식(깨면 데이터 꼬임 — 절대 유지)**: ① 업로드는 **단일 in-flight 직렬화**(`upsertingRef`; `upsertingRef`를 외부에서 리셋하지 말 것 — 계정 전환 복구는 `syncNonce` 재예약으로). ② 각 upsert write 직전 `liveUserIdRef.current === 캡처 userId` 확인 → **다른 계정 행에 쓰지 않음**. ③ 최초 로그인 프롬프트는 계정별 마커(`mvpCloudSyncedUid`)로 **1회만**(새로고침 X). ④ ledger는 항목 id 기준 **합집합 병합**(손실 없음).
 - 상세는 프로젝트 메모리 `supabase-multiuser-sync` 참고.
 
 ## 배포
 
-- **Cloudflare Pages** — `main` push 시 자동 배포. URL: https://maplebudget-1xp.pages.dev
+- **Cloudflare Pages** — `main` push 시 자동 배포. 프로덕션 URL: **https://maplemvpcalculator.com** (+`www`), 기존 https://maplebudget-1xp.pages.dev 도 유효.
 - Framework=**Vite**, Build=`npm run build`, Output=`dist`, Production branch=`main`, Node=**22**(저장소 `.node-version`).
 - 환경변수 대시보드가 불안정하면 위 `.env` 커밋 방식으로 대체(공개 값만).
+- **도메인을 바꾸면 로그인 리다이렉트도 반드시 갱신**: Supabase → Auth → URL Configuration의 **Site URL**과 **Redirect URLs**에 새 도메인 추가(안 하면 Google/매직링크 로그인이 새 도메인에서 막힘). 앱 코드는 `window.location.origin`을 써서 코드 변경은 불필요.
 
 ## 도메인 / 기능 규칙
 
@@ -45,3 +51,6 @@
 - 시크릿 키(Supabase service key, Gmail 앱 비밀번호 등) 저장소 커밋.
 - 코드 변경 후 Codex 재검수 생략.
 - 렌더 함수 내부에 컴포넌트 정의(리마운트로 입력 포커스 유실) — 모듈 스코프로 둘 것.
+- **프로덕션 Supabase(app_config/user_data)에 sentinel·테스트 값 쓰기** — 모든 유저가 읽는 shared state 오염. 테스트는 로컬에서.
+- **동기화 불변식 위반**: `upsertingRef`를 이펙트에서 외부 리셋, upsert 시 `liveUserIdRef` 가드 제거, 마커 없이 매 로드 프롬프트 등.
+- **DB 값을 검증 없이 렌더**: `app_config`에서 온 배열/객체(예: `chargeMethods`/`defaultItems`)는 `m && typeof m.name === "string"` 등으로 걸러 쓴다(malformed 원소 렌더 크래시 방지).
