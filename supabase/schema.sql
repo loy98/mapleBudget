@@ -36,3 +36,55 @@ drop trigger if exists user_data_touch on public.user_data;
 create trigger user_data_touch
   before update on public.user_data
   for each row execute function public.touch_updated_at();
+
+-- ============================================================
+-- app_config · 앱 공용 설정(시세성 기본값) 1행
+-- 누구나 읽기(anon 포함), 쓰기 정책 없음 → 클라이언트는 수정 불가.
+-- 값 변경은 대시보드(service role, RLS 우회)로만. src/lib/cloud.js fetchAppConfig 가 읽음.
+-- ============================================================
+
+create table if not exists public.app_config (
+  id         int primary key default 1,
+  config     jsonb        not null,
+  updated_at timestamptz  not null default now(),
+  constraint app_config_singleton check (id = 1)
+);
+
+-- 공개 읽기: anon + authenticated 에 SELECT 권한 (RLS와 별개로 GRANT 필요)
+grant select on public.app_config to anon, authenticated;
+
+alter table public.app_config enable row level security;
+
+-- 누구나 읽기만. INSERT/UPDATE/DELETE 정책을 두지 않아 클라이언트 쓰기는 전부 거부됨.
+drop policy if exists "app_config_read_all" on public.app_config;
+create policy "app_config_read_all" on public.app_config
+  for select
+  using (true);
+
+drop trigger if exists app_config_touch on public.app_config;
+create trigger app_config_touch
+  before update on public.app_config
+  for each row execute function public.touch_updated_at();
+
+-- 초기 시드(원하는 값으로 수정). 시세성 기본값 + 충전 프리셋 + 기본 아이템.
+-- force: 모든 유저에게 강제 반영할 키 배열(예: ["mesoRate"]). 비우면 강제 안 함.
+insert into public.app_config (id, config) values (1, '{
+  "mesoRate": 3000, "giftRatio": 8000, "marketRatio": 7500, "force": [],
+  "chargeMethods": [
+    {"name":"정가 (할인 없음)","rate":0,"limit":0},
+    {"name":"컬쳐랜드 상품권","rate":7,"limit":200000},
+    {"name":"도서문화상품권","rate":7,"limit":200000},
+    {"name":"넥슨카드 (할인몰)","rate":5.6,"limit":0},
+    {"name":"넥슨 현대카드","rate":10,"limit":0},
+    {"name":"직접 입력","rate":0,"limit":0}
+  ],
+  "defaultItems": [
+    {"name":"로얄 스타일 쿠폰 10개","cash":22000,"mAllowed":false,"icon":"🎀"},
+    {"name":"로얄 스타일 쿠폰 20개","cash":44000,"mAllowed":false,"icon":"🎀"},
+    {"name":"원더베리","cash":3900,"mAllowed":true,"icon":"🫐"},
+    {"name":"플래티넘 카르마의 가위","cash":5900,"mAllowed":true,"icon":"✂️"},
+    {"name":"프리미엄 헤어 쿠폰","cash":5500,"mAllowed":true,"icon":"💇"},
+    {"name":"프리미엄 성형 쿠폰","cash":5500,"mAllowed":true,"icon":"💄"},
+    {"name":"뷰티 쿠폰","cash":4900,"mAllowed":true,"icon":"💅"}
+  ]
+}'::jsonb) on conflict (id) do nothing;
