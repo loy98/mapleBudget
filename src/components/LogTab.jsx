@@ -427,7 +427,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
 
       <div className="draftblock" style={{ marginTop: 12 }}>
         <div className="bt">🛒 구매 (아이템 → 캐시 사용)</div>
-        <table>
+        <div className="tblx"><table>
           <thead><tr><th>아이템</th><th>수량</th><th>개당 캐시가(원)</th><th className="milh">마일</th><th></th></tr></thead>
           <tbody>
             {draft.buys.map((x, i) => (
@@ -443,13 +443,13 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="row-actions"><button className="btn sm" onClick={() => add("buys", { item: "", qty: 1, price: "", mil: false })}>+ 구매 항목</button></div>
       </div>
 
       <div className="draftblock">
         <div className="bt">💰 판매 (경매장 → 메소)</div>
-        <table>
+        <div className="tblx"><table>
           <thead><tr><th>아이템</th><th>수량</th><th>개당 판매가(억)</th><th></th></tr></thead>
           <tbody>
             {draft.sells.map((x, i) => (
@@ -461,7 +461,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="row-actions"><button className="btn sm" onClick={() => add("sells", { item: "", qty: 1, meso: "" })}>+ 판매 항목</button></div>
       </div>
 
@@ -470,7 +470,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
         <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 8 }}>
           현금화한 메소(억)와 억당 판매 비율(원/억)을 입력하면 판매 현금이 자동 계산됩니다.
         </div>
-        <table>
+        <div className="tblx"><table>
           <thead><tr><th>메소(억)</th><th>억당(원)</th><th>판매 현금(자동)</th><th></th></tr></thead>
           <tbody>
             {draft.cashes.map((x, i) => (
@@ -482,7 +482,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="row-actions"><button className="btn sm" onClick={() => add("cashes", { meso: "", rate: "" })}>+ 현금화 항목</button></div>
       </div>
 
@@ -491,7 +491,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
         <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 8 }}>
           충전은 많이 했어도 엠작 외 다른 데 쓴 넥슨캐시. 사용액이 MVP 과금(실적)에 잡히므로 여기에 기입하면 주차별 과금이 정확해집니다.
         </div>
-        <table>
+        <div className="tblx"><table>
           <thead><tr><th>사용액(원)</th><th>메모</th><th></th></tr></thead>
           <tbody>
             {draft.spends.map((x, i) => (
@@ -502,7 +502,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <div className="row-actions"><button className="btn sm" onClick={() => add("spends", { amount: "", memo: "" })}>+ 캐시 사용</button></div>
       </div>
 
