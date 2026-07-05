@@ -135,6 +135,7 @@ export default function App() {
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
   useEffect(() => {
+    syncedUserRef.current = null; // 새 userId 컨텍스트 진입 → 이 유저 데이터 로드 완료 전까지 force '미정착'(재로그인 stale 방지)
     if (!userId) {
       pendingCloudSyncMarkRef.current = null;
       setCloudReady(false);
