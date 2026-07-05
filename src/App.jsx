@@ -126,6 +126,10 @@ export default function App() {
     }
   }, [appConfig, authResolved, userId, cloudReady]);
 
+  // 로그인/계정 전환 시 force 1회 게이트를 리셋 → 새 컨텍스트(클라우드 데이터)에도 force가 다시 적용된다.
+  // forceAppliedRef만 건드리므로 업로드 직렬화(upsertingRef/dirtyRef)에는 영향 없음.
+  useEffect(() => { forceAppliedRef.current = false; }, [userId]);
+
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
   useEffect(() => {
