@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { computeCalc } from "./lib/calc.js";
 import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
-  loadLedger, saveLedger, exportAll, importAll, withRowKeys,
+  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched,
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
 import { useCloudSync } from "./lib/useCloudSync.js";
@@ -32,11 +32,13 @@ export default function App() {
   useEffect(() => saveMyItems(myItems), [myItems]);
   useEffect(() => saveLedger(ledger), [ledger]);
 
-  // 리스트 setter는 withRowKeys로 감싸 모든 생성/편집 경로가 안정 key(_k)를 갖게 한다.
-  const setSettings = (patch) => setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-  const setCharges = (charges) => setCalcState((s) => ({ ...s, charges: withRowKeys(charges) }));
-  const setItems = (items) => setCalcState((s) => ({ ...s, items: withRowKeys(items) }));
-  const applyMyItems = (arr) => setMyItems(withRowKeys(arr));
+  // 사용자 직접 편집용 setter. withRowKeys로 안정 key를 부여하고, markUserTouched로 '사용자가 손댔음'을 기록
+  // → 최초 로그인 병합에서 거래 없이 설정/아이템만 바꾼 게스트의 데이터도 보호(P1-4). config/sync 프로그램적
+  //   변경은 훅이 setCalcState/setMyItems를 직접 호출하므로 여기 표시가 붙지 않는다.
+  const setSettings = (patch) => { markUserTouched(); setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } })); };
+  const setCharges = (charges) => { markUserTouched(); setCalcState((s) => ({ ...s, charges: withRowKeys(charges) })); };
+  const setItems = (items) => { markUserTouched(); setCalcState((s) => ({ ...s, items: withRowKeys(items) })); };
+  const applyMyItems = (arr) => { markUserTouched(); setMyItems(withRowKeys(arr)); };
 
   // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
   const { session, syncState, chargeOptions } = useCloudSync({

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
-  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys,
+  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, upsertUserData, mergeSnapshots, fetchAppConfig } from "./cloud.js";
 import { CHARGE_METHODS } from "./constants.js";
@@ -128,7 +128,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const firstLogin = !isCloudSynced(userId);
         pendingCloudSyncMarkRef.current = firstLogin ? userId : null;
         const local = localSnapshot();
-        const { snapshot, conflict } = mergeSnapshots(local, cloud);
+        // 거래 없이 설정/아이템만 바꾼 게스트도 보호: 사용자 직접 편집 여부를 병합 판정에 전달(P1-4).
+        const { snapshot, conflict } = mergeSnapshots(local, cloud, { localTouched: isUserTouched() });
         let finalSnap = snapshot;
         if (conflict && firstLogin) {
           const useCloud = window.confirm(

@@ -71,16 +71,19 @@ export async function upsertUserData(userId, snap) {
 // calc/my_items는 클라우드가 비어있지 않으면 클라우드 우선하되, 이 기기에서 게스트로
 // 거래를 기록한 적이 있으면(=localActive) conflict=true로 표시해 App이 사용자에게 선택을 묻는다.
 // 반환: { snapshot: {calc,my_items,ledger}, conflict: boolean }
-export function mergeSnapshots(local, cloud) {
+// opts.localTouched: 이 기기에서 사용자가 계산기/아이템을 직접 편집했는지(거래 없이 설정만 바꾼 경우 포착 — P1-4).
+export function mergeSnapshots(local, cloud, opts = {}) {
   if (!cloud) return { snapshot: local, conflict: false };
   const ledger = mergeLedger(local.ledger, cloud.ledger);
   const cloudHasItems = !!(cloud.my_items && cloud.my_items.length);
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
   const my_items = cloudHasItems ? cloud.my_items : local.my_items;
   const calc = cloudHasCalc ? cloud.calc : local.calc;
-  const localActive = ["buys", "sells", "cashes", "spends"].some(
+  const ledgerActive = ["buys", "sells", "cashes", "spends"].some(
     (k) => local.ledger && local.ledger[k] && local.ledger[k].length > 0
   );
+  // 거래가 있거나(ledgerActive) 사용자가 설정/아이템을 직접 편집했으면(localTouched) 지켜야 할 로컬 데이터가 있음.
+  const localActive = ledgerActive || !!opts.localTouched;
   const conflict = (cloudHasCalc || cloudHasItems) && localActive;
   return { snapshot: { calc, my_items, ledger }, conflict };
 }
