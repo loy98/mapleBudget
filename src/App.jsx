@@ -29,10 +29,13 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
+  const [syncNonce, setSyncNonce] = useState(0); // 계정 전환 후 새 계정 업로드 재예약 트리거
   const upsertTimer = useRef(null);
   const upsertingRef = useRef(false); // 업로드 진행 중 플래그(중복/역전 저장 방지)
   const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
   const dataRef = useRef(null);       // 항상 최신 스냅샷(업로드 payload)
+  const pendingCloudSyncMarkRef = useRef(null); // 첫 로그인 시 "첫 업로드 성공 후 마킹 예정" userId 보관
+  const liveUserIdRef = useRef(null); // 현재 로그인된 userId(매 렌더 갱신) — 계정 전환 중 교차 업로드 차단용
 
   // 파생 계산 (기존 render()의 순수 버전)
   const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
@@ -50,6 +53,7 @@ export default function App() {
   const userId = session?.user?.id ?? null;
   // 최신 스냅샷을 매 렌더 갱신 → 디바운스 업로드가 항상 최신값을 쓴다.
   dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
+  liveUserIdRef.current = userId; // 업로드 직전 캡처된 userId와 대조 → 계정 전환 시 옛 계정 행에 쓰지 않음
 
   // 세션 구독
   useEffect(() => onAuthChange(setSession), []);
@@ -57,7 +61,11 @@ export default function App() {
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
   useEffect(() => {
-    if (!userId) { setCloudReady(false); return; }
+    if (!userId) {
+      pendingCloudSyncMarkRef.current = null;
+      setCloudReady(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -67,6 +75,7 @@ export default function App() {
         // 이 기기가 이 계정과 이미 동기화됐으면(=새로고침/세션 복원) 프롬프트 없이 조용히 병합.
         // 최초 로그인일 때만 게스트↔클라우드 설정 선택을 묻는다.
         const firstLogin = !isCloudSynced(userId);
+        pendingCloudSyncMarkRef.current = firstLogin ? userId : null;
         const local = localSnapshot();
         const { snapshot, conflict } = mergeSnapshots(local, cloud);
         let finalSnap = snapshot;
@@ -85,7 +94,6 @@ export default function App() {
         setCalcState({ settings: c.settings, charges: c.charges, items: c.items });
         setMyItems(normalizeMyItems(finalSnap.my_items));
         setLedger(normalizeLedger(finalSnap.ledger));
-        markCloudSynced(userId); // 이 기기·계정 동기화 완료 표시 → 다음 새로고침부턴 프롬프트 없음
         setCloudReady(true); // 이후 데이터 변경분은 클라우드로 업로드
       } catch (e) {
         console.error("[cloud] 초기 동기화 실패", e);
@@ -107,18 +115,33 @@ export default function App() {
       try {
         do {
           dirtyRef.current = false;
+          // 계정이 바뀌었으면(로그아웃/전환) 이 콜백이 캡처한 옛 userId 행에 현재(다른 계정) 데이터를
+          // 써 넣지 않도록 중단. dataRef는 라이브라 새 계정 데이터를 담을 수 있어 교차 오염을 막는다.
+          if (liveUserIdRef.current !== userId) break;
           await upsertUserData(userId, dataRef.current);
         } while (dirtyRef.current);
+        // 최초 로그인이었다면, 업로드가 실제로 성공한 지금 시점에만 동기화 마커를 찍는다.
+        // (병합 직후 조기 마킹 시 업로드 실패/새로고침 레이스로 사용자의 "기기 설정 사용" 선택이 무시될 수 있음)
+        if (pendingCloudSyncMarkRef.current === userId) {
+          if (!isCloudSynced(userId)) markCloudSynced(userId);
+          pendingCloudSyncMarkRef.current = null; // 이 계정의 pending만 정리(다른 계정 로그인분을 지우지 않음)
+        }
         setSyncState("saved");
       } catch (e) {
         console.error("[cloud] 저장 실패", e);
         setSyncState("error");
       } finally {
         upsertingRef.current = false;
+        // 이 업로드가 도는 동안 계정이 바뀌었다면(로그인 전환), 새 계정 업로드를 재예약.
+        // upsertingRef를 외부에서 리셋하지 않아 단일 in-flight 직렬화는 유지되고(동시 업로드/응답 역전 없음),
+        // A가 끝난 지금에서야 B 업로드를 새 타이머로 트리거 → B 첫 업로드 유실 방지.
+        if (liveUserIdRef.current && liveUserIdRef.current !== userId) {
+          setSyncNonce((n) => n + 1);
+        }
       }
     }, 800);
     return () => clearTimeout(upsertTimer.current);
-  }, [settings, charges, items, myItems, ledger, userId, cloudReady]);
+  }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce]);
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
