@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
-  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems,
+  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, upsertUserData, mergeSnapshots, fetchAppConfig } from "./cloud.js";
 import { CHARGE_METHODS } from "./constants.js";
@@ -30,7 +30,9 @@ const validItems = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof 
 //  - 계정 전환 후 새 계정 업로드는 syncNonce 재예약(직렬화 유지한 채).
 //  - force 정착 판정은 syncedUserRef(실제 데이터 로드) — cloudReady state의 stale read 회피.
 // ============================================================
-export function useCloudSync({ settings, charges, items, myItems, ledger, setCalcState, setMyItems, setLedger, applyMyItems }) {
+// setCalcState/setMyItems/setLedger는 React useState 세터(안정 identity)만 받는다 → stale closure 없음.
+// 내부에서 setMyItems(withRowKeys(...))로 안정 key를 부여(App의 applyMyItems 래퍼에 의존하지 않음).
+export function useCloudSync({ settings, charges, items, myItems, ledger, setCalcState, setMyItems, setLedger }) {
   const [session, setSession] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
@@ -86,7 +88,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     }
     if (freshRef.current.items) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) applyMyItems(its);
+      if (its.length) setMyItems(withRowKeys(its));
     }
   }, [appConfig, authResolved, userId]);
 
@@ -105,7 +107,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     if (force.includes("defaultItems")) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) applyMyItems(its);
+      if (its.length) setMyItems(withRowKeys(its));
     }
   }, [appConfig, authResolved, userId, cloudReady]);
 
@@ -154,22 +156,27 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
 
   // ===== 업로드 러너(통합): 디바운스·플러시가 공유 =====
   // 단일 in-flight 직렬화 + do-while dirty-retry + 계정 가드 + 마커 + 재예약. captured uid로 동작.
-  const runUpload = async (uid) => {
+  // refs + 안정 setter(setSyncState/setSyncNonce)만 읽으므로 useCallback([])로 안정화 → 이펙트 deps에 넣어도 재실행 없음.
+  const runUpload = useCallback(async (uid) => {
     if (upsertingRef.current) { dirtyRef.current = true; return; } // in-flight면 dirty만 표시(러너가 소비)
     upsertingRef.current = true;
     setSyncState("syncing");
+    let aborted = false;
     try {
       do {
         dirtyRef.current = false;
-        if (liveUserIdRef.current !== uid) break; // 계정 전환 → 옛 행에 쓰지 않음
+        if (liveUserIdRef.current !== uid) { aborted = true; break; } // 계정 전환 → 옛 행에 쓰지 않고 중단
         await upsertUserData(uid, dataRef.current);
       } while (dirtyRef.current);
-      dirtyForFlushRef.current = false; // 업로드 성공 → 미반영 변경 없음
-      if (pendingCloudSyncMarkRef.current === uid) {
-        if (!isCloudSynced(uid)) markCloudSynced(uid);
-        pendingCloudSyncMarkRef.current = null;
+      // 실제로 이 uid 업로드가 완료된 경우에만 성공 처리 — 중단(계정 전환)된 업로드를 성공으로 오인하지 않는다.
+      if (!aborted) {
+        dirtyForFlushRef.current = false; // 업로드 성공 → 미반영 변경 없음
+        if (pendingCloudSyncMarkRef.current === uid) {
+          if (!isCloudSynced(uid)) markCloudSynced(uid);
+          pendingCloudSyncMarkRef.current = null;
+        }
+        setSyncState("saved");
       }
-      setSyncState("saved");
     } catch (e) {
       console.error("[cloud] 저장 실패", e);
       setSyncState("error");
@@ -177,7 +184,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       upsertingRef.current = false;
       if (liveUserIdRef.current && liveUserIdRef.current !== uid) setSyncNonce((n) => n + 1); // 새 계정 업로드 재예약
     }
-  };
+  }, []);
 
   // 데이터 변경 → 디바운스 후 업로드.
   useEffect(() => {
@@ -186,8 +193,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     clearTimeout(upsertTimer.current);
     upsertTimer.current = setTimeout(() => { runUpload(userId); }, 800);
     return () => clearTimeout(upsertTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce]);
+  }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce, runUpload]);
 
   // 마지막 편집 유실 방지: 탭 숨김 시 대기 중 변경을 즉시 업로드(같은 runUpload → dirty-retry 공유).
   useEffect(() => {
@@ -200,8 +206,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     };
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, cloudReady]);
+  }, [userId, cloudReady, runUpload]);
 
   return { session, syncState, chargeOptions };
 }

@@ -41,7 +41,7 @@ export default function App() {
   // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
   const { session, syncState, chargeOptions } = useCloudSync({
     settings, charges, items, myItems, ledger,
-    setCalcState, setMyItems, setLedger, applyMyItems,
+    setCalcState, setMyItems, setLedger,
   });
 
   const onImportFile = (e) => {
