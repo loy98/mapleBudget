@@ -34,6 +34,7 @@ export default function App() {
   const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
   const dataRef = useRef(null);       // 항상 최신 스냅샷(업로드 payload)
   const pendingCloudSyncMarkRef = useRef(null); // 첫 로그인 시 "첫 업로드 성공 후 마킹 예정" userId 보관
+  const liveUserIdRef = useRef(null); // 현재 로그인된 userId(매 렌더 갱신) — 계정 전환 중 교차 업로드 차단용
 
   // 파생 계산 (기존 render()의 순수 버전)
   const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
@@ -51,6 +52,7 @@ export default function App() {
   const userId = session?.user?.id ?? null;
   // 최신 스냅샷을 매 렌더 갱신 → 디바운스 업로드가 항상 최신값을 쓴다.
   dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
+  liveUserIdRef.current = userId; // 업로드 직전 캡처된 userId와 대조 → 계정 전환 시 옛 계정 행에 쓰지 않음
 
   // 세션 구독
   useEffect(() => onAuthChange(setSession), []);
@@ -112,6 +114,9 @@ export default function App() {
       try {
         do {
           dirtyRef.current = false;
+          // 계정이 바뀌었으면(로그아웃/전환) 이 콜백이 캡처한 옛 userId 행에 현재(다른 계정) 데이터를
+          // 써 넣지 않도록 중단. dataRef는 라이브라 새 계정 데이터를 담을 수 있어 교차 오염을 막는다.
+          if (liveUserIdRef.current !== userId) break;
           await upsertUserData(userId, dataRef.current);
         } while (dirtyRef.current);
         // 최초 로그인이었다면, 업로드가 실제로 성공한 지금 시점에만 동기화 마커를 찍는다.
