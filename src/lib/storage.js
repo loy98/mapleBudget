@@ -44,6 +44,15 @@ export function parseCalcState(d) {
 export function loadCalcState() {
   return parseCalcState(readJSON(KEY));
 }
+// 이 브라우저에 계산기/아이템 저장 이력이 있는지(=기존 유저인지) 판별.
+// 첫 렌더에서 캡처해 두고, DB 시세성 기본값을 "새 유저에게만" 적용하는 데 쓴다.
+// (자동 저장 이펙트가 곧 localStorage를 채우므로 반드시 최초 시점에 읽어야 함)
+export function hasStoredCalc() {
+  try { return localStorage.getItem(KEY) != null; } catch { return false; }
+}
+export function hasStoredItems() {
+  try { return localStorage.getItem(ITEMS_KEY) != null; } catch { return false; }
+}
 export function saveCalcState(settings, charges, items) {
   writeJSON(KEY, serializeCalcState(settings, charges, items));
 }

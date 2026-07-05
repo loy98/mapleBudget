@@ -4,9 +4,10 @@ import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
   loadLedger, saveLedger, exportAll, importAll,
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
-  isCloudSynced, markCloudSynced,
+  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems,
 } from "./lib/storage.js";
-import { cloudEnabled, onAuthChange, fetchUserData, upsertUserData, mergeSnapshots } from "./lib/cloud.js";
+import { cloudEnabled, onAuthChange, fetchUserData, upsertUserData, mergeSnapshots, fetchAppConfig } from "./lib/cloud.js";
+import { CHARGE_METHODS } from "./lib/constants.js";
 import CalcTab from "./components/CalcTab.jsx";
 import LogTab from "./components/LogTab.jsx";
 import ForecastTab from "./components/ForecastTab.jsx";
@@ -30,6 +31,11 @@ export default function App() {
   const [cloudReady, setCloudReady] = useState(false);
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
   const [syncNonce, setSyncNonce] = useState(0); // 계정 전환 후 새 계정 업로드 재예약 트리거
+  // 충전 방식 프리셋 목록(드롭다운 옵션) — DB app_config에서 받아오면 교체, 기본은 constants.
+  const [chargeOptions, setChargeOptions] = useState(CHARGE_METHODS);
+  // 첫 렌더에서 '저장 이력 없는 새 유저'인지 캡처(자동저장 이펙트가 곧 localStorage를 채우므로 최초 시점에).
+  const freshRef = useRef({ calc: !hasStoredCalc(), items: !hasStoredItems() });
+  const configAppliedRef = useRef(false); // 시세성 기본값을 이미 1회 적용했는지
   const upsertTimer = useRef(null);
   const upsertingRef = useRef(false); // 업로드 진행 중 플래그(중복/역전 저장 방지)
   const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
@@ -57,6 +63,36 @@ export default function App() {
 
   // 세션 구독
   useEffect(() => onAuthChange(setSession), []);
+
+  // 앱 공용 설정(app_config) 로드 → 시세성 기본값 반영. 실패/오프라인이면 constants 폴백(무시).
+  useEffect(() => {
+    let cancelled = false;
+    fetchAppConfig().then((cfg) => {
+      if (cancelled || !cfg) return;
+      // 충전 프리셋 목록: per-user 저장이 아닌 드롭다운 옵션 → 모두에게 반영(있을 때만).
+      if (Array.isArray(cfg.chargeMethods) && cfg.chargeMethods.length) setChargeOptions(cfg.chargeMethods);
+      // 시세/기본 아이템: '저장 이력 없는 게스트'에게 1회만 적용.
+      // 로그인 유저는 클라우드 동기화가 상태를 관리하므로 건너뜀(레이스 방지).
+      if (configAppliedRef.current || liveUserIdRef.current) return;
+      if (!freshRef.current.calc && !freshRef.current.items) return;
+      configAppliedRef.current = true;
+      if (freshRef.current.calc) {
+        setCalcState((s) => ({
+          ...s,
+          settings: {
+            ...s.settings,
+            ...(cfg.mesoRate != null && { mesoRate: cfg.mesoRate }),
+            ...(cfg.giftRatio != null && { giftRatio: cfg.giftRatio }),
+            ...(cfg.marketRatio != null && { marketRatio: cfg.marketRatio }),
+          },
+        }));
+      }
+      if (freshRef.current.items && Array.isArray(cfg.defaultItems) && cfg.defaultItems.length) {
+        setMyItems(cfg.defaultItems);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
@@ -183,6 +219,7 @@ export default function App() {
           charges={charges} setCharges={setCharges}
           items={items} setItems={setItems}
           myItems={myItems} setMyItems={setMyItems}
+          chargeMethods={chargeOptions}
           calc={calc}
         />
       )}
