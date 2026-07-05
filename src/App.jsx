@@ -38,7 +38,7 @@ export default function App() {
   // 첫 렌더에서 '저장 이력 없는 새 유저'인지 캡처(자동저장 이펙트가 곧 localStorage를 채우므로 최초 시점에).
   const freshRef = useRef({ calc: !hasStoredCalc(), items: !hasStoredItems() });
   const configAppliedRef = useRef(false); // 시세성 기본값을 이미 1회 적용했는지
-  const forceAppliedRef = useRef(false);  // 강제 반영(force)을 이번 로드에서 이미 적용했는지
+  const forceAppliedForRef = useRef(undefined); // force를 마지막으로 적용한 컨텍스트('__guest__' 또는 userId)
   const upsertTimer = useRef(null);
   const upsertingRef = useRef(false); // 업로드 진행 중 플래그(중복/역전 저장 방지)
   const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
@@ -106,14 +106,18 @@ export default function App() {
     }
   }, [appConfig, authResolved, userId]);
 
-  // 강제 반영(force): appConfig.force 배열에 든 키는 '모든 유저'에게 이번 로드 시 DB값으로 덮어씀(저장값 무시).
-  // 데이터 정착 후 실행(게스트=authResolved / 로그인=cloudReady) → 로컬·클라우드 값을 확실히 덮는다.
+  // 강제 반영(force): appConfig.force 배열에 든 키를 '모든 유저'에게 DB값으로 덮어씀(저장값 무시).
+  // 컨텍스트(게스트='__guest__' / 각 로그인 userId)별로 데이터 정착 후 1회 적용. 정착 신호는
+  // 게스트=authResolved, 로그인=cloudReady(로그인 동기화가 새 userId마다 false→true로 세팅).
+  // 컨텍스트 키로 자기완결적 게이팅 → 이펙트 선언 순서에 의존하지 않고 계정 전환에도 정확히 재적용.
   // 대상: 시세 스칼라(mesoRate/giftRatio/marketRatio) + defaultItems. 배열에 없는 키는 강제하지 않음.
   useEffect(() => {
-    if (!appConfig || forceAppliedRef.current) return;
+    if (!appConfig) return;
     const settled = userId ? cloudReady : authResolved;
     if (!settled) return;
-    forceAppliedRef.current = true;
+    const ctxKey = userId || "__guest__";
+    if (forceAppliedForRef.current === ctxKey) return; // 이 컨텍스트엔 이미 적용
+    forceAppliedForRef.current = ctxKey;
     const force = Array.isArray(appConfig.force) ? appConfig.force : [];
     if (!force.length) return;
     const RATE_KEYS = ["mesoRate", "giftRatio", "marketRatio"];
@@ -126,16 +130,12 @@ export default function App() {
     }
   }, [appConfig, authResolved, userId, cloudReady]);
 
-  // 로그인/계정 전환 시 force 1회 게이트를 리셋 → 새 컨텍스트(클라우드 데이터)에도 force가 다시 적용된다.
-  // forceAppliedRef만 건드리므로 업로드 직렬화(upsertingRef/dirtyRef)에는 영향 없음.
-  useEffect(() => { forceAppliedRef.current = false; }, [userId]);
-
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
   useEffect(() => {
+    setCloudReady(false); // 새 userId 동기화 시작 → 정착(cloudReady) 전까지 업로드·force 'settled' 보류
     if (!userId) {
       pendingCloudSyncMarkRef.current = null;
-      setCloudReady(false);
       return;
     }
     let cancelled = false;
