@@ -33,6 +33,7 @@ export default function App() {
   const upsertingRef = useRef(false); // 업로드 진행 중 플래그(중복/역전 저장 방지)
   const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
   const dataRef = useRef(null);       // 항상 최신 스냅샷(업로드 payload)
+  const pendingCloudSyncMarkRef = useRef(null); // 첫 로그인 시 "첫 업로드 성공 후 마킹 예정" userId 보관
 
   // 파생 계산 (기존 render()의 순수 버전)
   const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
@@ -57,7 +58,11 @@ export default function App() {
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).
   useEffect(() => {
-    if (!userId) { setCloudReady(false); return; }
+    if (!userId) {
+      pendingCloudSyncMarkRef.current = null;
+      setCloudReady(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -67,6 +72,7 @@ export default function App() {
         // 이 기기가 이 계정과 이미 동기화됐으면(=새로고침/세션 복원) 프롬프트 없이 조용히 병합.
         // 최초 로그인일 때만 게스트↔클라우드 설정 선택을 묻는다.
         const firstLogin = !isCloudSynced(userId);
+        pendingCloudSyncMarkRef.current = firstLogin ? userId : null;
         const local = localSnapshot();
         const { snapshot, conflict } = mergeSnapshots(local, cloud);
         let finalSnap = snapshot;
@@ -85,7 +91,6 @@ export default function App() {
         setCalcState({ settings: c.settings, charges: c.charges, items: c.items });
         setMyItems(normalizeMyItems(finalSnap.my_items));
         setLedger(normalizeLedger(finalSnap.ledger));
-        markCloudSynced(userId); // 이 기기·계정 동기화 완료 표시 → 다음 새로고침부턴 프롬프트 없음
         setCloudReady(true); // 이후 데이터 변경분은 클라우드로 업로드
       } catch (e) {
         console.error("[cloud] 초기 동기화 실패", e);
@@ -109,6 +114,12 @@ export default function App() {
           dirtyRef.current = false;
           await upsertUserData(userId, dataRef.current);
         } while (dirtyRef.current);
+        // 최초 로그인이었다면, 업로드가 실제로 성공한 지금 시점에만 동기화 마커를 찍는다.
+        // (병합 직후 조기 마킹 시 업로드 실패/새로고침 레이스로 사용자의 "기기 설정 사용" 선택이 무시될 수 있음)
+        if (pendingCloudSyncMarkRef.current === userId) {
+          if (!isCloudSynced(userId)) markCloudSynced(userId);
+          pendingCloudSyncMarkRef.current = null; // 이 계정의 pending만 정리(다른 계정 로그인분을 지우지 않음)
+        }
         setSyncState("saved");
       } catch (e) {
         console.error("[cloud] 저장 실패", e);
