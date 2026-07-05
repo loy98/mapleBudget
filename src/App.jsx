@@ -4,6 +4,7 @@ import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
   loadLedger, saveLedger, exportAll, importAll,
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
+  isCloudSynced, markCloudSynced,
 } from "./lib/storage.js";
 import { cloudEnabled, onAuthChange, fetchUserData, upsertUserData, mergeSnapshots } from "./lib/cloud.js";
 import CalcTab from "./components/CalcTab.jsx";
@@ -63,10 +64,13 @@ export default function App() {
         setSyncState("syncing");
         const cloud = await fetchUserData(userId);
         if (cancelled) return;
+        // 이 기기가 이 계정과 이미 동기화됐으면(=새로고침/세션 복원) 프롬프트 없이 조용히 병합.
+        // 최초 로그인일 때만 게스트↔클라우드 설정 선택을 묻는다.
+        const firstLogin = !isCloudSynced(userId);
         const local = localSnapshot();
         const { snapshot, conflict } = mergeSnapshots(local, cloud);
         let finalSnap = snapshot;
-        if (conflict) {
+        if (conflict && firstLogin) {
           // 이 기기 게스트 데이터와 클라우드 설정이 모두 있음 → 어느 설정을 쓸지 선택(거래는 이미 합쳐짐).
           const useCloud = window.confirm(
             "클라우드에 저장된 설정/자주 쓰는 아이템이 있습니다.\n\n" +
@@ -81,6 +85,7 @@ export default function App() {
         setCalcState({ settings: c.settings, charges: c.charges, items: c.items });
         setMyItems(normalizeMyItems(finalSnap.my_items));
         setLedger(normalizeLedger(finalSnap.ledger));
+        markCloudSynced(userId); // 이 기기·계정 동기화 완료 표시 → 다음 새로고침부턴 프롬프트 없음
         setCloudReady(true); // 이후 데이터 변경분은 클라우드로 업로드
       } catch (e) {
         console.error("[cloud] 초기 동기화 실패", e);

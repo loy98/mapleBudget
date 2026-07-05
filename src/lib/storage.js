@@ -6,6 +6,10 @@ export const KEY = "mvpCalc_v4";
 export const ITEMS_KEY = "mvpItems_v1";
 export const LKEY = "mvpLedger_v2";
 export const CALMODE_KEY = "mvpCalMode";
+// 이 기기가 어떤 계정(userId)과 이미 동기화됐는지 표시.
+// 있으면 = 새로고침(세션 복원) → 병합 충돌을 조용히 클라우드 우선 처리.
+// 없거나 다른 uid = 이 기기에서 그 계정 첫 로그인 → 게스트/클라우드 설정 선택을 1회 물음.
+export const SYNC_KEY = "mvpCloudSyncedUid";
 
 function readJSON(key) {
   try {
@@ -85,6 +89,25 @@ export function writeLocalSnapshot({ calc, my_items, ledger }) {
   if (calc) writeJSON(KEY, calc);
   if (my_items) writeJSON(ITEMS_KEY, my_items);
   if (ledger) writeJSON(LKEY, ledger);
+}
+
+// ===== 클라우드 동기화 마커 (계정별 최초 로그인 판별) =====
+export function isCloudSynced(userId) {
+  try {
+    return !!userId && localStorage.getItem(SYNC_KEY) === userId;
+  } catch {
+    return false;
+  }
+}
+export function markCloudSynced(userId) {
+  try {
+    if (userId) localStorage.setItem(SYNC_KEY, userId);
+  } catch { /* 저장 불가 환경 무시 */ }
+}
+export function clearCloudSynced() {
+  try {
+    localStorage.removeItem(SYNC_KEY);
+  } catch { /* ignore */ }
 }
 
 export function loadCalMode() {
