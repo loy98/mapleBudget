@@ -63,13 +63,12 @@ export default function App() {
 
   // 세션 객체 대신 userId(원시값)로 이펙트를 키잉 → 토큰 갱신/중복 이벤트로 재실행되지 않음.
   const userId = session?.user?.id ?? null;
-  // 최신 스냅샷·현재 userId를 ref에 반영. 렌더 본문이 아니라 커밋 후(useEffect)에서 갱신해 렌더 순수성 유지
-  // (StrictMode/concurrent 안전). 이 ref들은 디바운스 업로드 payload·계정 전환 가드가 async로 읽으므로
-  // 커밋 후 갱신으로 충분(동기 렌더 중 읽는 코드 없음).
-  useEffect(() => {
-    dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
-    liveUserIdRef.current = userId;
-  });
+  // 최신 스냅샷·현재 userId를 렌더 본문에서 ref에 반영(의도적). 이 ref들은 디바운스 업로드(800ms+)·
+  // 계정 전환 가드 등 async 콜백만 읽으므로 '항상 최신값'이 필요하다. 렌더 본문 갱신이 이를 보장하며,
+  // 파생값을 다시 쓰는 것이라 StrictMode 이중 렌더에도 idempotent(무해). useEffect로 옮기면 커밋~이펙트
+  // 사이 지연 창에서 stale ref를 읽을 위험이 생겨(Codex 지적) 오히려 나쁘다.
+  dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
+  liveUserIdRef.current = userId;
 
   // 세션 구독. 첫 콜백(세션 null이어도) = auth 해석 완료 → authResolved.
   useEffect(() => onAuthChange((s) => { setSession(s); setAuthResolved(true); }), []);
