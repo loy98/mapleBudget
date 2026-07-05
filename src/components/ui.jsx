@@ -13,7 +13,9 @@ export function NumInput({ value, onChange, step = 1, width, noStepper, placehol
   const shown = focused ? draft : display;
 
   const emit = (raw) => {
-    const clean = raw.replace(/[^\d.]/g, "");
+    // 숫자·소수점만 남기고, 소수점이 여러 개면 첫 번째만 유지(둘째 점 이후 병합) →
+    // "1.2.3" 같은 입력이 blur에서 NaN→0 으로 소실되는 것 방지.
+    const clean = raw.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
     setDraft(clean);
     onChange(clean);
   };
@@ -343,8 +345,17 @@ export const PlLabel = ({ p }) =>
 export const MilUse = ({ n }) => (n > 0 ? <span className="mil">{mlF(n)} 소모</span> : <>–</>);
 export const IconView = ({ icon }) => {
   if (!icon) return null;
-  return /^https?:/.test(icon) ? (
-    <img className="iic" src={icon} alt="" onError={(e) => (e.target.style.display = "none")} />
+  // http(s) URL만 이미지로. referrerPolicy=no-referrer 로 트래킹 리퍼러 유출 차단, lazy 로딩.
+  // (data:/javascript: 는 여기서 자동 제외 → 이모지 span 으로 폴백, img 스크립트 벡터 없음.)
+  return /^https?:\/\//.test(icon) ? (
+    <img
+      className="iic"
+      src={icon}
+      alt=""
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={(e) => (e.target.style.display = "none")}
+    />
   ) : (
     <span className="iemoji">{icon}</span>
   );

@@ -29,16 +29,21 @@ function writeJSON(key, val) {
 export function serializeCalcState(settings, charges, items) {
   return { ...settings, charge: charges, items };
 }
+// 리스트 행에 안정적인 React key(_k)를 부여. index key는 중간 행 삭제 시
+// NumInput/ItemCombo 내부 상태(draft/focus)가 다른 행에 얹히므로, 행마다 고정 키가 필요.
+export function withRowKeys(arr) {
+  return (arr || []).map((x) => (x && x._k ? x : { ...x, _k: uid() }));
+}
 export function parseCalcState(d) {
   if (!d) {
-    return { settings: { ...DEFAULT_SETTINGS }, charges: DEFAULT_CHARGES.map((c) => ({ ...c })), items: DEFAULT_CALC_ITEMS.map((i) => ({ ...i })) };
+    return { settings: { ...DEFAULT_SETTINGS }, charges: withRowKeys(DEFAULT_CHARGES), items: withRowKeys(DEFAULT_CALC_ITEMS) };
   }
   const settings = { ...DEFAULT_SETTINGS };
   Object.keys(DEFAULT_SETTINGS).forEach((k) => {
     if (d[k] != null && d[k] !== "") settings[k] = d[k];
   });
-  const charges = d.charge && d.charge.length ? d.charge : [{ name: "정가 (할인 없음)", rate: 0, limit: 0 }];
-  const items = d.items && d.items.length ? d.items : [];
+  const charges = withRowKeys(d.charge && d.charge.length ? d.charge : [{ name: "정가 (할인 없음)", rate: 0, limit: 0 }]);
+  const items = withRowKeys(d.items && d.items.length ? d.items : []);
   return { settings, charges, items };
 }
 export function loadCalcState() {
@@ -59,8 +64,7 @@ export function saveCalcState(settings, charges, items) {
 
 // ===== 자주 쓰는 아이템 =====
 export function normalizeMyItems(d) {
-  if (d && d.length) return d;
-  return DEFAULT_ITEMS.map((x) => ({ ...x }));
+  return withRowKeys(d && d.length ? d : DEFAULT_ITEMS);
 }
 export function loadMyItems() {
   return normalizeMyItems(readJSON(ITEMS_KEY));

@@ -397,7 +397,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
   const upd = (kind, i, patch) =>
     setDraft({ ...draft, [kind]: draft[kind].map((x, j) => (j === i ? { ...x, ...patch } : x)) });
   const del = (kind, i) => setDraft({ ...draft, [kind]: draft[kind].filter((_, j) => j !== i) });
-  const add = (kind, base) => setDraft({ ...draft, [kind]: [...draft[kind], base] });
+  const add = (kind, base) => setDraft({ ...draft, [kind]: [...draft[kind], { ...base, _k: uid() }] });
 
   const commit = () => {
     const date = entryDate || todayStr();
@@ -431,7 +431,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
           <thead><tr><th>아이템</th><th>수량</th><th>개당 캐시가(원)</th><th className="milh">마일</th><th></th></tr></thead>
           <tbody>
             {draft.buys.map((x, i) => (
-              <tr key={i}>
+              <tr key={x._k}>
                 <td><ItemCombo value={x.item || ""} options={myItems} onChange={(name) => {
                   const mi = myItems.find((m) => m.name === name);
                   upd("buys", i, mi && !x.price ? { item: name, price: +mi.cash } : { item: name });
@@ -453,7 +453,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
           <thead><tr><th>아이템</th><th>수량</th><th>개당 판매가(억)</th><th></th></tr></thead>
           <tbody>
             {draft.sells.map((x, i) => (
-              <tr key={i}>
+              <tr key={x._k}>
                 <td><ItemCombo value={x.item || ""} options={soldNames} onChange={(v) => upd("sells", i, { item: v })} /></td>
                 <td><NumInput noStepper width={54} value={x.qty != null ? x.qty : 1} onChange={(v) => upd("sells", i, { qty: v })} /></td>
                 <td><NumInput noStepper width={88} step={0.01} value={x.meso != null ? x.meso : ""} onChange={(v) => upd("sells", i, { meso: v })} /></td>
@@ -474,7 +474,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
           <thead><tr><th>메소(억)</th><th>억당(원)</th><th>판매 현금(자동)</th><th></th></tr></thead>
           <tbody>
             {draft.cashes.map((x, i) => (
-              <tr key={i}>
+              <tr key={x._k}>
                 <td><NumInput noStepper width={88} step={0.01} value={x.meso != null ? x.meso : ""} onChange={(v) => upd("cashes", i, { meso: v })} /></td>
                 <td><NumInput noStepper width={110} step={1000} value={x.rate != null ? x.rate : ""} onChange={(v) => upd("cashes", i, { rate: v })} /></td>
                 <td className="num">{x.meso && x.rate ? won(cashWonOf(x)) : "–"}</td>
@@ -495,7 +495,7 @@ function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldName
           <thead><tr><th>사용액(원)</th><th>메모</th><th></th></tr></thead>
           <tbody>
             {draft.spends.map((x, i) => (
-              <tr key={i}>
+              <tr key={x._k}>
                 <td><NumInput noStepper width={110} step={1000} value={x.amount != null ? x.amount : ""} onChange={(v) => upd("spends", i, { amount: v })} /></td>
                 <td><input value={x.memo || ""} onChange={(e) => upd("spends", i, { memo: e.target.value })} /></td>
                 <td><button className="del" onClick={() => del("spends", i)}>×</button></td>

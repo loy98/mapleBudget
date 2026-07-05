@@ -107,7 +107,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
               <thead><tr><th>방식</th><th>할인%</th><th>월한도(원)</th><th></th></tr></thead>
               <tbody>
                 {charges.map((r, i) => (
-                  <tr key={i}>
+                  <tr key={r._k}>
                     <td><input value={r.name} onChange={(e) => setCharge(i, { name: e.target.value })} /></td>
                     <td><NumInput noStepper width={58} step={0.1} value={r.rate} onChange={(v) => setCharge(i, { rate: v })} /></td>
                     <td><NumInput noStepper width={88} step={10000} value={r.limit} onChange={(v) => setCharge(i, { limit: v })} /></td>
@@ -215,7 +215,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
               <span className="pblabel">자주 쓰는 아이템</span>
               <div className="chips">
                 {myItems.map((p, i) => (
-                  <span key={i} className="chip"
+                  <span key={p._k} className="chip"
                     onClick={() => addItem({ name: p.name, cash: p.cash, sell: "", mAllowed: p.mAllowed !== false, mil: p.mAllowed !== false })}>
                     <IconView icon={p.icon} />{p.name || "(무명)"}{" "}
                     <span className="fx">{p.cash ? (+p.cash).toLocaleString() + "원" : ""}{p.mAllowed === false ? " · 마일불가" : ""}</span>
@@ -233,7 +233,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   <thead><tr><th>아이콘</th><th>이름</th><th>캐시가(원)</th><th className="milh">마일가능</th><th></th></tr></thead>
                   <tbody>
                     {myItems.map((it, i) => (
-                      <tr key={i}>
+                      <tr key={it._k}>
                         <td>
                           <span className="prev"><IconView icon={it.icon} /></span>{" "}
                           <input value={it.icon || ""} style={{ width: 64 }} placeholder="🫐/URL" onChange={(e) => setMyItem(i, { icon: e.target.value })} />
@@ -265,7 +265,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   {items.map((it, i) => {
                     const r = c.itemRows[i] || { empty: true };
                     return (
-                      <tr key={i} className={r.win ? "win" : ""}>
+                      <tr key={it._k} className={r.win ? "win" : ""}>
                         <td><input placeholder="아이템명" value={it.name || ""} onChange={(e) => setItem(i, { name: e.target.value })} /></td>
                         <td><NumInput noStepper step={100} placeholder="예:5900" value={it.cash || ""} onChange={(v) => setItem(i, { cash: v })} /></td>
                         <td><NumInput noStepper step={0.01} placeholder="예:0.9" value={it.sell || ""} onChange={(v) => setItem(i, { sell: v })} /></td>

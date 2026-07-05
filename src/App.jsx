@@ -4,7 +4,7 @@ import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
   loadLedger, saveLedger, exportAll, importAll,
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
-  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems,
+  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys,
 } from "./lib/storage.js";
 import { cloudEnabled, onAuthChange, fetchUserData, upsertUserData, mergeSnapshots, fetchAppConfig } from "./lib/cloud.js";
 import { CHARGE_METHODS } from "./lib/constants.js";
@@ -55,15 +55,21 @@ export default function App() {
   useEffect(() => saveMyItems(myItems), [myItems]);
   useEffect(() => saveLedger(ledger), [ledger]);
 
+  // 리스트 setter는 withRowKeys로 감싸 모든 생성/편집 경로가 안정 key(_k)를 갖게 한다(생성 사이트 개별 수정 불필요).
   const setSettings = (patch) => setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-  const setCharges = (charges) => setCalcState((s) => ({ ...s, charges }));
-  const setItems = (items) => setCalcState((s) => ({ ...s, items }));
+  const setCharges = (charges) => setCalcState((s) => ({ ...s, charges: withRowKeys(charges) }));
+  const setItems = (items) => setCalcState((s) => ({ ...s, items: withRowKeys(items) }));
+  const applyMyItems = (arr) => setMyItems(withRowKeys(arr));
 
   // 세션 객체 대신 userId(원시값)로 이펙트를 키잉 → 토큰 갱신/중복 이벤트로 재실행되지 않음.
   const userId = session?.user?.id ?? null;
-  // 최신 스냅샷을 매 렌더 갱신 → 디바운스 업로드가 항상 최신값을 쓴다.
-  dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
-  liveUserIdRef.current = userId; // 업로드 직전 캡처된 userId와 대조 → 계정 전환 시 옛 계정 행에 쓰지 않음
+  // 최신 스냅샷·현재 userId를 ref에 반영. 렌더 본문이 아니라 커밋 후(useEffect)에서 갱신해 렌더 순수성 유지
+  // (StrictMode/concurrent 안전). 이 ref들은 디바운스 업로드 payload·계정 전환 가드가 async로 읽으므로
+  // 커밋 후 갱신으로 충분(동기 렌더 중 읽는 코드 없음).
+  useEffect(() => {
+    dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
+    liveUserIdRef.current = userId;
+  });
 
   // 세션 구독. 첫 콜백(세션 null이어도) = auth 해석 완료 → authResolved.
   useEffect(() => onAuthChange((s) => { setSession(s); setAuthResolved(true); }), []);
@@ -103,7 +109,7 @@ export default function App() {
     }
     if (freshRef.current.items && Array.isArray(appConfig.defaultItems)) {
       const items = appConfig.defaultItems.filter((x) => x && typeof x.name === "string");
-      if (items.length) setMyItems(items);
+      if (items.length) applyMyItems(items);
     }
   }, [appConfig, authResolved, userId]);
 
@@ -128,7 +134,7 @@ export default function App() {
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     if (force.includes("defaultItems") && Array.isArray(appConfig.defaultItems)) {
       const items = appConfig.defaultItems.filter((x) => x && typeof x.name === "string");
-      if (items.length) setMyItems(items);
+      if (items.length) applyMyItems(items);
     }
   }, [appConfig, authResolved, userId, cloudReady]);
 
@@ -258,7 +264,7 @@ export default function App() {
           settings={settings} setSettings={setSettings}
           charges={charges} setCharges={setCharges}
           items={items} setItems={setItems}
-          myItems={myItems} setMyItems={setMyItems}
+          myItems={myItems} setMyItems={applyMyItems}
           chargeMethods={chargeOptions}
           calc={calc}
         />
