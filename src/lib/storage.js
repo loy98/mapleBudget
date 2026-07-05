@@ -134,6 +134,8 @@ export function isUserTouched() {
   try { return localStorage.getItem(TOUCHED_KEY) === "1"; } catch { return false; }
 }
 
+// calMode(달력 보기: 월력/MVP주간)는 '기기별 뷰 설정'이라 의도적으로 로컬 전용(클라우드 미동기화).
+// user_data 스냅샷(calc/my_items/ledger)에는 포함하지 않는다. 내보내기/가져오기에는 포함(백업 편의).
 export function loadCalMode() {
   try {
     return localStorage.getItem(CALMODE_KEY) || "month";

@@ -40,6 +40,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const [chargeOptions, setChargeOptions] = useState(CHARGE_METHODS);
   const [appConfig, setAppConfig] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
+  const [conflictPrompt, setConflictPrompt] = useState(null); // 최초 로그인 병합 충돌 시 { onChoose } — App이 모달 렌더
+  const conflictResolveRef = useRef(null);                    // 대기 중 프로미스 resolver(cleanup에서 정리)
 
   const freshRef = useRef({ calc: !hasStoredCalc(), items: !hasStoredItems() });
   const configAppliedRef = useRef(false);
@@ -132,12 +134,15 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const { snapshot, conflict } = mergeSnapshots(local, cloud, { localTouched: isUserTouched() });
         let finalSnap = snapshot;
         if (conflict && firstLogin) {
-          const useCloud = window.confirm(
-            "클라우드에 저장된 설정/자주 쓰는 아이템이 있습니다.\n\n" +
-            "확인 = 클라우드 설정 사용 (이 기기 설정은 덮어씀)\n" +
-            "취소 = 이 기기 설정을 클라우드에 올림\n\n" +
-            "※ 거래 기록은 어느 쪽을 고르든 모두 합쳐집니다."
-          );
+          // 네이티브 confirm 대신 App이 렌더하는 테마 모달로 선택을 받는다(테스트 가능·UI 일관성).
+          // 이펙트는 사용자가 고를 때까지 프로미스로 대기. cleanup(계정 전환/언마운트) 시 안전하게 정리.
+          const useCloud = await new Promise((resolve) => {
+            conflictResolveRef.current = resolve;
+            setConflictPrompt({
+              onChoose: (v) => { conflictResolveRef.current = null; setConflictPrompt(null); resolve(v); },
+            });
+          });
+          if (cancelled) return;
           if (!useCloud) finalSnap = { ...snapshot, calc: local.calc, my_items: local.my_items };
         }
         if (cancelled) return;
@@ -152,7 +157,16 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         if (!cancelled) setSyncState("error");
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // 충돌 모달이 떠 있는 채로 계정 전환/언마운트되면 대기 프로미스를 해소(기본=클라우드)해 async 누수 방지.
+      if (conflictResolveRef.current) {
+        const r = conflictResolveRef.current;
+        conflictResolveRef.current = null;
+        setConflictPrompt(null);
+        r(true);
+      }
+    };
   }, [userId]);
 
   // ===== 업로드 러너(통합): 디바운스·플러시가 공유 =====
@@ -209,5 +223,5 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     return () => document.removeEventListener("visibilitychange", onHide);
   }, [userId, cloudReady, runUpload]);
 
-  return { session, syncState, chargeOptions };
+  return { session, syncState, chargeOptions, conflictPrompt };
 }
