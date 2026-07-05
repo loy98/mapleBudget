@@ -172,7 +172,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           <div className="card" id="sec2">
             <h2><span className="n">2</span>목표 등급까지 총비용 (기초 방식)</h2>
             <p className="desc">현재 13주 누적 실적에서 목표 등급까지 채우는 최소 실비용.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+            <div className="formgrid">
               <div>
                 <label>목표 등급</label>
                 <CSelect value={settings.tierSel} options={tierOptions}
@@ -354,7 +354,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           <div className="card" id="sec6">
             <h2><span className="n">6</span>이번 달 최적 실행 플랜</h2>
             <p className="desc">이번 달 채울 실적을 가장 싼 구성으로 제시. 마일리지는 '월 사용 가능' 한도 내 우선 배정.</p>
-            <table>
+            <div className="tblx"><table>
               <thead><tr><th>구성 (구매/판매 방식)</th><th>채우는 실적</th><th>실비용</th><th>마일리지 소모</th></tr></thead>
               <tbody>
                 {c.remain <= 0 ? (
@@ -370,7 +370,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   ))
                 )}
               </tbody>
-            </table>
+            </table></div>
             <div className="kpi">
               <KpiBox title="이번 달 총 실비용" best>{c.remain <= 0 ? "–" : <CostLabel n={c.plan.totalCost} />}</KpiBox>
               <KpiBox title="이번 달 마일리지 소모">{c.remain <= 0 ? "–" : <MilUse n={c.plan.milUsed} />}</KpiBox>
