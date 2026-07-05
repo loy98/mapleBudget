@@ -138,4 +138,18 @@ describe("mergeSnapshots", () => {
     const { conflict } = mergeSnapshots(local, cloud);
     expect(conflict).toBe(false);
   });
+
+  it("거래 없어도 사용자 직접 편집(localTouched)+클라우드 설정 있으면 conflict=true (P1-4)", () => {
+    const local = mk({ calc: { mesoRate: 1 } });
+    const cloud = mk({ calc: { mesoRate: 2 } });
+    const { conflict } = mergeSnapshots(local, cloud, { localTouched: true });
+    expect(conflict).toBe(true);
+  });
+
+  it("localTouched여도 클라우드에 설정/아이템 없으면 conflict=false", () => {
+    const local = mk({ calc: { mesoRate: 1 } });
+    const cloud = mk({ calc: {}, my_items: [] });
+    const { conflict } = mergeSnapshots(local, cloud, { localTouched: true });
+    expect(conflict).toBe(false);
+  });
 });

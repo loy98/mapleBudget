@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { computeCalc } from "./lib/calc.js";
 import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
-  loadLedger, saveLedger, exportAll, importAll, withRowKeys,
+  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched,
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
 import { useCloudSync } from "./lib/useCloudSync.js";
@@ -16,6 +16,25 @@ const TABS = [
   { id: "log", label: "거래 기록" },
   { id: "fore", label: "예상 & 추천" },
 ];
+
+// 최초 로그인 병합 충돌 선택 모달(네이티브 confirm 대체 — 앱 테마·테스트 가능). 모듈 스코프(리마운트 방지).
+function ConflictModal({ onChoose }) {
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true">
+      <div className="modal-card">
+        <div className="modal-title">클라우드에 저장된 설정이 있어요</div>
+        <p className="modal-body">
+          이 기기의 설정/자주 쓰는 아이템과 클라우드에 저장된 것이 서로 달라요. 어느 쪽을 쓸까요?
+          <br /><span className="muted">※ 거래 기록은 어느 쪽을 고르든 모두 합쳐집니다.</span>
+        </p>
+        <div className="modal-actions">
+          <button className="btn" onClick={() => onChoose(true)}>클라우드 설정 사용</button>
+          <button className="btn ghost" onClick={() => onChoose(false)}>이 기기 설정 사용</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState("calc");
@@ -32,14 +51,16 @@ export default function App() {
   useEffect(() => saveMyItems(myItems), [myItems]);
   useEffect(() => saveLedger(ledger), [ledger]);
 
-  // 리스트 setter는 withRowKeys로 감싸 모든 생성/편집 경로가 안정 key(_k)를 갖게 한다.
-  const setSettings = (patch) => setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-  const setCharges = (charges) => setCalcState((s) => ({ ...s, charges: withRowKeys(charges) }));
-  const setItems = (items) => setCalcState((s) => ({ ...s, items: withRowKeys(items) }));
-  const applyMyItems = (arr) => setMyItems(withRowKeys(arr));
+  // 사용자 직접 편집용 setter. withRowKeys로 안정 key를 부여하고, markUserTouched로 '사용자가 손댔음'을 기록
+  // → 최초 로그인 병합에서 거래 없이 설정/아이템만 바꾼 게스트의 데이터도 보호(P1-4). config/sync 프로그램적
+  //   변경은 훅이 setCalcState/setMyItems를 직접 호출하므로 여기 표시가 붙지 않는다.
+  const setSettings = (patch) => { markUserTouched(); setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } })); };
+  const setCharges = (charges) => { markUserTouched(); setCalcState((s) => ({ ...s, charges: withRowKeys(charges) })); };
+  const setItems = (items) => { markUserTouched(); setCalcState((s) => ({ ...s, items: withRowKeys(items) })); };
+  const applyMyItems = (arr) => { markUserTouched(); setMyItems(withRowKeys(arr)); };
 
   // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
-  const { session, syncState, chargeOptions } = useCloudSync({
+  const { session, syncState, chargeOptions, conflictPrompt } = useCloudSync({
     settings, charges, items, myItems, ledger,
     setCalcState, setMyItems, setLedger,
   });
@@ -105,6 +126,8 @@ export default function App() {
             : "모든 데이터는 이 브라우저(localStorage)에만 저장됩니다. 기기 변경 시 내보내기/가져오기를 사용하세요."}
         </p>
       </footer>
+
+      {conflictPrompt && <ConflictModal onChoose={conflictPrompt.onChoose} />}
     </div>
   );
 }
