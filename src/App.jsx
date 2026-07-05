@@ -56,6 +56,7 @@ export default function App() {
   const pendingCloudSyncMarkRef = useRef(null); // 첫 로그인 시 "첫 업로드 성공 후 마킹 예정" userId 보관
   const liveUserIdRef = useRef(null); // 현재 로그인된 userId(매 렌더 갱신) — 계정 전환 중 교차 업로드 차단용
   const syncedUserRef = useRef(null); // 클라우드 데이터가 실제 로드 완료된 userId(정착 신호 — cloudReady state의 stale read 회피)
+  const dirtyForFlushRef = useRef(false); // 디바운스 대기 중(=클라우드 미반영) 변경이 있는지 → 탭 숨김 시 즉시 플러시
 
   // 파생 계산 (기존 render()의 순수 버전)
   const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
@@ -189,6 +190,7 @@ export default function App() {
   // 항상 dataRef.current(최신)를 쓰고 in-flight를 하나로 제한 → 느린 옛 저장이 새 저장을 덮어쓰지 않음.
   useEffect(() => {
     if (!userId || !cloudReady) return;
+    dirtyForFlushRef.current = true; // 대기 중 미반영 변경 있음(탭 숨김 시 즉시 플러시 대상)
     clearTimeout(upsertTimer.current);
     upsertTimer.current = setTimeout(async () => {
       if (upsertingRef.current) { dirtyRef.current = true; return; }
@@ -202,6 +204,7 @@ export default function App() {
           if (liveUserIdRef.current !== userId) break;
           await upsertUserData(userId, dataRef.current);
         } while (dirtyRef.current);
+        dirtyForFlushRef.current = false; // 업로드 성공 → 미반영 변경 없음
         // 최초 로그인이었다면, 업로드가 실제로 성공한 지금 시점에만 동기화 마커를 찍는다.
         // (병합 직후 조기 마킹 시 업로드 실패/새로고침 레이스로 사용자의 "기기 설정 사용" 선택이 무시될 수 있음)
         if (pendingCloudSyncMarkRef.current === userId) {
@@ -224,6 +227,25 @@ export default function App() {
     }, 800);
     return () => clearTimeout(upsertTimer.current);
   }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce]);
+
+  // 마지막 편집 유실 방지(P1-3): 탭이 숨겨질 때(닫기/전환) 디바운스 대기 중 변경을 즉시 업로드.
+  // 800ms 디바운스 안에 탭을 닫으면 마지막 변경이 클라우드에 안 올라가 다른 기기에서 사라진 듯 보이던 문제 보완.
+  // 단일 in-flight 가드(upsertingRef)·계정 대조(liveUserIdRef)를 동일하게 지켜 교차/중복 업로드 없음.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState !== "hidden") return;
+      if (!userId || !cloudReady || upsertingRef.current || !dirtyForFlushRef.current) return;
+      if (liveUserIdRef.current !== userId) return;
+      clearTimeout(upsertTimer.current);
+      dirtyForFlushRef.current = false;
+      upsertingRef.current = true;
+      upsertUserData(userId, dataRef.current)
+        .catch((e) => console.error("[cloud] 플러시 실패", e))
+        .finally(() => { upsertingRef.current = false; });
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [userId, cloudReady]);
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
