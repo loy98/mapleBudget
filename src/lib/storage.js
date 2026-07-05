@@ -123,6 +123,19 @@ export function clearCloudSynced() {
   } catch { /* ignore */ }
 }
 
+// ===== 사용자 직접 편집 여부 (P1-4 게스트 설정 손실 방지) =====
+// 계산기/아이템을 '사용자가 직접' 편집하면 표시. config 자동적용·클라우드 동기화 같은 프로그램적 변경과 구분해,
+// 최초 로그인 병합 시 '이 기기에 지켜야 할 사용자 데이터가 있는지' 판정에 쓴다. (거래 없이 설정만 바꾼 게스트도 포착)
+export const TOUCHED_KEY = "mvpUserTouched";
+export function markUserTouched() {
+  try { localStorage.setItem(TOUCHED_KEY, "1"); } catch { /* ignore */ }
+}
+export function isUserTouched() {
+  try { return localStorage.getItem(TOUCHED_KEY) === "1"; } catch { return false; }
+}
+
+// calMode(달력 보기: 월력/MVP주간)는 '기기별 뷰 설정'이라 의도적으로 로컬 전용(클라우드 미동기화).
+// user_data 스냅샷(calc/my_items/ledger)에는 포함하지 않는다. 내보내기/가져오기에는 포함(백업 편의).
 export function loadCalMode() {
   try {
     return localStorage.getItem(CALMODE_KEY) || "month";
