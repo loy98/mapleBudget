@@ -27,6 +27,25 @@ export function signOut() {
   return supabase.auth.signOut();
 }
 
+// ===== 앱 공용 설정 (app_config 1행, 누구나 읽기) =====
+// 시세성 기본값(mesoRate/giftRatio/marketRatio·chargeMethods·defaultItems)을 DB에서 받아온다.
+// 실패/오프라인/게스트면 null → 호출부가 constants.js 값으로 폴백.
+export async function fetchAppConfig() {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from("app_config")
+      .select("config")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) { console.warn("[config] 앱 설정 로드 실패", error); return null; }
+    return data?.config ?? null;
+  } catch (e) {
+    console.warn("[config] 앱 설정 로드 예외", e);
+    return null;
+  }
+}
+
 // ===== 데이터 (user_data 1행) =====
 export async function fetchUserData(userId) {
   const { data, error } = await supabase
