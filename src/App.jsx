@@ -33,6 +33,8 @@ export default function App() {
   const [syncNonce, setSyncNonce] = useState(0); // 계정 전환 후 새 계정 업로드 재예약 트리거
   // 충전 방식 프리셋 목록(드롭다운 옵션) — DB app_config에서 받아오면 교체, 기본은 constants.
   const [chargeOptions, setChargeOptions] = useState(CHARGE_METHODS);
+  const [appConfig, setAppConfig] = useState(null);   // 로드된 app_config
+  const [authResolved, setAuthResolved] = useState(false); // 세션 해석 완료 여부(게스트/로그인 확정)
   // 첫 렌더에서 '저장 이력 없는 새 유저'인지 캡처(자동저장 이펙트가 곧 localStorage를 채우므로 최초 시점에).
   const freshRef = useRef({ calc: !hasStoredCalc(), items: !hasStoredItems() });
   const configAppliedRef = useRef(false); // 시세성 기본값을 이미 1회 적용했는지
@@ -61,38 +63,47 @@ export default function App() {
   dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
   liveUserIdRef.current = userId; // 업로드 직전 캡처된 userId와 대조 → 계정 전환 시 옛 계정 행에 쓰지 않음
 
-  // 세션 구독
-  useEffect(() => onAuthChange(setSession), []);
+  // 세션 구독. 첫 콜백(세션 null이어도) = auth 해석 완료 → authResolved.
+  useEffect(() => onAuthChange((s) => { setSession(s); setAuthResolved(true); }), []);
 
-  // 앱 공용 설정(app_config) 로드 → 시세성 기본값 반영. 실패/오프라인이면 constants 폴백(무시).
+  // 앱 공용 설정(app_config) 로드. 충전 프리셋은 즉시 반영(드롭다운 옵션),
+  // 시세/기본아이템 기본값은 아래 '적용' 이펙트가 auth 해석 후 담당. 실패/오프라인은 constants 폴백.
   useEffect(() => {
     let cancelled = false;
     fetchAppConfig().then((cfg) => {
       if (cancelled || !cfg) return;
-      // 충전 프리셋 목록: per-user 저장이 아닌 드롭다운 옵션 → 모두에게 반영(있을 때만).
-      if (Array.isArray(cfg.chargeMethods) && cfg.chargeMethods.length) setChargeOptions(cfg.chargeMethods);
-      // 시세/기본 아이템: '저장 이력 없는 게스트'에게 1회만 적용.
-      // 로그인 유저는 클라우드 동기화가 상태를 관리하므로 건너뜀(레이스 방지).
-      if (configAppliedRef.current || liveUserIdRef.current) return;
-      if (!freshRef.current.calc && !freshRef.current.items) return;
-      configAppliedRef.current = true;
-      if (freshRef.current.calc) {
-        setCalcState((s) => ({
-          ...s,
-          settings: {
-            ...s.settings,
-            ...(cfg.mesoRate != null && { mesoRate: cfg.mesoRate }),
-            ...(cfg.giftRatio != null && { giftRatio: cfg.giftRatio }),
-            ...(cfg.marketRatio != null && { marketRatio: cfg.marketRatio }),
-          },
-        }));
+      if (Array.isArray(cfg.chargeMethods)) {
+        const valid = cfg.chargeMethods.filter((m) => m && typeof m.name === "string");
+        if (valid.length) setChargeOptions(valid);
       }
-      if (freshRef.current.items && Array.isArray(cfg.defaultItems) && cfg.defaultItems.length) {
-        setMyItems(cfg.defaultItems);
-      }
+      setAppConfig(cfg);
     });
     return () => { cancelled = true; };
   }, []);
+
+  // 시세/기본아이템 기본값: auth 해석(authResolved) 후 '저장 이력 없는 게스트(userId 없음)'에게만 1회 적용.
+  // 설정 fetch가 auth보다 빨라도 여기서 authResolved를 기다리므로 로그인 유저에 오적용/레이스 없음.
+  useEffect(() => {
+    if (!appConfig || !authResolved || configAppliedRef.current) return;
+    if (userId) return; // 로그인 유저 → 클라우드 동기화가 상태 관리
+    if (!freshRef.current.calc && !freshRef.current.items) return;
+    configAppliedRef.current = true;
+    if (freshRef.current.calc) {
+      setCalcState((s) => ({
+        ...s,
+        settings: {
+          ...s.settings,
+          ...(appConfig.mesoRate != null && { mesoRate: appConfig.mesoRate }),
+          ...(appConfig.giftRatio != null && { giftRatio: appConfig.giftRatio }),
+          ...(appConfig.marketRatio != null && { marketRatio: appConfig.marketRatio }),
+        },
+      }));
+    }
+    if (freshRef.current.items && Array.isArray(appConfig.defaultItems)) {
+      const items = appConfig.defaultItems.filter((x) => x && typeof x.name === "string");
+      if (items.length) setMyItems(items);
+    }
+  }, [appConfig, authResolved, userId]);
 
   // 최초 로그인 동기화: 클라우드 fetch → 로컬과 병합 → 상태 반영 (업로드는 아래 upsert 이펙트가 담당).
   // userId를 deps로 두어 로그인 1회만 실행(토큰 갱신·중복 인증 이벤트로 재실행/취소 레이스 없음).

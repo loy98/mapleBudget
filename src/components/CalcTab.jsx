@@ -10,8 +10,10 @@ const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
 export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, chargeMethods = CHARGE_METHODS, calc }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
-  // 충전 방식 프리셋 옵션 — DB 설정에서 온 목록(chargeMethods)으로 구성. 기본은 constants.
-  const presetOptions = chargeMethods.map((m, i) => ({ value: i, label: m.name + (m.rate ? ` (${m.rate}%)` : "") }));
+  // 충전 방식 프리셋 옵션 — DB 설정 목록(chargeMethods) 기반. DB에 malformed/null 원소가 섞여도
+  // 안전하도록 name 있는 원소만 사용(옵션·addPreset이 같은 목록을 써 인덱스 정합 유지). 기본은 constants.
+  const validCharges = (chargeMethods || []).filter((m) => m && typeof m.name === "string");
+  const presetOptions = validCharges.map((m, i) => ({ value: i, label: m.name + (m.rate ? ` (${m.rate}%)` : "") }));
 
   const c = calc;
   const feeBenefit = +settings.mvpGrade >= 1 || settings.pcRoom === "1";
@@ -21,7 +23,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   const setCharge = (i, patch) => setCharges(charges.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const delCharge = (i) => setCharges(charges.filter((_, j) => j !== i));
   const addPreset = () => {
-    const m = chargeMethods[+preset];
+    const m = validCharges[+preset];
     if (!m) return;
     setCharges([...charges, { name: m.name, rate: m.rate, limit: m.limit }]);
   };
