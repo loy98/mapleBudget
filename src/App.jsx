@@ -29,6 +29,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
+  const [syncNonce, setSyncNonce] = useState(0); // 계정 전환 후 새 계정 업로드 재예약 트리거
   const upsertTimer = useRef(null);
   const upsertingRef = useRef(false); // 업로드 진행 중 플래그(중복/역전 저장 방지)
   const dirtyRef = useRef(false);     // 업로드 중 추가 변경 발생 여부
@@ -131,20 +132,16 @@ export default function App() {
         setSyncState("error");
       } finally {
         upsertingRef.current = false;
+        // 이 업로드가 도는 동안 계정이 바뀌었다면(로그인 전환), 새 계정 업로드를 재예약.
+        // upsertingRef를 외부에서 리셋하지 않아 단일 in-flight 직렬화는 유지되고(동시 업로드/응답 역전 없음),
+        // A가 끝난 지금에서야 B 업로드를 새 타이머로 트리거 → B 첫 업로드 유실 방지.
+        if (liveUserIdRef.current && liveUserIdRef.current !== userId) {
+          setSyncNonce((n) => n + 1);
+        }
       }
     }, 800);
     return () => clearTimeout(upsertTimer.current);
-  }, [settings, charges, items, myItems, ledger, userId, cloudReady]);
-
-  // 계정 전환/로그아웃 시 이전 계정용 업로드 상태를 초기화.
-  // 없으면: 새 계정(B) 업로드 타이머가 옛 in-flight(A) 때문에 dirtyRef만 세우고 반환 →
-  // A 루프가 계정 불일치로 break하며 그 dirty 신호를 소비 → B 첫 업로드가 재예약 없이 유실될 수 있음.
-  // userId가 실제로 바뀔 때만 실행되므로 동일 계정 업로드 흐름에는 영향 없음.
-  useEffect(() => {
-    clearTimeout(upsertTimer.current);
-    upsertingRef.current = false;
-    dirtyRef.current = false;
-  }, [userId]);
+  }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce]);
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
