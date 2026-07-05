@@ -19,6 +19,16 @@ const TABS = [
   { id: "fore", label: "예상 & 추천" },
 ];
 
+// app_config에서 settings로 반영하는 시세 스칼라 키(기본값 적용·force가 공유 → 새 키 추가 시 한 곳만 수정).
+const CONFIG_RATE_KEYS = ["mesoRate", "giftRatio", "marketRatio"];
+function configRatePatch(cfg, onlyKeys) {
+  const patch = {};
+  CONFIG_RATE_KEYS.forEach((k) => {
+    if ((!onlyKeys || onlyKeys.includes(k)) && cfg[k] != null) patch[k] = cfg[k];
+  });
+  return patch;
+}
+
 export default function App() {
   const [tab, setTab] = useState("calc");
   const [{ settings, charges, items }, setCalcState] = useState(loadCalcState);
@@ -96,15 +106,8 @@ export default function App() {
     if (!freshRef.current.calc && !freshRef.current.items) return;
     configAppliedRef.current = true;
     if (freshRef.current.calc) {
-      setCalcState((s) => ({
-        ...s,
-        settings: {
-          ...s.settings,
-          ...(appConfig.mesoRate != null && { mesoRate: appConfig.mesoRate }),
-          ...(appConfig.giftRatio != null && { giftRatio: appConfig.giftRatio }),
-          ...(appConfig.marketRatio != null && { marketRatio: appConfig.marketRatio }),
-        },
-      }));
+      const patch = configRatePatch(appConfig);
+      if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     }
     if (freshRef.current.items && Array.isArray(appConfig.defaultItems)) {
       const items = appConfig.defaultItems.filter((x) => x && typeof x.name === "string");
@@ -127,9 +130,7 @@ export default function App() {
     forceAppliedForRef.current = ctxKey;
     const force = Array.isArray(appConfig.force) ? appConfig.force : [];
     if (!force.length) return;
-    const RATE_KEYS = ["mesoRate", "giftRatio", "marketRatio"];
-    const patch = {};
-    force.forEach((k) => { if (RATE_KEYS.includes(k) && appConfig[k] != null) patch[k] = appConfig[k]; });
+    const patch = configRatePatch(appConfig, force); // force에 든 시세 키만
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     if (force.includes("defaultItems") && Array.isArray(appConfig.defaultItems)) {
       const items = appConfig.defaultItems.filter((x) => x && typeof x.name === "string");
