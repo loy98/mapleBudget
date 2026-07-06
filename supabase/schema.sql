@@ -91,7 +91,7 @@ insert into public.app_config (id, config) values (1, '{
 
 -- ============================================================
 -- feedback · 사용자 피드백(건의/버그/기타). 누구나(게스트 포함) INSERT만 가능.
--- 읽기 정책·GRANT 없음 → 클라이언트는 조회 불가. 확인은 대시보드(service role, RLS 우회).
+-- 읽기 정책 없음 → RLS가 조회를 막음(클라이언트 조회 불가). 확인은 대시보드(service role, RLS 우회).
 -- user_id 는 컬럼 default auth.uid() 로 서버가 채움 → 클라이언트가 위조 못 함(게스트는 null).
 -- src/lib/cloud.js submitFeedback 가 INSERT 한다.
 -- ============================================================
@@ -109,7 +109,10 @@ create table if not exists public.feedback (
   constraint feedback_category_len check (category is null or char_length(category) <= 40)
 );
 
--- INSERT 권한만 부여. SELECT/UPDATE/DELETE 는 미부여 → 클라이언트 조회·수정 불가.
+-- 최소권한: 기본 권한을 모두 회수한 뒤 INSERT만 부여.
+-- (Supabase는 public 스키마 새 테이블에 anon/authenticated로 SELECT/UPDATE/DELETE 등을 기본 부여하는
+--  경우가 있어, 명시적으로 revoke 하여 조회·수정·삭제를 GRANT 레벨에서도 차단 — RLS와 함께 이중 방어.)
+revoke all on public.feedback from anon, authenticated;
 grant insert on public.feedback to anon, authenticated;
 
 alter table public.feedback enable row level security;
