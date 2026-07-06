@@ -10,6 +10,8 @@ import CalcTab from "./components/CalcTab.jsx";
 import LogTab from "./components/LogTab.jsx";
 import ForecastTab from "./components/ForecastTab.jsx";
 import AuthBar from "./components/AuthBar.jsx";
+import HelpModal from "./components/HelpModal.jsx";
+import FeedbackModal from "./components/FeedbackModal.jsx";
 
 const TABS = [
   { id: "calc", label: "계산기" },
@@ -41,6 +43,7 @@ export default function App() {
   const [{ settings, charges, items }, setCalcState] = useState(loadCalcState);
   const [myItems, setMyItems] = useState(loadMyItems);
   const [ledger, setLedger] = useState(loadLedger);
+  const [modal, setModal] = useState(null); // null | "help" | "feedback"
   const fileRef = useRef(null);
 
   // 파생 계산 (기존 render()의 순수 버전)
@@ -88,7 +91,11 @@ export default function App() {
         <span className="logo">M</span>
         <h1>메이플 MVP작 효율 계산기</h1>
         <span className="sub">엠작 최적화 · 계산기 + 거래 기록/13주 달력</span>
-        <AuthBar session={session} syncState={syncState} />
+        <div className="headright">
+          <button className="btn ghost sm" onClick={() => setModal("help")}>❓ 도움말</button>
+          <button className="btn ghost sm" onClick={() => setModal("feedback")}>💬 피드백</button>
+          <AuthBar session={session} syncState={syncState} />
+        </div>
       </header>
 
       <div className="tabs">
@@ -128,6 +135,8 @@ export default function App() {
       </footer>
 
       {conflictPrompt && <ConflictModal onChoose={conflictPrompt.onChoose} />}
+      {modal === "help" && <HelpModal onClose={() => setModal(null)} />}
+      {modal === "feedback" && <FeedbackModal session={session} onClose={() => setModal(null)} />}
     </div>
   );
 }
