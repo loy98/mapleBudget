@@ -46,6 +46,23 @@ export async function fetchAppConfig() {
   }
 }
 
+// ===== 피드백 (feedback 테이블, INSERT 전용) =====
+// 게스트/로그인 모두 제출 가능. user_id 는 DB default(auth.uid())가 채우므로 클라이언트가 보내지 않는다.
+// 반환: { error } — 성공이면 error=null. 클라우드 비활성이면 error에 사유를 담아 호출부가 안내.
+export async function submitFeedback({ message, category, email } = {}) {
+  if (!supabase) return { error: new Error("cloud-disabled") };
+  const msg = String(message ?? "").trim();
+  if (!msg) return { error: new Error("empty") };
+  const row = {
+    message: msg.slice(0, 4000),
+    category: category ? String(category).slice(0, 40) : null,
+    email: email ? String(email).trim().slice(0, 200) : null,
+    user_agent: (typeof navigator !== "undefined" ? navigator.userAgent : "").slice(0, 500),
+  };
+  const { error } = await supabase.from("feedback").insert(row);
+  return { error };
+}
+
 // ===== 데이터 (user_data 1행) =====
 export async function fetchUserData(userId) {
   const { data, error } = await supabase

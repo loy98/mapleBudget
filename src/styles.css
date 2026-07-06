@@ -255,6 +255,32 @@
 .modal-title{font-size:16px;font-weight:800;margin-bottom:8px}
 .modal-body{font-size:13px;color:var(--sub);line-height:1.6;margin:0 0 16px}
 .modal-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+/* 헤더 우측 컨트롤 묶음(도움말·피드백·로그인/동기화) — 하나의 auto 마진으로 우측 정렬 */
+.headright{display:inline-flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.headright .authbar{margin-left:0}
+/* 닫기(×) 헤더 + 스크롤 본문(도움말/피드백 공용) */
+.modal-head{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.modal-head .modal-title{margin-bottom:0}
+.modal-x{margin-left:auto;background:none;border:none;color:var(--sub);font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
+.modal-x:hover{color:var(--txt)}
+.modal-card.help,.modal-card.feedback{max-width:520px;display:flex;flex-direction:column;max-height:calc(100vh - 32px)}
+.modal-scroll{overflow-y:auto;margin:-4px -4px 12px;padding:4px}
+/* 도움말 섹션 */
+.help-sec{margin:0 0 14px}
+.help-sec h4{margin:0 0 6px;font-size:14px;font-weight:800;color:var(--txt)}
+.help-sec ul{margin:0;padding-left:18px}
+.help-sec li{font-size:12.5px;color:var(--sub);line-height:1.6;margin-bottom:3px}
+.help-sec b{color:var(--txt)}
+/* 피드백 폼 */
+.fb-field{margin-bottom:12px}
+.fb-field>label{display:block;font-size:12.5px;font-weight:700;color:var(--sub);margin-bottom:5px}
+.fb-field .req{color:var(--bad);margin-left:3px}
+.fb-text,.fb-input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--txt);
+  font-family:inherit;font-size:13px;padding:9px 11px;resize:vertical}
+.fb-text:focus,.fb-input:focus{outline:none;border-color:var(--accent)}
+.fb-count{text-align:right;font-size:11px;color:var(--sub);margin-top:3px}
+.fb-err{background:rgba(255,107,107,.12);border:1px solid var(--bad);color:var(--bad);
+  font-size:12.5px;border-radius:8px;padding:8px 10px;margin-bottom:10px}
 /* ===== 백업/복원 ===== */
 .backupbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--sub);font-size:11.5px;text-align:center}
