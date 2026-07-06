@@ -88,3 +88,46 @@ insert into public.app_config (id, config) values (1, '{
     {"name":"뷰티 쿠폰","cash":4900,"mAllowed":true,"icon":"💅"}
   ]
 }'::jsonb) on conflict (id) do nothing;
+
+-- ============================================================
+-- feedback · 사용자 피드백(건의/버그/기타). 누구나(게스트 포함) INSERT만 가능.
+-- 읽기 정책 없음 → RLS가 조회를 막음(클라이언트 조회 불가). 확인은 대시보드(service role, RLS 우회).
+-- user_id 는 컬럼 default auth.uid() 로 서버가 채움 → 클라이언트가 위조 못 함(게스트는 null).
+-- src/lib/cloud.js submitFeedback 가 INSERT 한다.
+-- ============================================================
+
+create table if not exists public.feedback (
+  id         bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  user_id    uuid default auth.uid() references auth.users(id) on delete set null,
+  email      text,
+  category   text,
+  message    text not null,
+  user_agent text,
+  constraint feedback_message_len  check (char_length(message)  between 1 and 4000),
+  constraint feedback_email_len    check (email    is null or char_length(email)    <= 200),
+  constraint feedback_category_len check (category is null or char_length(category) <= 40)
+);
+
+-- 최소권한: 기본 권한을 모두 회수한 뒤 INSERT만 부여.
+-- (Supabase는 public 스키마 새 테이블에 anon/authenticated로 SELECT/UPDATE/DELETE 등을 기본 부여하는
+--  경우가 있어, 명시적으로 revoke 하여 조회·수정·삭제를 GRANT 레벨에서도 차단 — RLS와 함께 이중 방어.)
+revoke all on public.feedback from anon, authenticated;
+grant insert on public.feedback to anon, authenticated;
+
+alter table public.feedback enable row level security;
+
+-- 누구나 제출 가능. 단 역할별로 user_id 를 고정:
+--  · 게스트(anon)  → user_id 는 반드시 null
+--  · 로그인(authenticated) → user_id 는 반드시 본인(auth.uid())
+-- 클라이언트는 user_id 를 보내지 않고 DB default(auth.uid())가 채우므로 정상 경로는 항상 통과하고,
+-- 타인 사칭(다른 uid)도, 로그인 유저의 게스트 위장(user_id=null 강제 주입)도 모두 차단된다.
+drop policy if exists "feedback_insert_anyone" on public.feedback;
+create policy "feedback_insert_anyone" on public.feedback
+  for insert
+  to anon, authenticated
+  with check (
+    (auth.role() = 'anon' and user_id is null)
+    or
+    (auth.role() = 'authenticated' and user_id = auth.uid())
+  );
