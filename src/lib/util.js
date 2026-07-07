@@ -5,6 +5,8 @@ export const won = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") :
 export const pct = (n) => (isFinite(n) ? n.toFixed(1) : "–") + "%";
 export const eok = (n) => (isFinite(n) ? n.toFixed(2) : "–") + "억";
 export const ml = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "–") + " 마일리지";
+// 숫자만(단위 없음) — 모노(.num) 안에서 쓰고 "마일리지" 단위는 .u 로 따로 붙일 때 사용
+export const mlN = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "–");
 
 export function manW(n) {
   const a = Math.abs(n);

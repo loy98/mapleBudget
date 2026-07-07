@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_ITEMS, DEFAULT_SETTINGS } from "../lib/constants.js";
-import { won, pct, eok, ml } from "../lib/util.js";
+import { won, pct, eok, ml, mlN } from "../lib/util.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView } from "./ui.jsx";
 
 const tierOptions = TIERS.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
@@ -340,9 +340,9 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             <h2><span className="n">5</span>마일리지 수급</h2>
             <p className="desc">이번 엠작 충전으로 쌓이는 마일리지와 3번 아이템 필요 마일리지.</p>
             <div className="kpi">
-              <KpiBox title="월 적립 (≈5%, 한도 반영)"><span className="mil"><span className="num">{ml(c.earnPerMonth)}</span><span className="u"> 적립</span></span></KpiBox>
+              <KpiBox title="월 적립 (≈5%, 한도 반영)"><span className="mil"><span className="num">{mlN(c.earnPerMonth)}</span><span className="u"> 마일리지 적립</span></span></KpiBox>
               <KpiBox title="3번 마일 아이템 소요(1세트)"><MilUse n={c.milNeed} /></KpiBox>
-              <KpiBox title="월 사용 가능(보유)">{ml(c.milAvail)}</KpiBox>
+              <KpiBox title="월 사용 가능(보유)"><span className="num">{mlN(c.milAvail)}</span><span className="u"> 마일리지</span></KpiBox>
             </div>
             <div className="note">
               {c.remain <= 0 && c.milNeed <= 0 ? "목표·아이템을 입력하면 마일리지 적립/소요가 계산됩니다." : (
