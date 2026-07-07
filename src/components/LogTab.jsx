@@ -179,7 +179,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
             <div className="legend">
               <span><i className="sw" style={{ background: "var(--accent2)" }}></i>오늘</span>
               <span><i className="sw" style={{ background: "var(--accent)" }}></i>과금 있는 날</span>
-              <span><i className="sw" style={{ background: "rgba(47,212,196,.15)", boxShadow: "inset 0 0 0 1.5px var(--accent)" }}></i>선택</span>
+              <span><i className="sw" style={{ background: "var(--accent-weak)", boxShadow: "inset 0 0 0 1.5px var(--accent)" }}></i>선택</span>
               <span style={{ color: "var(--accent2)" }}>■ 이번 주 하이라이트</span>
             </div>
             {selectedDate && (
