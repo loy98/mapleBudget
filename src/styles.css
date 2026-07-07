@@ -5,12 +5,16 @@
     --good:#4fd18b; --bad:#ff6b6b; --blue:#5aa9ff;
     /* 숫자 전용 모노(poe.ninja/TradingView) — 시스템 모노 스택, 웹폰트 의존 없음 */
     --font-num:"JetBrains Mono","SFMono-Regular",ui-monospace,Consolas,"D2Coding",monospace;
+    /* 본문(한글) 스택 — 모노 컨테이너 안의 한글 접미(.u)를 이 폰트로 되돌림 */
+    --font-body:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",system-ui,sans-serif;
     /* 모서리 스케일 통일(16/12/9 혼재 → 3단계) */
     --r-sm:6px; --r:8px; --r-lg:12px;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
-    font-family:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.55}
+    font-family:var(--font-body);font-size:14px;line-height:1.55}
+  /* 숫자 접미 유닛(억/원/%/메소 등) — 모노 컨테이너 안에서도 한글은 본문폰트로 */
+  .u{font-family:var(--font-body);font-variant-numeric:normal;letter-spacing:normal}
   a{color:var(--accent);text-decoration:none}
   .wrap{max-width:1440px;margin:0 auto;padding:20px 20px 70px}
   .tblx{overflow-x:auto}
@@ -54,12 +58,10 @@
   td input{padding:6px 8px;font-size:13px}
   .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.2px}
   .good{color:var(--good)} .bad{color:var(--bad)}
-  /* 손익/비용/마일 수치: 모노 + tabular (한글 접미는 Pretendard로 폴백) */
-  .good,.bad,.cost,.mil{font-family:var(--font-num);font-variant-numeric:tabular-nums}
   .cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
   .box{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}
   .box .t{font-size:12px;color:var(--sub)}
-  .box .v{font-family:var(--font-num);font-size:22px;font-weight:800;margin-top:4px;letter-spacing:-.5px}
+  .box .v{font-size:22px;font-weight:800;margin-top:4px;letter-spacing:-.4px}
   .box.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .tag{font-size:11px;padding:2px 7px;border-radius:10px;background:var(--panel);color:var(--sub)}
   .tag.best{background:var(--accent);color:#04121b;font-weight:700}
@@ -89,7 +91,7 @@
   .hero{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r-lg);padding:18px;margin-bottom:16px}
   .hero .hgrid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px}
   .hero .t{font-size:12px;color:var(--sub)}
-  .hero .big{font-family:var(--font-num);font-size:24px;font-weight:900;margin-top:4px;letter-spacing:-.6px}
+  .hero .big{font-size:24px;font-weight:900;margin-top:4px;letter-spacing:-.5px}
   .hero .big.acc{color:var(--accent)}
   .draftblock{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:var(--panel2)}
   .draftblock .bt{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px}

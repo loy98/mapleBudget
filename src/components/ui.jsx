@@ -338,11 +338,17 @@ export function KpiBox({ title, best, children, hint }) {
 
 // 손익/비용 표기 헬퍼 (JSX)
 import { won as wonF, ml as mlF } from "../lib/util.js";
+// 숫자는 모노(.num), 한글 접미는 본문폰트(.u)로 분리 — 모노 컨테이너 안에서도 접미가 mono로 leak되지 않음
 export const CostLabel = ({ n }) =>
-  n < 0 ? <span className="good">{wonF(-n)} 이득</span> : <span className="cost">{wonF(n)} 지출</span>;
+  n < 0
+    ? <span className="good"><span className="num">{wonF(-n)}</span><span className="u"> 이득</span></span>
+    : <span className="cost"><span className="num">{wonF(n)}</span><span className="u"> 지출</span></span>;
 export const PlLabel = ({ p }) =>
-  p >= 0 ? <span className="good">{wonF(p)} 이득</span> : <span className="bad">{wonF(-p)} 손해</span>;
-export const MilUse = ({ n }) => (n > 0 ? <span className="mil">{mlF(n)} 소모</span> : <>–</>);
+  p >= 0
+    ? <span className="good"><span className="num">{wonF(p)}</span><span className="u"> 이득</span></span>
+    : <span className="bad"><span className="num">{wonF(-p)}</span><span className="u"> 손해</span></span>;
+export const MilUse = ({ n }) =>
+  n > 0 ? <span className="mil"><span className="num">{mlF(n)}</span><span className="u"> 소모</span></span> : <>–</>;
 export const IconView = ({ icon }) => {
   if (!icon) return null;
   // http(s) URL만 이미지로. referrerPolicy=no-referrer 로 트래킹 리퍼러 유출 차단, lazy 로딩.

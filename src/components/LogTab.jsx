@@ -109,10 +109,10 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
               <KpiBox title="엠작 구매 실지출"><CostLabel n={st.spend} /></KpiBox>
             </div>
             <div className="kpi">
-              <KpiBox title="판매 메소 (실수령)">{eok(st.meso)} <span className="muted">메소</span></KpiBox>
-              <KpiBox title="현금화한 메소">{eok(st.cashMeso)} <span className="muted">메소</span></KpiBox>
+              <KpiBox title="판매 메소 (실수령)">{eok(st.meso)} <span className="muted u">메소</span></KpiBox>
+              <KpiBox title="현금화한 메소">{eok(st.cashMeso)} <span className="muted u">메소</span></KpiBox>
               <KpiBox title="현금화 필요 메소 (판매−현금화)" hint={uncashed < 0 ? <>현금화가 판매보다 {eok(-uncashed)} 많음</> : undefined}>
-                {eok(Math.max(0, uncashed))} <span className="muted">메소</span>
+                {eok(Math.max(0, uncashed))} <span className="muted u">메소</span>
               </KpiBox>
             </div>
             <div className="kpi">
@@ -178,7 +178,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
             )}
             <div className="legend">
               <span><i className="sw" style={{ background: "var(--accent2)" }}></i>오늘</span>
-              <span><i className="sw" style={{ background: "linear-gradient(135deg,var(--accent),#37c2b4)" }}></i>과금 있는 날</span>
+              <span><i className="sw" style={{ background: "var(--accent)" }}></i>과금 있는 날</span>
               <span><i className="sw" style={{ background: "rgba(47,212,196,.15)", boxShadow: "inset 0 0 0 1.5px var(--accent)" }}></i>선택</span>
               <span style={{ color: "var(--accent2)" }}>■ 이번 주 하이라이트</span>
             </div>

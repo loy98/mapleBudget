@@ -40,7 +40,7 @@ export default function ForecastTab({ ledger, calc }) {
                   <td>{t.name}</td>
                   <td className="num">{won(t.amt)}</td>
                   <td className="num">{won(t.amt / 13)}</td>
-                  <td className={"num " + (need > 0 ? "bad" : "good")}>{need > 0 ? won(need) : "충족"}</td>
+                  <td className={"num " + (need > 0 ? "bad" : "good")}>{need > 0 ? won(need) : <span className="u">충족</span>}</td>
                 </tr>
               );
             })}
