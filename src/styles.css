@@ -9,10 +9,11 @@
     --hover:rgba(255,255,255,.03);
     --accent-faint:rgba(47,212,196,.08); --accent-weak:rgba(47,212,196,.15);
     --accent-mid:rgba(47,212,196,.5); --accent2-weak:rgba(255,176,32,.4);
-    /* 숫자 전용 모노(poe.ninja/TradingView) */
-    --font-num:"JetBrains Mono","SFMono-Regular",ui-monospace,Consolas,"D2Coding",monospace;
-    /* 본문 — 시스템 폰트(이전 폰트 복귀) */
-    --font-body:"Segoe UI","Malgun Gothic",system-ui,sans-serif;
+    /* 숫자 = Sora, 본문/한글 = Noto Sans KR (자체 호스팅 @fontsource) */
+    --font-num:"Sora","Noto Sans KR",ui-monospace,Consolas,monospace;
+    --font-body:"Noto Sans KR","Segoe UI","Malgun Gothic",system-ui,sans-serif;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 26px -14px rgba(0,0,0,.7);
+    --shadow-lg:0 2px 6px rgba(0,0,0,.5),0 24px 50px -20px rgba(0,0,0,.75);
     /* 모서리 스케일 통일 */
     --r-sm:6px; --r:8px; --r-lg:12px;
     color-scheme:dark;
@@ -28,6 +29,8 @@
     --hover:rgba(60,45,20,.05);
     --accent-faint:rgba(224,114,12,.09); --accent-weak:rgba(224,114,12,.15);
     --accent-mid:rgba(224,114,12,.5); --accent2-weak:rgba(201,138,0,.35);
+    --shadow:0 1px 2px rgba(60,45,20,.05),0 8px 24px -12px rgba(60,45,20,.18);
+    --shadow-lg:0 2px 6px rgba(60,45,20,.07),0 20px 44px -18px rgba(60,45,20,.30);
     color-scheme:light;
   }
   *{box-sizing:border-box}
@@ -59,7 +62,7 @@
   .grid>*{min-width:0}
   .tblx,.calwrap{max-width:100%}
   .formgrid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px;margin-bottom:16px;box-shadow:var(--shadow)}
   .card h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:9px;letter-spacing:-.2px}
   .card h2 .n{background:var(--accent);color:var(--on-accent);width:23px;height:23px;border-radius:var(--r-sm);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
   .card .desc{color:var(--sub);font-size:12px;margin:0 0 14px}
@@ -76,7 +79,7 @@
   th:first-child,td:first-child{text-align:left}
   .mil-cell,th.milh{text-align:center}
   td input{padding:6px 8px;font-size:13px}
-  .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.2px}
+  .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.01em}
   .good{color:var(--good)} .bad{color:var(--bad)}
   .cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
   .box{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}
@@ -314,3 +317,45 @@
 /* ===== 백업/복원 ===== */
 .backupbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--sub);font-size:11.5px;text-align:center}
+
+/* ===== 리디자인: 히어로 요약(핵심 수치 + 진행률 링) ===== */
+.hero.herox{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;padding:22px 24px;align-items:center}
+.hx-main{display:flex;flex-direction:column;min-width:0}
+.hx-eyebrow{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--accent)}
+.hx-num{font-size:clamp(30px,4.2vw,48px);font-weight:800;letter-spacing:-.03em;line-height:1.04;margin-top:8px}
+.hx-num .u{color:var(--sub);font-weight:700}
+.hx-sub{font-size:13.5px;color:var(--sub);margin-top:10px;line-height:1.55}
+.hx-sub b{color:var(--txt);font-weight:700}
+.hx-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.hx-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:6px 11px;border-radius:99px;border:1px solid var(--line);background:var(--panel2);color:var(--sub)}
+.hx-chip .num{font-weight:700}
+.hx-chip.good{color:var(--good);background:color-mix(in srgb,var(--good) 13%,transparent);border-color:transparent}
+.hx-chip.dot::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+.hx-ring{display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid var(--line);padding-left:18px}
+.ring-wrap{position:relative;width:150px;height:150px}
+.ring-wrap svg{display:block;transform:rotate(-90deg)}
+.ring-c{position:absolute;inset:0;display:grid;place-content:center;text-align:center;gap:2px}
+.ring-c .pct{font-family:var(--font-num);font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.ring-c .to{font-size:11px;color:var(--sub);font-weight:700}
+.ring-c .to b{color:var(--accent)}
+.hx-ringcap{margin-top:12px;font-size:12px;color:var(--sub);text-align:center;line-height:1.5}
+.hx-ringcap b{color:var(--txt);font-weight:700}
+@media(max-width:760px){
+  .hero.herox{grid-template-columns:1fr;gap:16px}
+  .hx-ring{border-left:none;border-top:1px solid var(--line);padding-left:0;padding-top:16px}
+}
+/* ===== 리디자인: 방식 비교 카드 ===== */
+.mcards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:2px}
+.mcard{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;transition:border-color .14s,box-shadow .14s,transform .14s}
+.mcard:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.mcard.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.mcard.best::before{content:"최적";position:absolute;top:-9px;left:15px;font-size:10.5px;font-weight:800;color:var(--on-accent);background:var(--accent);padding:3px 9px;border-radius:99px}
+.mcard .mc-name{font-size:13px;font-weight:700;color:var(--sub)}
+.mcard .mc-val{font-family:var(--font-num);font-size:26px;font-weight:800;letter-spacing:-.03em;margin:8px 0 2px}
+.mcard .mc-sub{font-size:11.5px;color:var(--hint)}
+.mcard .mc-bar{height:6px;border-radius:99px;background:color-mix(in srgb,var(--sub) 16%,transparent);margin-top:13px;overflow:hidden}
+.mcard .mc-bar i{display:block;height:100%;border-radius:99px;background:var(--sub);opacity:.5}
+.mcard.best .mc-bar i{background:var(--accent);opacity:1}
+.mcard .mc-delta{font-size:11.5px;font-weight:700;margin-top:9px;color:var(--sub)}
+.mcard.best .mc-delta{color:var(--accent)}
+@media(max-width:600px){.mcards{grid-template-columns:1fr}}

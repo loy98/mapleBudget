@@ -336,6 +336,26 @@ export function KpiBox({ title, best, children, hint }) {
   );
 }
 
+// ===== 진행률 링 (SVG) — 목표 대비 진행도 시각화 =====
+export function ProgressRing({ pct, size = 150, stroke = 14, children }) {
+  const p = Math.max(0, Math.min(100, +pct || 0));
+  const r = (size - stroke) / 2;
+  const C = 2 * Math.PI * r;
+  return (
+    <div className="ring-wrap" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--line)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--accent)" strokeWidth={stroke}
+          strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - p / 100)}
+          style={{ transition: "stroke-dashoffset .8s cubic-bezier(.22,1,.36,1)" }}
+        />
+      </svg>
+      <div className="ring-c">{children}</div>
+    </div>
+  );
+}
+
 // 손익/비용 표기 헬퍼 (JSX)
 import { won as wonF, mlN } from "../lib/util.js";
 // 숫자는 모노(.num), 한글 접미는 본문폰트(.u)로 분리 — 모노 컨테이너 안에서도 접미가 mono로 leak되지 않음
