@@ -6,8 +6,8 @@
   <title>메이플 MVP작 효율 계산기</title>
   <meta name="description" content="메이플스토리 MVP 등급작(엠작) 최적 비용 계산기. 선물식·메소마켓·경매장 되팔기 비교, 마일리지, 거래 기록, 13주 달력, 등급 유지 스케줄까지." />
   <meta name="theme-color" content="#0a0b0e" />
-  <!-- 저장된 테마를 렌더 전에 선반영(라이트 유저의 최초 다크 flash 방지) -->
-  <script>try{if(localStorage.getItem('mvpTheme')==='light'){document.documentElement.setAttribute('data-theme','light');var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content','#f4efe4');}}catch(e){}</script>
+  <!-- 기본 진입 = 일반(라이트) 모드. 저장값이 'dark'일 때만 다크. 렌더 전 선반영으로 flash 방지 -->
+  <script>try{if(localStorage.getItem('mvpTheme')!=='dark'){document.documentElement.setAttribute('data-theme','light');var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content','#f4efe4');}}catch(e){}</script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <!-- Open Graph (링크 공유 미리보기) -->
