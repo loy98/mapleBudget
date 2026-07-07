@@ -44,7 +44,21 @@ export default function App() {
   const [myItems, setMyItems] = useState(loadMyItems);
   const [ledger, setLedger] = useState(loadLedger);
   const [modal, setModal] = useState(null); // null | "help" | "feedback"
+  // 테마: "dark"(기본) | "light". index.html 인라인 스크립트가 최초 flash 없이 data-theme를 선반영.
+  const [theme, setTheme] = useState(() =>
+    typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"
+  );
   const fileRef = useRef(null);
+
+  // 테마 적용 + 저장 + 모바일 주소창 색(theme-color) 동기화
+  useEffect(() => {
+    const el = document.documentElement;
+    if (theme === "light") el.setAttribute("data-theme", "light");
+    else el.removeAttribute("data-theme");
+    try { localStorage.setItem("mvpTheme", theme); } catch {}
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute("content", theme === "light" ? "#f4efe4" : "#0a0b0e");
+  }, [theme]);
 
   // 파생 계산 (기존 render()의 순수 버전)
   const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
@@ -92,6 +106,9 @@ export default function App() {
         <h1>메이플 MVP작 효율 계산기</h1>
         <span className="sub">엠작 최적화 · 계산기 + 거래 기록/13주 달력</span>
         <div className="headright">
+          <button className="btn ghost sm" onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))} title="테마 전환" aria-label="테마 전환">
+            {theme === "light" ? "🌙 다크" : "☀️ 라이트"}
+          </button>
           <button className="btn ghost sm" onClick={() => setModal("help")}>❓ 도움말</button>
           <button className="btn ghost sm" onClick={() => setModal("feedback")}>💬 피드백</button>
           <AuthBar session={session} syncState={syncState} />
