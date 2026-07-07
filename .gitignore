@@ -10,3 +10,6 @@ dev-dist
 # Dev scaffolding / orchestration state
 .omc
 _archive
+
+# 디자인시스템 동기화 스크래치(로컬 전용)
+.design-sync/
