@@ -365,6 +365,7 @@ footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;co
 thead th{border-bottom:1.5px solid var(--line);padding-bottom:8px}
 tbody tr{transition:background .12s}
 #itemTable tbody tr:hover,.mplan tbody tr:hover,.ctable tbody tr:hover{background:var(--hover)}
+#itemTable tbody tr.win:hover{background:var(--accent-faint)}
 /* 사이드바 섹션 라벨에 구분선 */
 .subhead{display:flex;align-items:center;gap:9px;margin:18px 0 8px}
 .subhead::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -382,6 +383,6 @@ tbody tr{transition:background .12s}
 input:focus,select:focus{background:var(--panel)}
 /* 모션 감소 선호 존중 */
 @media(prefers-reduced-motion:reduce){
-  .ring-wrap circle,.mcard,.box,.chip,.navpills a{transition:none!important}
+  .ring-wrap circle,.mcard,.box,.chip,.navpills a,tbody tr{transition:none!important}
   .mcard:hover{transform:none}
 }
