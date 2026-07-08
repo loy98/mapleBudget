@@ -10,6 +10,7 @@ const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
 export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const [sub, setSub] = useState("view");
   const [periodMode, setPeriodMode] = useState("w13");
+  const [chartMode, setChartMode] = useState("line"); // 추세 차트: line | bars
   const [statMonth, setStatMonth] = useState(curMonth());
   const [statWeek, setStatWeek] = useState(() => fmtD(weekStartThu(new Date())));
   const [calMode, setCalModeState] = useState(loadCalMode);
@@ -114,9 +115,15 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
                   <div className="trend-lbl">주간 과금 추세 · 최근 13주</div>
                   <div className="trend-big">{won(cum)}</div>
                 </div>
-                <div className="trend-grade">누적 추정 <b>{estGrade(cum)}</b></div>
+                <div className="trend-tools">
+                  <div className="trend-grade">누적 추정 <b>{estGrade(cum)}</b></div>
+                  <div className="chart-toggle" role="group" aria-label="차트 모드">
+                    <button className={chartMode === "line" ? "on" : ""} aria-pressed={chartMode === "line"} onClick={() => setChartMode("line")}>라인</button>
+                    <button className={chartMode === "bars" ? "on" : ""} aria-pressed={chartMode === "bars"} onClick={() => setChartMode("bars")}>막대</button>
+                  </div>
+                </div>
               </div>
-              <Sparkline data={weekly13} />
+              <Sparkline data={weekly13} mode={chartMode} />
               <div className="xlab"><span>13주 전</span><span>이번 주</span></div>
             </div>
             <div className="kpi">

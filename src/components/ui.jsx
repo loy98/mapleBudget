@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useId } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import { fmtD, todayStr, addDays } from "../lib/util.js";
 import { WD_SUN } from "../lib/constants.js";
@@ -356,36 +356,74 @@ export function ProgressRing({ pct, size = 150, stroke = 14, children }) {
   );
 }
 
-// ===== 스파크라인 (SVG 면적 차트) — 주간 추세 시각화 =====
-export function Sparkline({ data = [], width = 600, height = 88, pad = 6 }) {
-  // 인스턴스별 고유 그래디언트 id (Hook은 조기 반환 이전에 무조건 호출) — 여러 Sparkline 참조 충돌 방지
-  const gid = "spk" + useId().replace(/:/g, "");
+// ===== 스파크라인 (SVG) — 라인/막대 모드, 컨테이너 실폭 측정으로 1:1 렌더 =====
+// preserveAspectRatio="none" 비균등 스케일이 선 두께 불균일·끝점 타원 왜곡을 유발 → 실폭 측정 viewBox로 1:1 렌더해 해결.
+export function Sparkline({ data = [], height = 88, pad = 6, mode = "line" }) {
+  const wrapRef = useRef(null);
+  const [w, setW] = useState(600);
+  const gid = "spk" + useId().replace(/:/g, ""); // Hook은 조기 반환 이전에 무조건 호출
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const update = () => setW(Math.max(1, Math.round(el.clientWidth || 600)));
+    update();
+    let ro;
+    if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(update); ro.observe(el); }
+    return () => ro && ro.disconnect();
+  }, []);
+
   const vals = data.map((v) => (Number.isFinite(+v) ? +v : 0));
-  if (vals.length < 2) return null;
-  const max = Math.max(...vals), min = Math.min(...vals);
-  const span = max - min || 1;
-  const xy = (i) => {
-    const x = pad + (i * (width - 2 * pad)) / (vals.length - 1);
-    const y = height - pad - ((vals[i] - min) / span) * (height - 2 * pad - 4);
-    return [x, y];
-  };
-  const pts = vals.map((_, i) => xy(i));
-  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-  const area = `M${pts[0][0].toFixed(1)} ${height} ` + line.replace(/^M/, "L") + ` L${pts[pts.length - 1][0].toFixed(1)} ${height} Z`;
-  const last = pts[pts.length - 1];
+  const n = vals.length;
+  const innerW = Math.max(1, w - 2 * pad);
+  const innerH = Math.max(1, height - 2 * pad - 4);
+
+  let content = null;
+  if (n >= 2) {
+    if (mode === "bars") {
+      const bmax = Math.max(...vals) || 1;
+      const step = innerW / n;
+      const gap = Math.min(6, step * 0.35);
+      const bw = Math.max(1, step - gap);
+      content = vals.map((v, i) => {
+        const bh = Math.max(0, (v / bmax) * innerH);
+        const x = pad + i * step + gap / 2;
+        const y = height - pad - bh;
+        return (
+          <rect key={i} x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={bh.toFixed(1)}
+            rx="2" fill="var(--accent)" opacity={i === n - 1 ? 1 : 0.45} />
+        );
+      });
+    } else {
+      const max = Math.max(...vals), min = Math.min(...vals);
+      const span = max - min || 1;
+      const xy = (i) => [pad + (i * innerW) / (n - 1), height - pad - ((vals[i] - min) / span) * innerH];
+      const pts = vals.map((_, i) => xy(i));
+      const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+      const area = `M${pts[0][0].toFixed(1)} ${height} ` + line.replace(/^M/, "L") + ` L${pts[n - 1][0].toFixed(1)} ${height} Z`;
+      const last = pts[n - 1];
+      content = (
+        <>
+          <path d={area} fill={`url(#${gid})`} />
+          <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="3.6" fill="var(--accent)" stroke="var(--panel)" strokeWidth="2" />
+        </>
+      );
+    }
+  }
+
   return (
-    <svg className="spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.24" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      <path d={area} fill={`url(#${gid})`} />
-      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-      <circle cx={last[0]} cy={last[1]} r="3.6" fill="var(--accent)" stroke="var(--panel)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div ref={wrapRef} className="spark-wrap">
+      <svg className="spark" width={w} height={height} viewBox={`0 0 ${w} ${height}`} aria-hidden="true">
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.24" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <line x1={pad} y1={height - pad} x2={w - pad} y2={height - pad} stroke="var(--line)" strokeWidth="1" />
+        {content}
+      </svg>
+    </div>
   );
 }
 
