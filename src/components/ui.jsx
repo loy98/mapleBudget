@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import { fmtD, todayStr, addDays } from "../lib/util.js";
 import { WD_SUN } from "../lib/constants.js";
@@ -358,6 +358,8 @@ export function ProgressRing({ pct, size = 150, stroke = 14, children }) {
 
 // ===== 스파크라인 (SVG 면적 차트) — 주간 추세 시각화 =====
 export function Sparkline({ data = [], width = 600, height = 88, pad = 6 }) {
+  // 인스턴스별 고유 그래디언트 id (Hook은 조기 반환 이전에 무조건 호출) — 여러 Sparkline 참조 충돌 방지
+  const gid = "spk" + useId().replace(/:/g, "");
   const vals = data.map((v) => (Number.isFinite(+v) ? +v : 0));
   if (vals.length < 2) return null;
   const max = Math.max(...vals), min = Math.min(...vals);
@@ -371,7 +373,6 @@ export function Sparkline({ data = [], width = 600, height = 88, pad = 6 }) {
   const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
   const area = `M${pts[0][0].toFixed(1)} ${height} ` + line.replace(/^M/, "L") + ` L${pts[pts.length - 1][0].toFixed(1)} ${height} Z`;
   const last = pts[pts.length - 1];
-  const gid = "spk-grad";
   return (
     <svg className="spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
       <defs>
