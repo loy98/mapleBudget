@@ -3,6 +3,52 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
 } from "./storage.js";
 import { mergeSnapshots } from "./cloud.js";
+import { weeklyMeso } from "./ledger.js";
+
+// ===== ledger.js 순수 함수 =====
+
+describe("weeklyMeso", () => {
+  const ws = new Date("2026-07-02T00:00:00"); // 목요일 시작, ~07/08(수) 마감
+  const L = (o) => ({ buys: [], sells: [], cashes: [], spends: [], ...o });
+
+  it("주 범위 안의 구매/판매 수량을 합산한다", () => {
+    const r = weeklyMeso(L({
+      buys: [{ date: "2026-07-02", qty: 2 }, { date: "2026-07-08", qty: 3 }],
+      sells: [{ date: "2026-07-05", qty: 4, meso: 1 }],
+    }), ws, 0);
+    expect(r.buyQty).toBe(5);
+    expect(r.sellQty).toBe(4);
+  });
+
+  it("주 경계 밖(직전 수요일·직후 목요일)은 제외한다", () => {
+    const r = weeklyMeso(L({
+      buys: [{ date: "2026-07-01", qty: 9 }, { date: "2026-07-09", qty: 9 }],
+      sells: [{ date: "2026-07-01", qty: 9, meso: 1 }],
+    }), ws, 0);
+    expect(r.buyQty).toBe(0);
+    expect(r.sellQty).toBe(0);
+  });
+
+  it("수량 미입력/빈 문자열은 구매·판매 모두 0으로 취급한다 (1개로 세지 않음)", () => {
+    const r = weeklyMeso(L({
+      buys: [{ date: "2026-07-03" }, { date: "2026-07-03", qty: "" }],
+      sells: [{ date: "2026-07-03", meso: 3 }, { date: "2026-07-03", qty: "", meso: 3 }],
+    }), ws, 0);
+    expect(r.buyQty).toBe(0);
+    expect(r.sellQty).toBe(0);
+    expect(r.sold).toBe(0);
+  });
+
+  it("판매 실수령 메소는 경매장 수수료를 뺀 값이다", () => {
+    const r = weeklyMeso(L({
+      sells: [{ date: "2026-07-03", qty: 2, meso: 10 }],
+      cashes: [{ date: "2026-07-03", meso: 5 }],
+    }), ws, 0.05);
+    expect(r.sold).toBeCloseTo(19, 10);
+    expect(r.cashed).toBe(5);
+    expect(r.need).toBeCloseTo(14, 10);
+  });
+});
 
 // ===== storage.js 순수 함수 =====
 

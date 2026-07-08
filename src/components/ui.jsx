@@ -504,12 +504,9 @@ export function Sparkline({ data = [], labels = [], height = 88, pad = 6, mode =
       )}
       {ticks.length > 0 && (
         <div className="spark-x" aria-hidden="true">
+          {/* 모든 눈금을 데이터 포인트 중앙에 정렬. 양끝은 살짝 넘칠 수 있어 .spark-x가 여백을 갖는다. */}
           {ticks.map((i) => (
-            <span
-              key={i}
-              className={"sx" + (i === hi ? " on" : "")}
-              style={{ left: xAt(i), transform: i === 0 ? "none" : i === n - 1 ? "translateX(-100%)" : "translateX(-50%)" }}
-            >
+            <span key={i} className={"sx" + (i === hi ? " on" : "")} style={{ left: xAt(i) }}>
               {(labels[i] && labels[i].short) || ""}
             </span>
           ))}

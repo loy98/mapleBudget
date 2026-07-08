@@ -49,6 +49,14 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
   // today를 deps에 포함해 날짜(주 경계 포함)가 바뀌면 최근 13주/주차 목록이 갱신되게 한다.
   const today = todayStr();
   const mWeeks = useMemo(() => mesoWeeks(ledger, calc.f), [ledger, calc.f, today]);
+  // 주차별 표 하단 합계 (13주 창 기준)
+  const wkTot = useMemo(
+    () => mWeeks.reduce(
+      (a, w) => ({ buyQty: a.buyQty + w.buyQty, sellQty: a.sellQty + w.sellQty, sold: a.sold + w.sold, cashed: a.cashed + w.cashed, need: a.need + w.need }),
+      { buyQty: 0, sellQty: 0, sold: 0, cashed: 0, need: 0 }
+    ),
+    [mWeeks]
+  );
   const uncashed = st.meso - st.cashMeso;
   // 최근 13주 주간 과금(실적) 시리즈 — 스파크라인용
   const weekly13 = useMemo(
@@ -126,9 +134,12 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
                 </div>
                 <div className="trend-tools">
                   <div className="trend-grade">누적 추정 <b>{estGrade(cum)}</b></div>
-                  <div className="chart-toggle" role="group" aria-label="차트 모드">
-                    <button className={chartMode === "line" ? "on" : ""} aria-pressed={chartMode === "line"} onClick={() => setChartMode("line")}>라인</button>
-                    <button className={chartMode === "bars" ? "on" : ""} aria-pressed={chartMode === "bars"} onClick={() => setChartMode("bars")}>막대</button>
+                  <div className="chart-mode">
+                    <span className="cm-lbl" id="chartModeLbl">그래프 방식</span>
+                    <div className="chart-toggle" role="group" aria-labelledby="chartModeLbl">
+                      <button className={chartMode === "line" ? "on" : ""} aria-pressed={chartMode === "line"} onClick={() => setChartMode("line")}>선</button>
+                      <button className={chartMode === "bars" ? "on" : ""} aria-pressed={chartMode === "bars"} onClick={() => setChartMode("bars")}>막대</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -171,14 +182,20 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
               실지출은 계산기 평균 충전 할인({pct(calc.effD * 100)}) 반영.
             </div>
 
-            <div className="subhead" style={{ marginTop: 18 }}>주차별 메소 현황 (최근 13주 · 목~수)</div>
+            <div className="subhead" style={{ marginTop: 18 }}>주차별 거래 현황 (최근 13주 · 목~수)</div>
             <div className="calwrap">
               <table>
-                <thead><tr><th>주 (목~수)</th><th>판매 메소</th><th>현금화 메소</th><th>현금화 필요</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>주 (목~수)</th>
+                    <th className="qh">구매</th><th className="qh sep">판매</th>
+                    <th>판매 메소</th><th>현금화 메소</th><th>현금화 필요</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {mWeeks.map((w) => {
                     const wk = fmtD(w.ws), isCur = wk === fmtD(weekStartThu(new Date()));
-                    const empty = !w.sold && !w.cashed;
+                    const empty = !w.sold && !w.cashed; // 메소 열 전용 — 개수 열은 각자 0이면 '–'
                     return (
                       <tr key={wk} className={isCur ? "curwk" : ""}>
                         <td>
@@ -187,6 +204,8 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
                           </button>
                           {isCur && <span className="nowtag" style={{ marginLeft: 6 }}>이번주</span>}
                         </td>
+                        <td className="num qty">{w.buyQty ? <>{w.buyQty}<span className="muted u">개</span></> : "–"}</td>
+                        <td className="num qty sep">{w.sellQty ? <>{w.sellQty}<span className="muted u">개</span></> : "–"}</td>
                         <td className="num">{empty ? "–" : eok(w.sold)}</td>
                         <td className="num">{empty ? "–" : eok(w.cashed)}</td>
                         <td className={"num " + (w.need > 0.0001 ? "bad" : "good")}>{empty ? "–" : eok(w.need)}</td>
@@ -194,9 +213,22 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="wktot-row">
+                    <td>13주 합계</td>
+                    <td className="num qty">{wkTot.buyQty ? <>{wkTot.buyQty}<span className="muted u">개</span></> : "–"}</td>
+                    <td className="num qty sep">{wkTot.sellQty ? <>{wkTot.sellQty}<span className="muted u">개</span></> : "–"}</td>
+                    <td className="num">{eok(wkTot.sold)}</td>
+                    <td className="num">{eok(wkTot.cashed)}</td>
+                    <td className={"num " + (wkTot.need > 0.0001 ? "bad" : "good")}>{eok(wkTot.need)}</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
-            <div className="hint" style={{ marginTop: 4 }}>주차를 누르면 위 통계가 그 주 기준으로 바뀝니다. '현금화 필요'는 판매 실수령 메소에서 현금화한 메소를 뺀 값이에요.</div>
+            <div className="hint" style={{ marginTop: 4 }}>
+              주차를 누르면 위 통계가 그 주 기준으로 바뀝니다. '구매/판매'는 그 주에 입력한 아이템 수량 합이에요
+              (산 주와 판 주가 다르면 각각 그 주에 잡힙니다). '현금화 필요'는 판매 실수령 메소에서 현금화한 메소를 뺀 값이에요.
+            </div>
           </div>
 
           {/* 달력 */}

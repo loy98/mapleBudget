@@ -35,18 +35,26 @@ export function cashWonOf(c) {
   return +c.won || 0;
 }
 
-// 한 주(목~수)의 메소 현황: 판매 실수령 / 현금화 / 현금화 필요(판매−현금화)
+// 한 주(목~수)의 거래 현황
+// buyQty/sellQty = 그 주에 구매·판매한 아이템 '개수'(수량 합, 미입력은 1개로 보지 않고 0)
+// sold = 판매 실수령 메소 / cashed = 현금화 메소 / need = 판매−현금화
 export function weeklyMeso(ledger, ws, fee) {
   const we = addDays(ws, 6);
   const ss = fmtD(ws), es = fmtD(we);
-  let sold = 0, cashed = 0;
+  let sold = 0, cashed = 0, buyQty = 0, sellQty = 0;
+  ledger.buys.forEach((b) => {
+    if (b.date >= ss && b.date <= es) buyQty += +b.qty || 0;
+  });
   ledger.sells.forEach((sl) => {
-    if (sl.date >= ss && sl.date <= es) sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+    if (sl.date >= ss && sl.date <= es) {
+      sellQty += +sl.qty || 0;
+      sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+    }
   });
   ledger.cashes.forEach((c) => {
     if (c.date >= ss && c.date <= es) cashed += +c.meso || 0;
   });
-  return { sold, cashed, need: sold - cashed };
+  return { buyQty, sellQty, sold, cashed, need: sold - cashed };
 }
 
 // 최근 13주 주차별 메소 현황
