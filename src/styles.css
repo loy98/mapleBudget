@@ -65,7 +65,7 @@
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px;margin-bottom:16px;box-shadow:var(--shadow)}
   .card h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:9px;letter-spacing:-.2px}
   .card h2 .n{background:var(--accent);color:var(--on-accent);width:23px;height:23px;border-radius:var(--r-sm);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
-  .card .desc{color:var(--sub);font-size:12px;margin:0 0 14px}
+  .card .desc{color:var(--sub);font-size:12.5px;margin:0 0 15px;line-height:1.55}
   .sticky{position:sticky;top:14px}
   label{display:block;font-size:12px;color:var(--sub);margin:12px 0 4px}
   label:first-of-type{margin-top:0}
@@ -83,7 +83,7 @@
   .good{color:var(--good)} .bad{color:var(--bad)}
   .cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
   .box{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}
-  .box .t{font-size:12px;color:var(--sub)}
+  .box .t{font-size:11.5px;color:var(--sub);font-weight:600}
   .box .v{font-size:22px;font-weight:800;margin-top:4px;letter-spacing:-.4px}
   .box.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .tag{font-size:11px;padding:2px 7px;border-radius:10px;background:var(--panel);color:var(--sub)}
@@ -96,7 +96,7 @@
   .row-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
   .del{background:none;border:none;color:var(--bad);cursor:pointer;font-size:16px}
   .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
-  .note{font-size:11.5px;color:var(--hint);margin-top:10px;border-top:1px dashed var(--line);padding-top:10px}
+  .note{font-size:11.7px;color:var(--sub);line-height:1.6;margin-top:14px;padding:10px 13px;background:color-mix(in srgb,var(--sub) 6%,transparent);border-left:2px solid var(--line);border-radius:0 var(--r-sm) var(--r-sm) 0}
   .win{background:var(--accent-faint)}
   .presetbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
   .pblabel{font-size:12px;color:var(--sub);white-space:nowrap}
