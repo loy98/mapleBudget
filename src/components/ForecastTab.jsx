@@ -38,7 +38,7 @@ export default function ForecastTab({ ledger, calc }) {
           {ladder.map((t, i) => {
             const cls = i < curLevel ? "done" : i === curLevel ? "here" : "todo";
             return (
-              <div key={t.name} className={"tier " + cls}>
+              <div key={t.name} className={"tier " + cls} aria-current={cls === "here" ? "step" : undefined}>
                 <span className="mk" />
                 <span className="tn">{t.name}{cls === "here" && <span className="now">현재</span>}</span>
                 <span className="t-amt">{t.amt > 0 ? won(t.amt) : "–"}</span>

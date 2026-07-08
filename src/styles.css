@@ -2,7 +2,7 @@
     /* ===== 다크(기본) — 니어블랙 플랫 + 청록 액센트 ===== */
     --bg:#0a0b0e; --panel:#12151b; --panel2:#171b22; --line:#242a34;
     --txt:#e8ecf1; --sub:#8a92a0; --hint:#6b7789;
-    --accent:#2fd4c4; --accent-hover:#3ee0d0; --accent2:#ffb020;
+    --accent:#2fd4c4; --accent-hover:#3ee0d0; --accent2:#ffb020; --accent-strong:#2fd4c4;
     --good:#4fd18b; --bad:#ff6b6b; --blue:#5aa9ff; --mil:#ff9a3d;
     --on-accent:#04121b; --on-accent2:#2a1c00;
     --sun:#ff7a7a; --sat:#7ab6ff;
@@ -22,7 +22,7 @@
   :root[data-theme="light"]{
     --bg:#f4efe4; --panel:#fbf8f1; --panel2:#eee7d8; --line:#e0d8c6;
     --txt:#2c2a24; --sub:#625947; --hint:#706754;
-    --accent:#e0720c; --accent-hover:#f0831c; --accent2:#c98a00;
+    --accent:#e0720c; --accent-hover:#f0831c; --accent2:#c98a00; --accent-strong:#a85408;
     --good:#0f713e; --bad:#a83232; --blue:#2f77d6; --mil:#8f4500;
     --on-accent:#2a1c00; --on-accent2:#2a1c00;
     --sun:#c94a4a; --sat:#2f6fd0;
@@ -403,11 +403,11 @@ tbody tr{transition:background .12s}
 .tier{display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:12px;padding:9px 0;position:relative}
 .tier + .tier{border-top:1px solid var(--line)}
 .tier .mk{width:11px;height:11px;border-radius:50%;background:var(--panel);border:2px solid var(--line);justify-self:center}
-.tier.done .mk{background:var(--accent);border-color:var(--accent)}
-.tier.here .mk{background:var(--panel);border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-faint)}
+.tier.done .mk{background:var(--accent-strong);border-color:var(--accent-strong)}
+.tier.here .mk{background:var(--panel);border-color:var(--accent-strong);box-shadow:0 0 0 4px var(--accent-faint)}
 .tier .tn{font-size:13px;font-weight:700;display:flex;align-items:center}
 .tier.todo .tn{color:var(--sub);font-weight:600}
-.tier.here .tn{color:var(--accent)}
+.tier.here .tn{color:var(--accent-strong)}
 .tier .t-amt{font-family:var(--font-num);font-size:12.5px;color:var(--sub)}
 .tier.here .t-amt,.tier.done .t-amt{color:var(--txt)}
 .tier.here .t-amt{font-weight:700}
