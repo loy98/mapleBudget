@@ -81,7 +81,7 @@ export default function ForecastTab({ ledger, calc }) {
             </label>
           </div>
         </div>
-        <div className="note" style={{ border: "none", marginTop: 12 }}>
+        <div className="note" style={{ marginTop: 12 }}>
           {fc.immediate > 0
             ? <>지금 바로 <b>{tn}</b> 도달하려면 이번 주 부족분 <b>{won(fc.immediate)}</b> 추가.<br /></>
             : <>현재 이미 <b>{tn}</b> 이상 충족.<br /></>}
