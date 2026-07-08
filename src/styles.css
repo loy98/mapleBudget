@@ -375,7 +375,13 @@ tbody tr{transition:background .12s}
 /* KPI 스탯 박스: best 강조 + 값 정렬 */
 .box{transition:border-color .14s,box-shadow .14s}
 .kpi .box .v,.cmp .box .v{letter-spacing:-.02em}
-.box.best{box-shadow:0 0 0 1px var(--accent) inset, var(--shadow)}
+.box.best{box-shadow:0 0 0 1px var(--accent) inset, var(--shadow);background:color-mix(in srgb,var(--accent) 7%,var(--panel2))}
+/* 아이템 표 가독성: 행 여백·삭제열 정돈 */
+#itemTable td{padding-top:10px;padding-bottom:10px}
+#itemTable td:last-child,#itemTable th:last-child{width:1%;padding-left:2px;padding-right:2px}
+/* 프리셋 칩: 아이템명 강조 + 가격 흐리게 */
+.presetbar .chip{font-weight:600}
+.presetbar .chip .fx{font-weight:500;font-size:11px}
 /* 상단 퀵내비 pill 트랜지션 */
 .navpills a{transition:border-color .12s,color .12s,background .12s}
 .navpills a:hover{background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
