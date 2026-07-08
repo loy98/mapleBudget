@@ -382,6 +382,11 @@ tbody tr{transition:background .12s}
 /* 프리셋 칩: 아이템명 강조 + 가격 흐리게 */
 .presetbar .chip{font-weight:600}
 .presetbar .chip .fx{font-weight:500;font-size:11px}
+/* 손익/비용 라벨(숫자+한글 단위): 한글은 단어 단위로만 줄바꿈(글자 중간 깨짐 방지) */
+.good,.bad,.cost,.mil{word-break:keep-all}
+/* 아이템 표 결과 셀: 넓으면 한 줄, 좁은 화면(모바일)에서만 단어 단위로 줄바꿈 */
+#itemTable td{white-space:nowrap}
+@media(max-width:600px){#itemTable td{white-space:normal}}
 /* 상단 퀵내비 pill 트랜지션 */
 .navpills a{transition:border-color .12s,color .12s,background .12s}
 .navpills a:hover{background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
