@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
 import { WD_MVP, WD_SUN } from "../lib/constants.js";
-import { won, pct, eok, mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, weekStartSun, uid, manW, estGrade } from "../lib/util.js";
+import { won, pct, eok, mlN, mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, weekStartSun, uid, manW, estGrade } from "../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, cashWonOf, mesoWeeks } from "../lib/ledger.js";
-import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, KpiBox, CostLabel, PlLabel, MilUse, Sparkline } from "./ui.jsx";
+import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, StatGroup, CostLabel, PlLabel, Sparkline } from "./ui.jsx";
 import { loadCalMode, saveCalMode } from "../lib/storage.js";
 
 const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
@@ -54,6 +54,15 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const weekly13 = useMemo(
     () => Array.from({ length: 13 }, (_, w) => weeklyAch(ledger, addDays(start13(), w * 7), calc.mileageR)),
     [ledger, calc.mileageR, today]
+  );
+  // 스파크라인 x축 눈금(주 시작일) + 툴팁 제목(목~수 구간). weekly13와 같은 순서·기준.
+  const weekly13Labels = useMemo(
+    () =>
+      Array.from({ length: 13 }, (_, w) => {
+        const ws = addDays(start13(), w * 7);
+        return { short: mmdd(ws), full: mmdd(ws) + "~" + mmdd(addDays(ws, 6)), cur: w === 12 };
+      }),
+    [today]
   );
 
   // 주차 선택 목록 (MVP 주: 목~수, 최근 26주 최신순)
@@ -123,25 +132,39 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
                   </div>
                 </div>
               </div>
-              <Sparkline data={weekly13} mode={chartMode} />
-              <div className="xlab"><span>13주 전</span><span>이번 주</span></div>
+              <Sparkline
+                data={weekly13} labels={weekly13Labels} mode={chartMode} format={won}
+                ariaLabel="최근 13주 주간 과금 추세"
+              />
             </div>
-            <div className="kpi">
-              <KpiBox title="13주 누적 과금 → 추정 등급" best hint={<>추정 등급: <b style={{ color: "var(--accent2)" }}>{estGrade(cum)}</b></>}>{won(cum)}</KpiBox>
-              <KpiBox title="총 과금(실적, MVP)">{won(st.ach)}</KpiBox>
-              <KpiBox title="엠작 구매 실지출"><CostLabel n={st.spend} /></KpiBox>
-            </div>
-            <div className="kpi">
-              <KpiBox title="판매 메소 (실수령)">{eok(st.meso)} <span className="muted u">메소</span></KpiBox>
-              <KpiBox title="현금화한 메소">{eok(st.cashMeso)} <span className="muted u">메소</span></KpiBox>
-              <KpiBox title="현금화 필요 메소 (판매−현금화)" hint={uncashed < 0 ? <>현금화가 판매보다 {eok(-uncashed)} 많음</> : undefined}>
-                {eok(Math.max(0, uncashed))} <span className="muted u">메소</span>
-              </KpiBox>
-            </div>
-            <div className="kpi">
-              <KpiBox title="총 마일리지 소모"><MilUse n={st.mil} /></KpiBox>
-              <KpiBox title="엠작 손익 (현금화−구매)"><PlLabel p={st.profit} /></KpiBox>
-              <KpiBox title="현금화율 (현금화/판매)">{pct(st.ratio * 100)}</KpiBox>
+            <div className="sgrid">
+              <StatGroup
+                icon="📈" title="과금 & 등급" best
+                primary={{ label: "13주 누적 과금", value: won(cum) }}
+                badge={<>추정 등급 <b>{estGrade(cum)}</b></>}
+                items={[
+                  { label: "총 과금 (실적, MVP)", value: won(st.ach) },
+                  { label: "총 마일리지 소모", value: st.mil > 0 ? <span className="mil">{mlN(st.mil)}</span> : "–" },
+                ]}
+              />
+              <StatGroup
+                icon="💸" title="지출 & 손익"
+                primary={{ label: "엠작 손익 (현금화−구매)", value: <PlLabel p={st.profit} /> }}
+                items={[
+                  { label: "엠작 구매 실지출", value: <CostLabel n={st.spend} /> },
+                  { label: "현금화 판매 현금", value: won(st.cashWon) },
+                ]}
+              />
+              <StatGroup
+                icon="💰" title="메소 & 현금화"
+                primary={{ label: "현금화 필요 메소 (판매−현금화)", value: <>{eok(Math.max(0, uncashed))} <span className="muted u">메소</span></> }}
+                items={[
+                  { label: "판매 메소 (실수령)", value: <>{eok(st.meso)} <span className="muted u">메소</span></> },
+                  { label: "현금화한 메소", value: <>{eok(st.cashMeso)} <span className="muted u">메소</span></> },
+                  { label: "현금화율 (현금화/판매)", value: pct(st.ratio * 100) },
+                ]}
+                hint={uncashed < 0 ? <>현금화가 판매보다 {eok(-uncashed)} 많습니다.</> : undefined}
+              />
             </div>
             <div className="note">
               구매 {st.buys}건 · 판매 {st.sells}건 · 현금화 {st.cashes}건 · 기타 캐시사용 {st.spends}건({won(st.extra)}).
