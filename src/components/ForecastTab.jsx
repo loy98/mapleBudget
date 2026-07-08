@@ -22,6 +22,10 @@ export default function ForecastTab({ ledger, calc }) {
   const fc = computeForecast(ledger, calc.mileageR, +tier, timing, includeThis, calc.optPer10k);
   const tn = TIERS[+tier].name;
 
+  // 등급 사다리: 현재 누적(C)이 도달한 레벨 (0=무등급, 1=브론즈, …)
+  const ladder = [{ name: "무등급", amt: 0 }, ...TIERS];
+  const curLevel = TIERS.reduce((acc, t, i) => (C >= t.amt ? i + 1 : acc), 0);
+
   return (
     <div>
       <div className="card">
@@ -30,6 +34,19 @@ export default function ForecastTab({ ledger, calc }) {
           MVP는 최근 13주 누적 넥슨캐시 사용액 기준. 각 등급의 누적 기준과 유지에 필요한 주당 과금입니다.
           현재 누적: <b>{won(C)} · 추정 {estGrade(C)}</b>
         </p>
+        <div className="ladder">
+          {ladder.map((t, i) => {
+            const cls = i < curLevel ? "done" : i === curLevel ? "here" : "todo";
+            return (
+              <div key={t.name} className={"tier " + cls}>
+                <span className="mk" />
+                <span className="tn">{t.name}{cls === "here" && <span className="now">현재</span>}</span>
+                <span className="t-amt">{t.amt > 0 ? won(t.amt) : "–"}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="subhead">등급별 상세 기준</div>
         <table>
           <thead><tr><th>등급</th><th>13주 누적 기준</th><th>주당 필요(유지)</th><th>현재 창 대비 부족</th></tr></thead>
           <tbody>

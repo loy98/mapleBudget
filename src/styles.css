@@ -397,6 +397,21 @@ tbody tr{transition:background .12s}
 .trend-grade b{color:var(--accent2);font-weight:800}
 .spark{width:100%;height:88px;display:block;margin-top:8px}
 .xlab{display:flex;justify-content:space-between;font-size:10.5px;color:var(--hint);margin-top:2px}
+
+/* ===== 리디자인: 등급 사다리 (현재 위치 강조) ===== */
+.ladder{display:flex;flex-direction:column;margin:4px 0 8px;max-width:440px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:6px 16px}
+.tier{display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:12px;padding:9px 0;position:relative}
+.tier + .tier{border-top:1px solid var(--line)}
+.tier .mk{width:11px;height:11px;border-radius:50%;background:var(--panel);border:2px solid var(--line);justify-self:center}
+.tier.done .mk{background:var(--accent);border-color:var(--accent)}
+.tier.here .mk{background:var(--panel);border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-faint)}
+.tier .tn{font-size:13px;font-weight:700;display:flex;align-items:center}
+.tier.todo .tn{color:var(--sub);font-weight:600}
+.tier.here .tn{color:var(--accent)}
+.tier .t-amt{font-family:var(--font-num);font-size:12.5px;color:var(--sub)}
+.tier.here .t-amt,.tier.done .t-amt{color:var(--txt)}
+.tier.here .t-amt{font-weight:700}
+.tier .now{font-size:10px;font-weight:800;color:var(--on-accent);background:var(--accent);padding:2px 7px;border-radius:99px;margin-left:8px}
 /* 상단 퀵내비 pill 트랜지션 */
 .navpills a{transition:border-color .12s,color .12s,background .12s}
 .navpills a:hover{background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
