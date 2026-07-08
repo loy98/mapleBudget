@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { WD_MVP, WD_SUN } from "../lib/constants.js";
 import { won, pct, eok, mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, weekStartSun, uid, manW, estGrade } from "../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, cashWonOf, mesoWeeks } from "../lib/ledger.js";
-import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, KpiBox, CostLabel, PlLabel, MilUse } from "./ui.jsx";
+import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, KpiBox, CostLabel, PlLabel, MilUse, Sparkline } from "./ui.jsx";
 import { loadCalMode, saveCalMode } from "../lib/storage.js";
 
 const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
@@ -49,6 +49,11 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const today = todayStr();
   const mWeeks = useMemo(() => mesoWeeks(ledger, calc.f), [ledger, calc.f, today]);
   const uncashed = st.meso - st.cashMeso;
+  // 최근 13주 주간 과금(실적) 시리즈 — 스파크라인용
+  const weekly13 = useMemo(
+    () => Array.from({ length: 13 }, (_, w) => weeklyAch(ledger, addDays(start13(), w * 7), calc.mileageR)),
+    [ledger, calc.mileageR, today]
+  );
 
   // 주차 선택 목록 (MVP 주: 목~수, 최근 26주 최신순)
   const weekOptions = useMemo(() => {
@@ -102,6 +107,17 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
                 <WeekPicker value={statWeek} weeks={weekOptions} onChange={setStatWeek} />
               )}
               <span className="hint">{periodRange}</span>
+            </div>
+            <div className="trendbox">
+              <div className="trend-top">
+                <div>
+                  <div className="trend-lbl">주간 과금 추세 · 최근 13주</div>
+                  <div className="trend-big">{won(cum)}</div>
+                </div>
+                <div className="trend-grade">누적 추정 <b>{estGrade(cum)}</b></div>
+              </div>
+              <Sparkline data={weekly13} />
+              <div className="xlab"><span>13주 전</span><span>이번 주</span></div>
             </div>
             <div className="kpi">
               <KpiBox title="13주 누적 과금 → 추정 등급" best hint={<>추정 등급: <b style={{ color: "var(--accent2)" }}>{estGrade(cum)}</b></>}>{won(cum)}</KpiBox>

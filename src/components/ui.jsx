@@ -356,6 +356,38 @@ export function ProgressRing({ pct, size = 150, stroke = 14, children }) {
   );
 }
 
+// ===== 스파크라인 (SVG 면적 차트) — 주간 추세 시각화 =====
+export function Sparkline({ data = [], width = 600, height = 88, pad = 6 }) {
+  const vals = data.map((v) => (Number.isFinite(+v) ? +v : 0));
+  if (vals.length < 2) return null;
+  const max = Math.max(...vals), min = Math.min(...vals);
+  const span = max - min || 1;
+  const xy = (i) => {
+    const x = pad + (i * (width - 2 * pad)) / (vals.length - 1);
+    const y = height - pad - ((vals[i] - min) / span) * (height - 2 * pad - 4);
+    return [x, y];
+  };
+  const pts = vals.map((_, i) => xy(i));
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const area = `M${pts[0][0].toFixed(1)} ${height} ` + line.replace(/^M/, "L") + ` L${pts[pts.length - 1][0].toFixed(1)} ${height} Z`;
+  const last = pts[pts.length - 1];
+  const gid = "spk-grad";
+  return (
+    <svg className="spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.24" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      <path d={area} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <circle cx={last[0]} cy={last[1]} r="3.6" fill="var(--accent)" stroke="var(--panel)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
 // 손익/비용 표기 헬퍼 (JSX)
 import { won as wonF, mlN } from "../lib/util.js";
 // 숫자는 모노(.num), 한글 접미는 본문폰트(.u)로 분리 — 모노 컨테이너 안에서도 접미가 mono로 leak되지 않음

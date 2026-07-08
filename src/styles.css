@@ -387,6 +387,16 @@ tbody tr{transition:background .12s}
 /* 아이템 표 결과 셀: 넓으면 한 줄, 좁은 화면(모바일)에서만 단어 단위로 줄바꿈 */
 #itemTable td{white-space:nowrap}
 @media(max-width:600px){#itemTable td{white-space:normal}}
+
+/* ===== 리디자인: 주간 추세 스파크라인 박스 ===== */
+.trendbox{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px 12px;margin:14px 0 6px}
+.trend-top{display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.trend-lbl{font-size:12px;color:var(--sub);font-weight:600}
+.trend-big{font-family:var(--font-num);font-size:26px;font-weight:800;letter-spacing:-.03em;line-height:1.15;margin-top:2px}
+.trend-grade{font-size:12.5px;color:var(--sub);white-space:nowrap}
+.trend-grade b{color:var(--accent2);font-weight:800}
+.spark{width:100%;height:88px;display:block;margin-top:8px}
+.xlab{display:flex;justify-content:space-between;font-size:10.5px;color:var(--hint);margin-top:2px}
 /* 상단 퀵내비 pill 트랜지션 */
 .navpills a{transition:border-color .12s,color .12s,background .12s}
 .navpills a:hover{background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
