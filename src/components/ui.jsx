@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import { fmtD, todayStr, addDays } from "../lib/util.js";
 import { WD_SUN } from "../lib/constants.js";
@@ -336,13 +336,111 @@ export function KpiBox({ title, best, children, hint }) {
   );
 }
 
+// ===== 진행률 링 (SVG) — 목표 대비 진행도 시각화 =====
+export function ProgressRing({ pct, size = 150, stroke = 14, children }) {
+  const p = Math.max(0, Math.min(100, +pct || 0));
+  const r = (size - stroke) / 2;
+  const C = 2 * Math.PI * r;
+  return (
+    <div className="ring-wrap" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--line)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--accent)" strokeWidth={stroke}
+          strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - p / 100)}
+          style={{ transition: "stroke-dashoffset .8s cubic-bezier(.22,1,.36,1)" }}
+        />
+      </svg>
+      <div className="ring-c">{children}</div>
+    </div>
+  );
+}
+
+// ===== 스파크라인 (SVG) — 라인/막대 모드, 컨테이너 실폭 측정으로 1:1 렌더 =====
+// preserveAspectRatio="none" 비균등 스케일이 선 두께 불균일·끝점 타원 왜곡을 유발 → 실폭 측정 viewBox로 1:1 렌더해 해결.
+export function Sparkline({ data = [], height = 88, pad = 6, mode = "line" }) {
+  const wrapRef = useRef(null);
+  const [w, setW] = useState(600);
+  const gid = "spk" + useId().replace(/:/g, ""); // Hook은 조기 반환 이전에 무조건 호출
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const update = () => setW(Math.max(1, Math.round(el.clientWidth || 600)));
+    update();
+    let ro;
+    if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(update); ro.observe(el); }
+    return () => ro && ro.disconnect();
+  }, []);
+
+  const vals = data.map((v) => (Number.isFinite(+v) ? +v : 0));
+  const n = vals.length;
+  const hp = Math.max(0, Math.min(pad, Math.floor(w / 2))); // 초협소 폭 보정(좌표 viewBox 이탈 방지)
+  const innerW = Math.max(1, w - 2 * hp);
+  const innerH = Math.max(1, height - 2 * pad - 4);
+
+  let content = null;
+  if (n >= 2) {
+    if (mode === "bars") {
+      const bmax = Math.max(1, ...vals.map((v) => Math.max(0, v))); // 음수 유입 시 왜곡 방지
+      const step = innerW / n;
+      const gap = Math.min(6, step * 0.35);
+      const bw = Math.max(1, step - gap);
+      content = vals.map((v, i) => {
+        const bh = Math.max(0, (Math.max(0, v) / bmax) * innerH);
+        const x = hp + i * step + gap / 2;
+        const y = height - pad - bh;
+        return (
+          <rect key={i} x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={bh.toFixed(1)}
+            rx="2" fill="var(--accent)" opacity={i === n - 1 ? 1 : 0.45} />
+        );
+      });
+    } else {
+      const max = Math.max(...vals), min = Math.min(...vals);
+      const span = max - min || 1;
+      const xy = (i) => [hp + (i * innerW) / (n - 1), height - pad - ((vals[i] - min) / span) * innerH];
+      const pts = vals.map((_, i) => xy(i));
+      const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+      const area = `M${pts[0][0].toFixed(1)} ${height} ` + line.replace(/^M/, "L") + ` L${pts[n - 1][0].toFixed(1)} ${height} Z`;
+      const last = pts[n - 1];
+      content = (
+        <>
+          <path d={area} fill={`url(#${gid})`} />
+          <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="3.6" fill="var(--accent)" stroke="var(--panel)" strokeWidth="2" />
+        </>
+      );
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="spark-wrap">
+      <svg className="spark" width={w} height={height} viewBox={`0 0 ${w} ${height}`} aria-hidden="true">
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.24" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <line x1={hp} y1={height - pad} x2={w - hp} y2={height - pad} stroke="var(--line)" strokeWidth="1" />
+        {content}
+      </svg>
+    </div>
+  );
+}
+
 // 손익/비용 표기 헬퍼 (JSX)
-import { won as wonF, ml as mlF } from "../lib/util.js";
+import { won as wonF, mlN } from "../lib/util.js";
+// 숫자는 모노(.num), 한글 접미는 본문폰트(.u)로 분리 — 모노 컨테이너 안에서도 접미가 mono로 leak되지 않음
 export const CostLabel = ({ n }) =>
-  n < 0 ? <span className="good">{wonF(-n)} 이득</span> : <span className="cost">{wonF(n)} 지출</span>;
+  n < 0
+    ? <span className="good"><span className="num">{wonF(-n)}</span><span className="u"> 이득</span></span>
+    : <span className="cost"><span className="num">{wonF(n)}</span><span className="u"> 지출</span></span>;
 export const PlLabel = ({ p }) =>
-  p >= 0 ? <span className="good">{wonF(p)} 이득</span> : <span className="bad">{wonF(-p)} 손해</span>;
-export const MilUse = ({ n }) => (n > 0 ? <span className="mil">{mlF(n)} 소모</span> : <>–</>);
+  p >= 0
+    ? <span className="good"><span className="num">{wonF(p)}</span><span className="u"> 이득</span></span>
+    : <span className="bad"><span className="num">{wonF(-p)}</span><span className="u"> 손해</span></span>;
+export const MilUse = ({ n }) =>
+  n > 0 ? <span className="mil"><span className="num">{mlN(n)}</span><span className="u"> 마일리지 소모</span></span> : <>–</>;
 export const IconView = ({ icon }) => {
   if (!icon) return null;
   // http(s) URL만 이미지로. referrerPolicy=no-referrer 로 트래킹 리퍼러 유출 차단, lazy 로딩.

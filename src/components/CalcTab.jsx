@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_ITEMS, DEFAULT_SETTINGS } from "../lib/constants.js";
-import { won, pct, eok, ml } from "../lib/util.js";
-import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView } from "./ui.jsx";
+import { won, pct, eok, ml, mlN } from "../lib/util.js";
+import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
 
 const tierOptions = TIERS.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
 const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
@@ -18,6 +18,20 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   const c = calc;
   const feeBenefit = +settings.mvpGrade >= 1 || settings.pcRoom === "1";
   const basicName = c.giftBest ? "선물식" : "메소마켓";
+
+  // ----- 히어로/방식비교 파생값 -----
+  const goalAmt = +settings.tierAmt || 0;
+  const curAch = +settings.curAchieved || 0;
+  const rawProgPct = c.remain <= 0 ? 100 : goalAmt > 0 ? (curAch / goalAmt) * 100 : 0;
+  const progPct = Math.max(0, Math.min(100, Number.isFinite(rawProgPct) ? rawProgPct : 0));
+  const targetName = (TIERS[+settings.tierSel] || {}).name || "목표";
+  const optName = c.useItem ? "경매장 되팔기" : basicName;
+  const bestBasicVal = Math.min(c.gift, c.market);
+  // 순비용은 음수(이득)일 수 있어 0을 포함한 범위로 정규화 후 0~100 클램프(바 폭 왜곡 방지)
+  const barVals = [c.gift, c.market].filter(Number.isFinite);
+  const barLo = Math.min(0, ...barVals);
+  const barSpan = Math.max(0, ...barVals) - barLo || 1;
+  const barW = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(((v - barLo) / barSpan) * 100))) : 0) + "%";
 
   // ----- 충전 방식 -----
   const setCharge = (i, patch) => setCharges(charges.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -142,11 +156,32 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
 
         {/* ===== 본문 ===== */}
         <div>
-          <div className="hero" id="hero">
-            <div className="hgrid">
-              <div><div className="t">이번 목표를 위한 최적 방식</div><div className="big acc">{c.remain <= 0 ? "목표 달성 완료" : optDisp}</div></div>
-              <div><div className="t">목표까지 총 실비용</div><div className="big">{c.remain <= 0 ? "–" : <CostLabel n={c.optTotal} />}</div></div>
-              <div><div className="t">이번 달 실비용 / 마일리지</div><div className="big">{c.remain <= 0 ? "–" : <><CostLabel n={c.plan.totalCost} /> / <MilUse n={c.plan.milUsed} /></>}</div></div>
+          <div className="hero herox" id="hero">
+            <div className="hx-main">
+              <div className="hx-eyebrow">목표까지 총 실비용 · {optName} 기준</div>
+              <div className="hx-num">
+                {c.remain <= 0 ? "목표 달성 완료 🎉" : <CostLabel n={c.optTotal} />}
+              </div>
+              <div className="hx-sub">
+                현재 누적 <b className="num">{won(curAch)}</b> → 목표 <b className="num">{won(goalAmt)}</b>까지{" "}
+                <b className="num">{won(c.remain)}</b> 남음. 적용 충전 할인 <b>{pct(c.effD * 100)}</b>.
+              </div>
+              <div className="hx-chips">
+                <span className="hx-chip dot">1만원 실적당 <span className="num">{won(c.optPer10k)}</span></span>
+                {c.remain > 0 && (
+                  <span className="hx-chip">이번 달 <CostLabel n={c.plan.totalCost} /></span>
+                )}
+                <span className="hx-chip">회수 후 순비용률 <span className="num">{pct(c.netRate)}</span></span>
+              </div>
+            </div>
+            <div className="hx-ring">
+              <ProgressRing pct={progPct}>
+                <div className="pct">{Math.round(progPct)}%</div>
+                <div className="to">목표 <b>{targetName}</b>까지</div>
+              </ProgressRing>
+              <div className="hx-ringcap">
+                현재 <b>{MVP_GRADES[+settings.mvpGrade] || "무등급"}</b> · 최적 <b>{optName}</b>
+              </div>
             </div>
           </div>
 
@@ -154,16 +189,20 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           <div className="card" id="sec1">
             <h2><span className="n">1</span>기초 엠작 방식 비교</h2>
             <p className="desc">1만원 실적을 쌓는 데 드는 실제 현금 비용(회수 후 순비용). 낮을수록 이득.</p>
-            <div className="cmp">
-              <div className={"box" + (c.giftBest ? " best" : "")}>
-                <div className="t">선물식 {c.giftBest && <span className="tag best">최적</span>}</div>
-                <div className="v num">{won(c.gift)}</div>
-                <div className="hint">1만원 실적당 순현금</div>
+            <div className="mcards">
+              <div className={"mcard" + (c.giftBest ? " best" : "")}>
+                <div className="mc-name">선물식</div>
+                <div className="mc-val num">{won(c.gift)}</div>
+                <div className="mc-sub">1만원 실적당 순현금</div>
+                <div className="mc-bar"><i style={{ width: barW(c.gift) }} /></div>
+                <div className="mc-delta">{c.giftBest ? "기준 · 최저" : <>메소마켓 대비 +{won(c.gift - bestBasicVal)}</>}</div>
               </div>
-              <div className={"box" + (!c.giftBest ? " best" : "")}>
-                <div className="t">메소마켓 {!c.giftBest && <span className="tag best">최적</span>}</div>
-                <div className="v num">{won(c.market)}</div>
-                <div className="hint">1만원 실적당 순현금</div>
+              <div className={"mcard" + (!c.giftBest ? " best" : "")}>
+                <div className="mc-name">메소마켓</div>
+                <div className="mc-val num">{won(c.market)}</div>
+                <div className="mc-sub">1만원 실적당 순현금</div>
+                <div className="mc-bar"><i style={{ width: barW(c.market) }} /></div>
+                <div className="mc-delta">{!c.giftBest ? "기준 · 최저" : <>선물식 대비 +{won(c.market - bestBasicVal)}</>}</div>
               </div>
             </div>
             <div className="note">
@@ -340,9 +379,9 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             <h2><span className="n">5</span>마일리지 수급</h2>
             <p className="desc">이번 엠작 충전으로 쌓이는 마일리지와 3번 아이템 필요 마일리지.</p>
             <div className="kpi">
-              <KpiBox title="월 적립 (≈5%, 한도 반영)"><span className="mil">{ml(c.earnPerMonth)} 적립</span></KpiBox>
+              <KpiBox title="월 적립 (≈5%, 한도 반영)"><span className="mil"><span className="num">{mlN(c.earnPerMonth)}</span><span className="u"> 마일리지 적립</span></span></KpiBox>
               <KpiBox title="3번 마일 아이템 소요(1세트)"><MilUse n={c.milNeed} /></KpiBox>
-              <KpiBox title="월 사용 가능(보유)">{ml(c.milAvail)}</KpiBox>
+              <KpiBox title="월 사용 가능(보유)"><span className="num">{mlN(c.milAvail)}</span><span className="u"> 마일리지</span></KpiBox>
             </div>
             <div className="note">
               {c.remain <= 0 && c.milNeed <= 0 ? "목표·아이템을 입력하면 마일리지 적립/소요가 계산됩니다." : (

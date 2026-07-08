@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { WD_MVP, WD_SUN } from "../lib/constants.js";
 import { won, pct, eok, mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, weekStartSun, uid, manW, estGrade } from "../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, cashWonOf, mesoWeeks } from "../lib/ledger.js";
-import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, KpiBox, CostLabel, PlLabel, MilUse } from "./ui.jsx";
+import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, KpiBox, CostLabel, PlLabel, MilUse, Sparkline } from "./ui.jsx";
 import { loadCalMode, saveCalMode } from "../lib/storage.js";
 
 const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
@@ -10,6 +10,7 @@ const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
 export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const [sub, setSub] = useState("view");
   const [periodMode, setPeriodMode] = useState("w13");
+  const [chartMode, setChartMode] = useState("line"); // 추세 차트: line | bars
   const [statMonth, setStatMonth] = useState(curMonth());
   const [statWeek, setStatWeek] = useState(() => fmtD(weekStartThu(new Date())));
   const [calMode, setCalModeState] = useState(loadCalMode);
@@ -49,6 +50,11 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
   const today = todayStr();
   const mWeeks = useMemo(() => mesoWeeks(ledger, calc.f), [ledger, calc.f, today]);
   const uncashed = st.meso - st.cashMeso;
+  // 최근 13주 주간 과금(실적) 시리즈 — 스파크라인용
+  const weekly13 = useMemo(
+    () => Array.from({ length: 13 }, (_, w) => weeklyAch(ledger, addDays(start13(), w * 7), calc.mileageR)),
+    [ledger, calc.mileageR, today]
+  );
 
   // 주차 선택 목록 (MVP 주: 목~수, 최근 26주 최신순)
   const weekOptions = useMemo(() => {
@@ -103,16 +109,33 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
               )}
               <span className="hint">{periodRange}</span>
             </div>
+            <div className="trendbox">
+              <div className="trend-top">
+                <div>
+                  <div className="trend-lbl">주간 과금 추세 · 최근 13주</div>
+                  <div className="trend-big">{won(cum)}</div>
+                </div>
+                <div className="trend-tools">
+                  <div className="trend-grade">누적 추정 <b>{estGrade(cum)}</b></div>
+                  <div className="chart-toggle" role="group" aria-label="차트 모드">
+                    <button className={chartMode === "line" ? "on" : ""} aria-pressed={chartMode === "line"} onClick={() => setChartMode("line")}>라인</button>
+                    <button className={chartMode === "bars" ? "on" : ""} aria-pressed={chartMode === "bars"} onClick={() => setChartMode("bars")}>막대</button>
+                  </div>
+                </div>
+              </div>
+              <Sparkline data={weekly13} mode={chartMode} />
+              <div className="xlab"><span>13주 전</span><span>이번 주</span></div>
+            </div>
             <div className="kpi">
               <KpiBox title="13주 누적 과금 → 추정 등급" best hint={<>추정 등급: <b style={{ color: "var(--accent2)" }}>{estGrade(cum)}</b></>}>{won(cum)}</KpiBox>
               <KpiBox title="총 과금(실적, MVP)">{won(st.ach)}</KpiBox>
               <KpiBox title="엠작 구매 실지출"><CostLabel n={st.spend} /></KpiBox>
             </div>
             <div className="kpi">
-              <KpiBox title="판매 메소 (실수령)">{eok(st.meso)} <span className="muted">메소</span></KpiBox>
-              <KpiBox title="현금화한 메소">{eok(st.cashMeso)} <span className="muted">메소</span></KpiBox>
+              <KpiBox title="판매 메소 (실수령)">{eok(st.meso)} <span className="muted u">메소</span></KpiBox>
+              <KpiBox title="현금화한 메소">{eok(st.cashMeso)} <span className="muted u">메소</span></KpiBox>
               <KpiBox title="현금화 필요 메소 (판매−현금화)" hint={uncashed < 0 ? <>현금화가 판매보다 {eok(-uncashed)} 많음</> : undefined}>
-                {eok(Math.max(0, uncashed))} <span className="muted">메소</span>
+                {eok(Math.max(0, uncashed))} <span className="muted u">메소</span>
               </KpiBox>
             </div>
             <div className="kpi">
@@ -178,8 +201,8 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
             )}
             <div className="legend">
               <span><i className="sw" style={{ background: "var(--accent2)" }}></i>오늘</span>
-              <span><i className="sw" style={{ background: "linear-gradient(135deg,var(--accent),#37c2b4)" }}></i>과금 있는 날</span>
-              <span><i className="sw" style={{ background: "rgba(47,212,196,.15)", boxShadow: "inset 0 0 0 1.5px var(--accent)" }}></i>선택</span>
+              <span><i className="sw" style={{ background: "var(--accent)" }}></i>과금 있는 날</span>
+              <span><i className="sw" style={{ background: "var(--accent-weak)", boxShadow: "inset 0 0 0 1.5px var(--accent)" }}></i>선택</span>
               <span style={{ color: "var(--accent2)" }}>■ 이번 주 하이라이트</span>
             </div>
             {selectedDate && (
