@@ -359,3 +359,29 @@ footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;co
 .mcard .mc-delta{font-size:11.5px;font-weight:700;margin-top:9px;color:var(--sub)}
 .mcard.best .mc-delta{color:var(--accent)}
 @media(max-width:600px){.mcards{grid-template-columns:1fr}}
+
+/* ===== 리디자인: 폴리시 (테이블·사이드바·KPI 디테일) ===== */
+/* 데이터 테이블: 헤더 구분선 + 행 호버 */
+thead th{border-bottom:1.5px solid var(--line);padding-bottom:8px}
+tbody tr{transition:background .12s}
+#itemTable tbody tr:hover,.mplan tbody tr:hover,.ctable tbody tr:hover{background:var(--hover)}
+/* 사이드바 섹션 라벨에 구분선 */
+.subhead{display:flex;align-items:center;gap:9px;margin:18px 0 8px}
+.subhead::after{content:"";flex:1;height:1px;background:var(--line)}
+/* 프리셋/아이템 칩 호버 */
+.chip{transition:border-color .12s,background .12s,color .12s}
+.chip:hover{background:color-mix(in srgb,var(--accent) 9%,var(--panel2))}
+/* KPI 스탯 박스: best 강조 + 값 정렬 */
+.box{transition:border-color .14s,box-shadow .14s}
+.kpi .box .v,.cmp .box .v{letter-spacing:-.02em}
+.box.best{box-shadow:0 0 0 1px var(--accent) inset, var(--shadow)}
+/* 상단 퀵내비 pill 트랜지션 */
+.navpills a{transition:border-color .12s,color .12s,background .12s}
+.navpills a:hover{background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+/* 숫자 인풋 포커스 시 살짝 더 또렷하게(기존 focus 유지) */
+input:focus,select:focus{background:var(--panel)}
+/* 모션 감소 선호 존중 */
+@media(prefers-reduced-motion:reduce){
+  .ring-wrap circle,.mcard,.box,.chip,.navpills a{transition:none!important}
+  .mcard:hover{transform:none}
+}

@@ -22,12 +22,16 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   // ----- 히어로/방식비교 파생값 -----
   const goalAmt = +settings.tierAmt || 0;
   const curAch = +settings.curAchieved || 0;
-  const progPct = c.remain <= 0 ? 100 : goalAmt > 0 ? Math.min(100, (curAch / goalAmt) * 100) : 0;
+  const rawProgPct = c.remain <= 0 ? 100 : goalAmt > 0 ? (curAch / goalAmt) * 100 : 0;
+  const progPct = Math.max(0, Math.min(100, Number.isFinite(rawProgPct) ? rawProgPct : 0));
   const targetName = (TIERS[+settings.tierSel] || {}).name || "목표";
   const optName = c.useItem ? "경매장 되팔기" : basicName;
-  const maxBasic = Math.max(c.gift, c.market) || 1;
   const bestBasicVal = Math.min(c.gift, c.market);
-  const barW = (v) => Math.round((v / maxBasic) * 100) + "%";
+  // 순비용은 음수(이득)일 수 있어 0을 포함한 범위로 정규화 후 0~100 클램프(바 폭 왜곡 방지)
+  const barVals = [c.gift, c.market].filter(Number.isFinite);
+  const barLo = Math.min(0, ...barVals);
+  const barSpan = Math.max(0, ...barVals) - barLo || 1;
+  const barW = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(((v - barLo) / barSpan) * 100))) : 0) + "%";
 
   // ----- 충전 방식 -----
   const setCharge = (i, patch) => setCharges(charges.map((r, j) => (j === i ? { ...r, ...patch } : r)));
