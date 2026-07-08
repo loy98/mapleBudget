@@ -374,19 +374,20 @@ export function Sparkline({ data = [], height = 88, pad = 6, mode = "line" }) {
 
   const vals = data.map((v) => (Number.isFinite(+v) ? +v : 0));
   const n = vals.length;
-  const innerW = Math.max(1, w - 2 * pad);
+  const hp = Math.max(0, Math.min(pad, Math.floor(w / 2))); // 초협소 폭 보정(좌표 viewBox 이탈 방지)
+  const innerW = Math.max(1, w - 2 * hp);
   const innerH = Math.max(1, height - 2 * pad - 4);
 
   let content = null;
   if (n >= 2) {
     if (mode === "bars") {
-      const bmax = Math.max(...vals) || 1;
+      const bmax = Math.max(1, ...vals.map((v) => Math.max(0, v))); // 음수 유입 시 왜곡 방지
       const step = innerW / n;
       const gap = Math.min(6, step * 0.35);
       const bw = Math.max(1, step - gap);
       content = vals.map((v, i) => {
-        const bh = Math.max(0, (v / bmax) * innerH);
-        const x = pad + i * step + gap / 2;
+        const bh = Math.max(0, (Math.max(0, v) / bmax) * innerH);
+        const x = hp + i * step + gap / 2;
         const y = height - pad - bh;
         return (
           <rect key={i} x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={bh.toFixed(1)}
@@ -396,7 +397,7 @@ export function Sparkline({ data = [], height = 88, pad = 6, mode = "line" }) {
     } else {
       const max = Math.max(...vals), min = Math.min(...vals);
       const span = max - min || 1;
-      const xy = (i) => [pad + (i * innerW) / (n - 1), height - pad - ((vals[i] - min) / span) * innerH];
+      const xy = (i) => [hp + (i * innerW) / (n - 1), height - pad - ((vals[i] - min) / span) * innerH];
       const pts = vals.map((_, i) => xy(i));
       const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
       const area = `M${pts[0][0].toFixed(1)} ${height} ` + line.replace(/^M/, "L") + ` L${pts[n - 1][0].toFixed(1)} ${height} Z`;
@@ -420,7 +421,7 @@ export function Sparkline({ data = [], height = 88, pad = 6, mode = "line" }) {
             <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <line x1={pad} y1={height - pad} x2={w - pad} y2={height - pad} stroke="var(--line)" strokeWidth="1" />
+        <line x1={hp} y1={height - pad} x2={w - hp} y2={height - pad} stroke="var(--line)" strokeWidth="1" />
         {content}
       </svg>
     </div>
