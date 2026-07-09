@@ -4,7 +4,7 @@ import {
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
   getDataOwner, setDataOwner,
 } from "./storage.js";
-import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig } from "./cloud.js";
+import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { CHARGE_METHODS, DEFAULT_RULES, resolveRules } from "./constants.js";
 
 // app_config에서 settings로 반영하는 시세 스칼라 키(기본값 적용·force가 공유 → 새 키 추가 시 한 곳만 수정).
@@ -156,13 +156,13 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const localUsable = !owner || owner === userId;
         const local = localUsable ? localSnapshot() : EMPTY_SNAPSHOT;
         // 거래 없이 설정/아이템만 바꾼 게스트도 보호: 사용자 직접 편집 여부를 병합 판정에 전달(P1-4).
-        // tombstone TTL 정리 기준 시각은 서버가 채운 updated_at 을 쓴다(클라이언트 시계가 미래로
-        // 틀어져 있으면 정상 표식이 조기 만료되어 삭제된 거래가 부활한다).
-        // updated_at 은 항상 실제 현재보다 과거라 만료를 '덜' 하는 안전한 방향이다.
-        const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+        // tombstone 만료 기준은 서버 updated_at, 미래 clamp 상한은 max(서버, 내 시계).
+        // 둘을 겸용하면 오래 접속하지 않은 유저의 새 표식이 과거로 되감겨 조기 만료된다.
+        const clock = tombstoneClock(cloud);
         const { snapshot, conflict } = mergeSnapshots(local, cloud, {
           localTouched: localUsable && isUserTouched(),
-          now: isFinite(serverNow) ? serverNow : null,
+          now: clock.now,
+          ceiling: clock.ceiling,
         });
         let finalSnap = snapshot;
         if (conflict && firstLogin) {

@@ -99,18 +99,28 @@ const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 // **로컬 로드에서는 정리하지 않는다.** 기기 시계가 미래로 틀어져 있으면 cutoff 가 함께 밀려
 // 정상 tombstone 이 조기 만료로 사라지고, 그 기기가 stale 원장을 올리면 삭제된 항목이 부활한다.
 // 정리는 클라우드 병합 때만, 서버가 채운 updated_at(신뢰 가능한 시각) 기준으로 한다.
-export function normalizeDeleted(d, now = null) {
+// 두 시각은 성격이 다르므로 분리한다. 하나로 겸용하면 아래 버그가 난다.
+//
+//  now(만료 기준)   — 이 시각보다 TTL 이상 오래된 표식을 버린다. **보수적이어야 한다**(적게 만료).
+//                     클라이언트 시계를 믿지 않고 서버가 채운 updated_at 을 쓴다.
+//  ceiling(상한)    — 이보다 미래인 표식은 여기로 끌어내린다. **'정상적인 지금'이어야 한다.**
+//                     max(서버 시각, 내 시계). 조작된 백업의 100년 뒤 표식이 영원히 남는 것을 막는다.
+//
+// 겸용하면: 오래 접속하지 않은 유저(updated_at 이 2년 전)가 오늘 지운 표식이 2년 전으로 되감기고,
+// 업로드 후 updated_at 이 현재가 되면 다음 병합에서 TTL 초과로 조기 만료 → 다른 기기가 부활시킨다.
+//
+// now = null 이면 만료 정리를 하지 않는다(로컬 로드. 기기 시계가 틀어져도 표식이 사라지지 않게).
+export function normalizeDeleted(d, now = null, ceiling = now) {
   const out = {};
   if (!d || typeof d !== "object" || Array.isArray(d)) return out;
   const prune = typeof now === "number" && isFinite(now);
+  const clamp = typeof ceiling === "number" && isFinite(ceiling);
   const cutoff = prune ? now - TOMBSTONE_TTL_DAYS * 86400000 : -Infinity;
   Object.keys(d).forEach((id) => {
     if (!id || UNSAFE_KEYS.has(id) || !hasOwn(d, id)) return;
     let t = Number(d[id]);
     if (!isFinite(t) || t <= 0) return; // malformed
-    // 미래 시각은 clamp. 조작된 백업이나 시계가 틀어진 기기가 '영원히 만료되지 않는' 표식을
-    // 심어 다른 기기의 정상 거래를 계속 지우는 것을 막는다(mergeDeleted 가 max 를 취하므로 위험).
-    if (prune && t > now) t = now;
+    if (clamp && t > ceiling) t = ceiling;
     if (t < cutoff) return; // TTL 만료
     out[id] = t;
   });
@@ -119,9 +129,9 @@ export function normalizeDeleted(d, now = null) {
 
 // 두 tombstone 집합의 합집합. 같은 id 면 더 '늦은' 삭제 시각을 남긴다 —
 // tombstone 은 오래 살아야 안전하다(일찍 만료되면 그 항목을 아직 든 기기가 되살린다).
-export function mergeDeleted(a, b, now = null) {
-  const out = normalizeDeleted(a, now);
-  const bb = normalizeDeleted(b, now);
+export function mergeDeleted(a, b, now = null, ceiling = now) {
+  const out = normalizeDeleted(a, now, ceiling);
+  const bb = normalizeDeleted(b, now, ceiling);
   Object.keys(bb).forEach((id) => {
     out[id] = hasOwn(out, id) ? Math.max(out[id], bb[id]) : bb[id];
   });
@@ -134,9 +144,9 @@ export const isDeleted = (deleted, id) => !!id && hasOwn(deleted, id);
 // id 가 "__proto__" 인 행은 삭제해도 표식이 기록되지 않아(UNSAFE_KEYS 차단) 다른 기기에서 부활한다.
 const safeRowId = (id) => typeof id === "string" && !!id && !UNSAFE_KEYS.has(id);
 
-export function normalizeLedger(d, now = null) {
+export function normalizeLedger(d, now = null, ceiling = now) {
   const src = d && typeof d === "object" && !Array.isArray(d) ? d : {};
-  const led = { deleted: normalizeDeleted(src.deleted, now) };
+  const led = { deleted: normalizeDeleted(src.deleted, now, ceiling) };
   LEDGER_BUCKETS.forEach((k) => {
     // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
     const rows = asArray(src[k]).filter((x) => x && typeof x === "object");
@@ -284,7 +294,8 @@ export function importAll(text) {
   // 원장은 검증·정규화해서 쓴다. 파일의 tombstone 은 그대로 클라우드로 전파되어 거래를 지우므로
   // (그게 삭제 전파의 정상 동작이다) 최소한 malformed·미래 시각·만료 표식은 걸러내야 한다.
   // now 를 넘겨 미래 시각을 clamp: 조작된 백업이 '영원히 만료되지 않는' 표식으로 남의 거래를 계속 지우는 것을 막는다.
-  if (data.ledger) writeJSON(LKEY, normalizeLedger(data.ledger, Date.now()));
+  // 가져오기는 서버와 무관하므로 만료 기준·clamp 상한이 모두 '지금'이다.
+  if (data.ledger) { const t = Date.now(); writeJSON(LKEY, normalizeLedger(data.ledger, t, t)); }
   if (data.calMode) saveCalMode(data.calMode);
   return { ok: true };
 }

@@ -4,7 +4,7 @@ import {
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
-import { mergeSnapshots, mergeLedger, mergeForUpload } from "./cloud.js";
+import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
 import { computeForecast } from "./ledger.js";
@@ -781,5 +781,51 @@ describe("업로드 충돌 병합 — 개수는 같지만 내용이 다른 경�
     const shape = (l) => ["buys", "sells", "cashes", "spends"].map((k) => l[k].length).join(",");
     expect(shape(merged.ledger)).toBe(shape(local.ledger)); // 개수 비교로는 구분 불가함을 명시
     expect(merged.ledger.buys[0].id).not.toBe(local.ledger.buys[0].id);
+  });
+});
+
+// Codex E: 만료 기준(서버 updated_at)과 미래 clamp 상한을 한 값으로 겸용하면,
+// 오래 접속하지 않은 유저가 오늘 지운 표식이 과거로 되감겨 다음 병합에서 조기 만료된다.
+describe("tombstone 시계 — 만료 기준과 clamp 상한의 분리", () => {
+  const iso = (ms) => new Date(ms).toISOString();
+  const NOW = T0;
+  const TWO_YEARS = 2 * 365 * 86400000;
+
+  it("tombstoneClock: 만료는 서버 시각, 상한은 max(서버, 내 시계)", () => {
+    const cloud = { updated_at: iso(NOW - TWO_YEARS) };
+    const c = tombstoneClock(cloud, NOW);
+    expect(c.now).toBe(NOW - TWO_YEARS); // 만료 기준은 보수적(적게 만료)
+    expect(c.ceiling).toBe(NOW);         // 상한은 '정상적인 지금'
+  });
+
+  it("2년 만에 접속한 유저가 방금 지운 표식이 과거로 되감기지 않는다", () => {
+    const cloud = { ledger: LED([{ id: "x" }]), updated_at: iso(NOW - TWO_YEARS) };
+    // 오늘 x 를 지움
+    const local = { calc: {}, my_items: [], ledger: deleteLedgerEntry(LED([{ id: "x" }]), "buys", "x", NOW) };
+
+    const merged = mergeForUpload(local, cloud, NOW);
+    expect(merged.ledger.buys).toEqual([]);
+    // 겸용 시절엔 여기서 x 의 시각이 2년 전으로 clamp 되어, 다음 병합(서버 시각=현재)에서
+    // TTL(1년) 초과로 조기 만료 → 항목을 아직 든 기기가 부활시켰다.
+    expect(merged.ledger.deleted.x).toBe(NOW);
+
+    // 다음 병합(업로드 후 updated_at 이 현재가 됨)에서도 표식이 살아남는다
+    const cloud2 = { ledger: merged.ledger, updated_at: iso(NOW) };
+    const other = { calc: {}, my_items: [], ledger: LED([{ id: "x" }]) }; // x 를 아직 든 기기
+    const merged2 = mergeForUpload(other, cloud2, NOW);
+    expect(merged2.ledger.buys).toEqual([]); // 부활하지 않는다
+  });
+
+  it("조작된 백업의 100년 뒤 표식은 내 시계 기준으로 clamp 된다", () => {
+    const far = NOW + 100 * 365 * 86400000;
+    const cloud = { ledger: LED([], { evil: far }), updated_at: iso(NOW) };
+    const local = { calc: {}, my_items: [], ledger: LED([]) };
+    expect(mergeForUpload(local, cloud, NOW).ledger.deleted.evil).toBe(NOW);
+  });
+
+  it("서버 행이 없으면 만료 정리를 하지 않는다 (첫 업로드)", () => {
+    const stale = NOW - (TOMBSTONE_TTL_DAYS + 1) * 86400000;
+    const local = { calc: {}, my_items: [], ledger: LED([], { old: stale }) };
+    expect(mergeForUpload(local, null, NOW).ledger.deleted).toEqual({ old: stale });
   });
 });

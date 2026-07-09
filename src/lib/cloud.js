@@ -122,13 +122,23 @@ export async function writeUserData(userId, snap, expectedUpdatedAt) {
 // 업로드 충돌 시의 병합 규칙.
 // calc/my_items = 지금 이 탭의 값이 이긴다(사용자가 방금 편집한 것). 설정은 last-writer-wins 로 충분하다.
 // ledger = 합집합 + tombstone 차감. 거래는 손실도 부활도 없어야 하므로 여기서만 진짜 병합이 필요하다.
-export function mergeForUpload(localSnap, cloud) {
-  const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+export function mergeForUpload(localSnap, cloud, clientNow = Date.now()) {
+  const t = tombstoneClock(cloud, clientNow);
   return {
     calc: localSnap.calc,
     my_items: localSnap.my_items,
-    ledger: mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, isFinite(serverNow) ? serverNow : null),
+    ledger: mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, t.now, t.ceiling),
   };
+}
+
+// tombstone 시각 파라미터를 한 곳에서 만든다(만료 기준과 clamp 상한을 혼동하지 않도록).
+//  now     = 서버 updated_at (없으면 null → 만료 정리 안 함)
+//  ceiling = max(서버 시각, 내 시계) — 방금 만든 로컬 표식이 과거로 되감기지 않게.
+export function tombstoneClock(cloud, clientNow = Date.now()) {
+  const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+  const now = isFinite(serverNow) ? serverNow : null;
+  const ceiling = Math.max(isFinite(serverNow) ? serverNow : -Infinity, clientNow);
+  return { now, ceiling: isFinite(ceiling) ? ceiling : null };
 }
 
 // ===== 병합 (최초 로그인 시 로컬 ↔ 클라우드) =====
@@ -139,7 +149,7 @@ export function mergeForUpload(localSnap, cloud) {
 // opts.localTouched: 이 기기에서 사용자가 계산기/아이템을 직접 편집했는지(거래 없이 설정만 바꾼 경우 포착 — P1-4).
 export function mergeSnapshots(local, cloud, opts = {}) {
   if (!cloud) return { snapshot: local, conflict: false };
-  const ledger = mergeLedger(local.ledger, cloud.ledger, opts.now);
+  const ledger = mergeLedger(local.ledger, cloud.ledger, opts.now, opts.ceiling);
   const cloudHasItems = !!(cloud.my_items && cloud.my_items.length);
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
   const my_items = cloudHasItems ? cloud.my_items : local.my_items;
@@ -156,13 +166,13 @@ export function mergeSnapshots(local, cloud, opts = {}) {
 // 합집합만으로는 '삭제'를 표현할 수 없어, 삭제된 항목을 아직 가진 기기가 접속하면 부활시켰다.
 // (단일 기기에서도: 삭제 후 디바운스 안에 탭을 닫으면 로컬엔 없고 클라우드엔 있는 상태가 된다.)
 // 이제 양쪽 tombstone 을 먼저 합치고, 그 id 는 어느 쪽 버킷에 있든 결과에서 제거한다.
-// now: TTL 정리 기준 시각. 호출측이 서버의 updated_at 을 넘긴다(클라이언트 시계를 믿지 않는다).
-// null 이면 정리하지 않고 합치기만 한다.
-export function mergeLedger(a = {}, b = {}, now = null) {
+// now     : TTL 만료 기준(서버 updated_at). null 이면 만료 정리를 하지 않는다.
+// ceiling : 미래 시각 clamp 상한('정상적인 지금'). 기본은 now 지만 호출측이 max(서버, 로컬)을 넘긴다.
+export function mergeLedger(a = {}, b = {}, now = null, ceiling = now) {
   const out = {};
   // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
   const arr = (v) => (Array.isArray(v) ? v : []);
-  const deleted = mergeDeleted(a && a.deleted, b && b.deleted, now);
+  const deleted = mergeDeleted(a && a.deleted, b && b.deleted, now, ceiling);
   LEDGER_BUCKETS.forEach((k) => {
     const map = new Map();
     arr(a[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
