@@ -118,7 +118,9 @@ export function mergeSnapshots(local, cloud, opts = {}) {
 // 합집합만으로는 '삭제'를 표현할 수 없어, 삭제된 항목을 아직 가진 기기가 접속하면 부활시켰다.
 // (단일 기기에서도: 삭제 후 디바운스 안에 탭을 닫으면 로컬엔 없고 클라우드엔 있는 상태가 된다.)
 // 이제 양쪽 tombstone 을 먼저 합치고, 그 id 는 어느 쪽 버킷에 있든 결과에서 제거한다.
-export function mergeLedger(a = {}, b = {}, now = Date.now()) {
+// now: TTL 정리 기준 시각. 호출측이 서버의 updated_at 을 넘긴다(클라이언트 시계를 믿지 않는다).
+// null 이면 정리하지 않고 합치기만 한다.
+export function mergeLedger(a = {}, b = {}, now = null) {
   const out = {};
   // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
   const arr = (v) => (Array.isArray(v) ? v : []);

@@ -151,7 +151,14 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const localUsable = !owner || owner === userId;
         const local = localUsable ? localSnapshot() : EMPTY_SNAPSHOT;
         // 거래 없이 설정/아이템만 바꾼 게스트도 보호: 사용자 직접 편집 여부를 병합 판정에 전달(P1-4).
-        const { snapshot, conflict } = mergeSnapshots(local, cloud, { localTouched: localUsable && isUserTouched() });
+        // tombstone TTL 정리 기준 시각은 서버가 채운 updated_at 을 쓴다(클라이언트 시계가 미래로
+        // 틀어져 있으면 정상 표식이 조기 만료되어 삭제된 거래가 부활한다).
+        // updated_at 은 항상 실제 현재보다 과거라 만료를 '덜' 하는 안전한 방향이다.
+        const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+        const { snapshot, conflict } = mergeSnapshots(local, cloud, {
+          localTouched: localUsable && isUserTouched(),
+          now: isFinite(serverNow) ? serverNow : null,
+        });
         let finalSnap = snapshot;
         if (conflict && firstLogin) {
           // 네이티브 confirm 대신 App이 렌더하는 테마 모달로 선택을 받는다(테스트 가능·UI 일관성).

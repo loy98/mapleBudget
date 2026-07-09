@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
-  getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted,
+  getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger } from "./cloud.js";
@@ -602,8 +602,9 @@ describe("tombstone — 삭제 전파", () => {
   });
 
   it("같은 id 의 표식이 양쪽에 있으면 더 늦은 시각을 남긴다 (오래 살아야 안전)", () => {
-    const merged = mergeDeleted({ x: T0 }, { x: T0 + 5000 }, T0);
-    expect(merged.x).toBe(T0 + 5000);
+    // 두 값 모두 now 이하여야 clamp 에 걸리지 않는다(미래 시각 방어는 아래 별도 테스트).
+    expect(mergeDeleted({ x: T0 - 5000 }, { x: T0 }, T0).x).toBe(T0);
+    expect(mergeDeleted({ x: T0 }, { x: T0 - 5000 }, T0).x).toBe(T0);
   });
 
   it("normalizeLedger: 로컬에 표식과 항목이 동시에 있으면 삭제를 존중한다", () => {
@@ -641,5 +642,75 @@ describe("tombstone — 삭제 전파", () => {
     const EMPTY = { buys: [], sells: [], cashes: [], spends: [], deleted: {} };
     const cloudMine = LED([{ id: "mine" }]);
     expect(mergeLedger(EMPTY, cloudMine, T0).buys.map((b) => b.id)).toEqual(["mine"]);
+  });
+});
+
+// Codex 재검수 반영: 시계 오차·미래 시각·안전하지 않은 id·가져오기 검증
+describe("tombstone — 신뢰할 수 없는 시각/키 방어", () => {
+  it("로컬 로드는 TTL 정리를 하지 않는다 (기기 시계가 미래여도 표식이 살아남는다)", () => {
+    const led = LED([], { x: T0 });
+    // now 미지정 = 정리 안 함
+    expect(normalizeLedger(led).deleted).toEqual({ x: T0 });
+    // 시계가 2년 미래로 틀어진 기기가 로드해도 표식 유지
+    expect(normalizeLedger(led).deleted.x).toBe(T0);
+    // 반면 서버 시각을 명시하면 TTL 적용
+    const future = T0 + (TOMBSTONE_TTL_DAYS + 1) * 86400000;
+    expect(normalizeLedger(led, future).deleted).toEqual({});
+  });
+
+  it("미래 시각 표식은 현재로 clamp 된다 (영원히 만료되지 않는 표식 방지)", () => {
+    const far = T0 + 100 * 365 * 86400000; // 100년 뒤
+    expect(normalizeLedger(LED([], { x: far }), T0).deleted).toEqual({ x: T0 });
+    // clamp 없으면 mergeDeleted 의 max 때문에 영구히 남아 남의 거래를 계속 지운다
+    expect(mergeDeleted({ x: far }, { x: T0 }, T0).x).toBe(T0);
+  });
+
+  it("병합은 서버 시각(updated_at) 기준으로 정리한다", () => {
+    const stale = T0 - (TOMBSTONE_TTL_DAYS + 1) * 86400000;
+    const merged = mergeLedger(LED([], { old: stale, keep: T0 - 1000 }), LED([]), T0);
+    expect(merged.deleted).toEqual({ keep: T0 - 1000 });
+    // now=null 이면 정리하지 않는다
+    expect(Object.keys(mergeLedger(LED([], { old: stale }), LED([]), null).deleted)).toEqual(["old"]);
+  });
+
+  it("안전하지 않은 행 id 는 새 id 로 교체된다 (표식을 남길 수 있어야 삭제가 전파된다)", () => {
+    const led = JSON.parse('{"buys":[{"id":"__proto__"},{"id":"constructor"},{"id":123},{"id":""}],"sells":[],"cashes":[],"spends":[]}');
+    const n = normalizeLedger(led);
+    const ids = n.buys.map((b) => b.id);
+    expect(ids).toHaveLength(4);
+    ids.forEach((id) => {
+      expect(typeof id).toBe("string");
+      expect(["__proto__", "constructor", "prototype", ""]).not.toContain(id);
+    });
+    // 교체된 id 로 삭제하면 표식이 정상 기록된다
+    const del = deleteLedgerEntry(n, "buys", ids[0], T0);
+    expect(del.deleted[ids[0]]).toBe(T0);
+    expect(del.buys).toHaveLength(3);
+  });
+
+  it("표식을 남길 수 없는 id 로는 삭제하지 않는다 (조용한 부활 방지)", () => {
+    const led = LED([{ id: "ok" }]);
+    expect(deleteLedgerEntry(led, "buys", "__proto__", T0)).toBe(led); // 무변경
+    expect(deleteLedgerEntry(led, "buys", "", T0)).toBe(led);
+  });
+
+  it("가져오기는 원장을 정규화해 쓴다 (조작된 백업의 미래 표식 차단)", () => {
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+    const far = Date.now() + 100 * 365 * 86400000;
+    const backup = JSON.stringify({
+      app: "mvp-calculator",
+      ledger: { buys: [{ id: "keep" }, "쓰레기", null], sells: {}, deleted: { evil: far, bad: "abc" } },
+    });
+    expect(importAll(backup).ok).toBe(true);
+    const written = JSON.parse(store.get(LKEY));
+    expect(written.buys.map((b) => b.id)).toEqual(["keep"]); // malformed 원소 제거
+    expect(written.sells).toEqual([]);                        // 배열 아닌 버킷 강등
+    expect(written.deleted.bad).toBeUndefined();              // malformed 시각 제거
+    expect(written.deleted.evil).toBeLessThanOrEqual(Date.now()); // 미래 시각 clamp
   });
 });
