@@ -503,3 +503,40 @@ describe("데이터 소유자 게이트", () => {
     expect(snapshot.ledger.buys.map((x) => x.id).sort()).toEqual(["a1", "a2"]);
   });
 });
+
+describe("resolveRules — Codex 재검수 반영", () => {
+  it("동일 금액의 인접 등급은 거부한다 (앞 등급이 도달 불가능한 죽은 등급이 됨)", () => {
+    const dup = [{ name: "브론즈", amt: 150000 }, { name: "실버", amt: 150000 }];
+    expect(resolveRules({ tiers: dup }).tiers).toBe(DEFAULT_RULES.tiers);
+    // 실제로 죽는지 확인: estGrade 는 마지막 통과 등급을 고르므로 브론즈는 절대 안 나온다.
+    expect(estGrade(150000, dup)).toBe("실버");
+  });
+  it("-0 은 거부한다", () => {
+    const r = resolveRules({ feeMvp: -0, mileageAccrual: -0 });
+    expect(r.feeMvp).toBe(DEFAULT_RULES.feeMvp);
+    expect(r.mileageAccrual).toBe(DEFAULT_RULES.mileageAccrual);
+  });
+  it("등급 기준액 0 은 거부한다 (무등급과 구분 불가)", () => {
+    expect(resolveRules({ tiers: [{ name: "영", amt: 0 }, { name: "일", amt: 1 }] }).tiers)
+      .toBe(DEFAULT_RULES.tiers);
+  });
+  it("엄격히 증가하는 tiers 는 통과", () => {
+    const t = [{ name: "a", amt: 1 }, { name: "b", amt: 2 }];
+    expect(resolveRules({ tiers: t }).tiers).toEqual(t);
+  });
+  it("schema.sql 시드의 rules 가 검증을 통과한다", () => {
+    // 시드가 거부되면 DB 설정이 조용히 무시되고 폴백만 쓰인다.
+    const seed = {
+      feeMvp: 3, feeBase: 5, mileageAccrual: 0.05,
+      tiers: [
+        { name: "브론즈", amt: 150000 }, { name: "실버", amt: 300000 }, { name: "골드", amt: 600000 },
+        { name: "다이아", amt: 900000 }, { name: "레드", amt: 1500000 }, { name: "블랙", amt: 3000000 },
+      ],
+    };
+    const r = resolveRules(seed);
+    expect(r.feeMvp).toBe(3);
+    expect(r.feeBase).toBe(5);
+    expect(r.mileageAccrual).toBe(0.05);
+    expect(r.tiers).toEqual(seed.tiers);
+  });
+});

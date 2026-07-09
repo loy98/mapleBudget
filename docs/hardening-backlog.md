@@ -156,6 +156,17 @@ UTC-8 사용자가 수요일 오후에 열면 KST로는 이미 새 주. 앱 내�
 같은 거래에 다른 id를 만들고, 합집합 병합이 둘 다 보존 → 통계·13주 누적이 2배.
 → 레거시 행은 결정적 id(버킷+날짜+아이템+금액 해시)로 유도.
 
+### B-9. feedback rate limit 의 IP 버킷은 best-effort — MEDIUM
+익명 요청의 IP 는 `request.headers` 의 `cf-connecting-ip`/`x-forwarded-for` 에서 읽는다.
+XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 읽도록 고쳤지만,
+**Supabase 앞단이 실제로 이 헤더를 어떻게 정규화하는지는 프로덕션에 요청을 보내지 않고는 확인할 수 없다.**
+정규화가 없다면 공격자가 요청마다 다른 XFF 를 보내 IP 버킷을 우회할 수 있다.
+→ 그래서 위조 불가능한 **전역 익명 버킷**(`anon:__all__`, 100건/10분)을 백스톱으로 뒀다.
+   우회해도 익명 전체 유입량은 이 상한에 묶인다. 대신 공격자가 상한을 소진시키면
+   익명 피드백이 일시 차단된다(로그인 유저는 `auth.uid()` 버킷이라 영향 없음).
+**제대로 된 해법**: Turnstile/CAPTCHA + 서버측에서 IP 를 확정하는 Edge Function 경유 INSERT.
+배포 후 `feedback_throttle` 의 `anon:__all__` 카운터를 관찰해 상한을 조정할 것.
+
 ### B-8. 그 외 (LOW~MEDIUM)
 - `visibilitychange` 플러시가 평범한 `fetch` — 탭 종료 시 취소된다. `sendBeacon`/`keepalive` 필요.
 - `writeJSON` 이 `QuotaExceededError` 를 조용히 삼킴 → 게스트는 저장이 no-op 인 줄 모른다.

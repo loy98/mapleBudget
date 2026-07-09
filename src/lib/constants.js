@@ -52,7 +52,8 @@ export const DEFAULT_RULES = {
 
 // DB에서 온 rules 는 신뢰하지 않는다. 항목별로 검증해 통과한 것만 기본값 위에 얹는다.
 // (하나라도 malformed 면 그 키만 버리고 나머지는 적용 — 전체를 버리면 DB 수정의 의미가 없다)
-const posNum = (v, max) => typeof v === "number" && isFinite(v) && v >= 0 && v <= max;
+// -0 도 거부한다(`-0 >= 0` 은 true). 수수료·등급 금액에 음의 0이 들어가면 표시·계산이 이상해진다.
+const posNum = (v, max) => typeof v === "number" && isFinite(v) && !Object.is(v, -0) && v >= 0 && v <= max;
 export function resolveRules(cfgRules) {
   const r = { ...DEFAULT_RULES };
   if (!cfgRules || typeof cfgRules !== "object" || Array.isArray(cfgRules)) return r;
@@ -60,9 +61,11 @@ export function resolveRules(cfgRules) {
   if (posNum(cfgRules.feeBase, 100)) r.feeBase = cfgRules.feeBase;
   if (posNum(cfgRules.mileageAccrual, 1)) r.mileageAccrual = cfgRules.mileageAccrual;
   if (Array.isArray(cfgRules.tiers) && cfgRules.tiers.length) {
-    const t = cfgRules.tiers.filter((x) => x && typeof x.name === "string" && posNum(x.amt, 1e12));
-    // estGrade 는 오름차순 순회로 마지막 통과 등급을 고른다 → 정렬이 깨지면 등급이 틀린다.
-    const ascending = t.every((x, i) => i === 0 || t[i - 1].amt <= x.amt);
+    // 등급 기준액은 0보다 커야 한다(0이면 무등급과 구분되지 않는다).
+    const t = cfgRules.tiers.filter((x) => x && typeof x.name === "string" && posNum(x.amt, 1e12) && x.amt > 0);
+    // estGrade 는 오름차순 순회로 '마지막 통과 등급'을 고른다.
+    // 인접 등급 금액이 같으면 앞 등급은 어떤 값으로도 도달할 수 없는 죽은 등급이 되므로 엄격한 증가를 요구한다.
+    const ascending = t.every((x, i) => i === 0 || t[i - 1].amt < x.amt);
     if (t.length === cfgRules.tiers.length && ascending) r.tiers = t;
   }
   return r;

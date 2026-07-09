@@ -223,7 +223,10 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       } while (dirtyRef.current);
       // 실제로 이 uid 업로드가 완료된 경우에만 성공 처리 — 중단(계정 전환)된 업로드를 성공으로 오인하지 않는다.
       if (!aborted) {
-        retryAtRef.current = 0; // 성공 → 백오프 초기화
+        // 성공 → 백오프 초기화 + 예약된 재시도 취소.
+        // (취소하지 않으면 이미 clean 한 상태에서 타이머가 울려 불필요한 중복 업로드가 한 번 더 돈다.)
+        retryAtRef.current = 0;
+        clearTimeout(retryTimer.current);
         if (pendingCloudSyncMarkRef.current === uid) {
           if (!isCloudSynced(uid)) markCloudSynced(uid);
           pendingCloudSyncMarkRef.current = null;
