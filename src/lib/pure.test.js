@@ -3,7 +3,7 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
-  loadLedger, saveLedger, getStorageIssues, __resetStorageIssues, CORRUPT_SUFFIX,
+  loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
@@ -956,5 +956,60 @@ describe("저장소 손상 방어 (B-3)", () => {
     const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [] } }));
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/저장 공간/);
+  });
+});
+
+describe("저장소 손상 방어 — 자체 추가 검수", () => {
+  const CORRUPT = '{"buys":[{"id":"a1"';
+  let store, failWrites;
+  beforeEach(() => {
+    store = new Map();
+    failWrites = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (failWrites.has(k) || failWrites.has("*")) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  });
+
+  it("공간이 다시 생겨 쓰기가 성공하면 쿼터 경고를 걷는다", () => {
+    failWrites.add("*");
+    expect(saveLedger({ buys: [] })).toBe(false);
+    expect(getStorageIssues().quotaHit).toBe(true);
+
+    failWrites.clear();
+    expect(saveLedger({ buys: [] })).toBe(true);
+    expect(getStorageIssues().quotaHit).toBe(false); // 배너가 새로고침까지 남지 않는다
+  });
+
+  it("로그아웃은 .corrupt 백업도 지운다 (원장 원본이 공용 브라우저에 남으면 안 된다)", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT);
+    expect(getStorageIssues().corruptKeys).toContain(LKEY);
+
+    clearAccountData();
+
+    expect(store.has(LKEY + CORRUPT_SUFFIX)).toBe(false);
+    expect(store.has(KEY + CORRUPT_SUFFIX)).toBe(false);
+    expect(getStorageIssues().corruptKeys).toEqual([]); // 표시도 초기화
+  });
+
+  it("구독 해제가 동작한다 (리스너 누수 없음)", () => {
+    let calls = 0;
+    const off = onStorageIssue(() => calls++);
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    expect(calls).toBeGreaterThan(0);
+    const before = calls;
+    off();
+    __resetStorageIssues();
+    store.set(KEY, CORRUPT);
+    loadCalcState();
+    expect(calls).toBe(before); // 해제 후에는 호출되지 않는다
   });
 });

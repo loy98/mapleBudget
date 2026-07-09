@@ -94,6 +94,8 @@ function writeJSON(key, val) {
   if (c && !c.backedUp) return false; // 원본을 지키지 못했다 → 덮어쓰지 않는다
   try {
     localStorage.setItem(key, JSON.stringify(val));
+    // 쓰기가 다시 성공했다 = 공간이 생겼다. 경고를 걷는다(그러지 않으면 배너가 새로고침까지 남는다).
+    if (quotaHit) { quotaHit = false; emitIssue(); }
     return true;
   } catch (e) {
     if (isQuotaError(e) && !quotaHit) { quotaHit = true; emitIssue(); }
@@ -311,7 +313,13 @@ export function setDataOwner(userId) {
 // 데이터는 클라우드에 있으므로 재로그인하면 복원된다. calMode/theme 같은 기기별 뷰 설정은 남긴다.
 export function clearAccountData() {
   try {
-    [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY].forEach((k) => localStorage.removeItem(k));
+    const keys = [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY];
+    keys.forEach((k) => localStorage.removeItem(k));
+    // 손상 백업(.corrupt)에는 원장 원본이 그대로 들어 있다 → 공용 브라우저에 남기지 않는다.
+    // 소유자 마커로 막으려던 바로 그 유출 경로다.
+    [KEY, ITEMS_KEY, LKEY].forEach((k) => localStorage.removeItem(k + CORRUPT_SUFFIX));
+    corrupted.clear();
+    emitIssue();
   } catch { /* ignore */ }
 }
 
