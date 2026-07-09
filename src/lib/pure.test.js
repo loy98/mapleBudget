@@ -761,3 +761,25 @@ describe("업로드 충돌 병합 (mergeForUpload)", () => {
     expect(mergeForUpload(localB, cloud).ledger.deleted).toEqual({});
   });
 });
+
+// 자체 검수에서 발견: 병합 결과를 '항목 개수'로만 비교해 상태 반영을 건너뛰면,
+// 개수가 같지만 내용이 다른 경우 로컬이 어긋난 채 남아 다음 업로드가 병합본을 덮어쓴다.
+describe("업로드 충돌 병합 — 개수는 같지만 내용이 다른 경우", () => {
+  it("클라우드가 a 를 지우고 c 를 추가했으면 병합 결과는 [c] 다 (로컬 [a] 와 개수 동일)", () => {
+    const cloud = {
+      ledger: { ...deleteLedgerEntry(LED([{ id: "a" }]), "buys", "a", T0), buys: [{ id: "c" }] },
+      updated_at: new Date(T0 + 1000).toISOString(),
+    };
+    const local = { calc: {}, my_items: [], ledger: LED([{ id: "a" }]) };
+
+    const merged = mergeForUpload(local, cloud);
+    expect(merged.ledger.buys.map((b) => b.id)).toEqual(["c"]); // a 는 표식으로 제거, c 는 유입
+    expect(local.ledger.buys).toHaveLength(1);                  // 로컬과 개수가 같다(1 vs 1)
+
+    // 이 상태에서 로컬 상태를 갱신하지 않으면, 다음 업로드가 로컬 [a] 를 올려 c 를 지우고 a 를 되살린다.
+    // → useCloudSync 는 충돌 병합 후 항상 setLedger(merged) 해야 한다.
+    const shape = (l) => ["buys", "sells", "cashes", "spends"].map((k) => l[k].length).join(",");
+    expect(shape(merged.ledger)).toBe(shape(local.ledger)); // 개수 비교로는 구분 불가함을 명시
+    expect(merged.ledger.buys[0].id).not.toBe(local.ledger.buys[0].id);
+  });
+});
