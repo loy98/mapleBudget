@@ -3,7 +3,7 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
 } from "./storage.js";
 import { mergeSnapshots } from "./cloud.js";
-import { weeklyMeso } from "./ledger.js";
+import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -47,6 +47,100 @@ describe("weeklyMeso", () => {
     expect(r.sold).toBeCloseTo(19, 10);
     expect(r.cashed).toBe(5);
     expect(r.need).toBeCloseTo(14, 10);
+  });
+});
+
+describe("weeklyItems", () => {
+  const ws = new Date("2026-07-02T00:00:00"); // 목요일 시작, ~07/08(수) 마감
+  const L = (o) => ({ buys: [], sells: [], cashes: [], spends: [], ...o });
+
+  it("품목별로 그 주의 구매·판매 수량을 모은다", () => {
+    const r = weeklyItems(L({
+      buys: [{ date: "2026-07-02", item: "가위", qty: 4 }, { date: "2026-07-05", item: "가위", qty: 2 }],
+      sells: [{ date: "2026-07-06", item: "가위", qty: 5, meso: 1.2 }],
+    }), ws, 0);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ name: "가위", buyQty: 6, sellQty: 5 });
+  });
+
+  it("주 경계 밖은 제외한다", () => {
+    const r = weeklyItems(L({
+      buys: [{ date: "2026-07-01", item: "가위", qty: 9 }, { date: "2026-07-09", item: "가위", qty: 9 }],
+    }), ws, 0);
+    expect(r).toEqual([]);
+  });
+
+  it("avg 는 입력한 개당 판매가의 수량가중 평균(수수료 차감 전), sold 는 수수료 반영 실수령", () => {
+    const r = weeklyItems(L({
+      sells: [
+        { date: "2026-07-03", item: "가위", qty: 1, meso: 1 },
+        { date: "2026-07-04", item: "가위", qty: 3, meso: 2 },
+      ],
+    }), ws, 0.05);
+    expect(r[0].avg).toBeCloseTo(7 / 4, 10); // (1*1 + 3*2) / 4
+    expect(r[0].sold).toBeCloseTo(7 * 0.95, 10);
+  });
+
+  it("품목별 수량 합계는 weeklyMeso 의 주차 합계와 일치한다 (품목 미입력분 포함)", () => {
+    const led = L({
+      buys: [{ date: "2026-07-02", item: "가위", qty: 4 }, { date: "2026-07-03", item: "", qty: 3 }],
+      sells: [{ date: "2026-07-06", item: "  ", qty: 2, meso: 1 }],
+    });
+    const wk = weeklyMeso(led, ws, 0);
+    const items = weeklyItems(led, ws, 0);
+    expect(items.reduce((a, x) => a + x.buyQty, 0)).toBe(wk.buyQty);
+    expect(items.reduce((a, x) => a + x.sellQty, 0)).toBe(wk.sellQty);
+    expect(items.map((x) => x.name)).toContain(NO_ITEM); // 이름 없는 항목은 버리지 않고 한 버킷으로
+  });
+
+  it("거래량 많은 순으로 정렬한다", () => {
+    const r = weeklyItems(L({
+      buys: [{ date: "2026-07-02", item: "적음", qty: 1 }, { date: "2026-07-02", item: "많음", qty: 8 }],
+    }), ws, 0);
+    expect(r.map((x) => x.name)).toEqual(["많음", "적음"]);
+  });
+});
+
+describe("itemSummary", () => {
+  const all = () => true;
+  const env = { fee: 0, effD: 0, mileageR: 0.3 };
+  const L = (o) => ({ buys: [], sells: [], cashes: [], spends: [], ...o });
+
+  it("재고는 전체 기간 누적(구매−판매)이라 기간을 좁혀도 음수가 되지 않는다", () => {
+    const led = L({
+      buys: [{ date: "2026-07-02", item: "가위", qty: 6, price: 5900 }],
+      sells: [{ date: "2026-07-09", item: "가위", qty: 5, meso: 1 }],
+    });
+    // 판 주(07-09~)만 보는 기간: 그 기간엔 구매 0 · 판매 5 지만 재고는 전체 기준 1
+    const inSellWeek = (d) => d >= "2026-07-09";
+    const r = itemSummary(led, inSellWeek, env, 3000);
+    expect(r[0]).toMatchObject({ buyQty: 0, sellQty: 5, stock: 1 });
+  });
+
+  it("spend 는 마일리지·충전할인을 반영하고, profit 은 실수령 메소를 rateWon 으로 환산해 뺀 값", () => {
+    const led = L({
+      buys: [{ date: "2026-07-02", item: "가위", qty: 2, price: 10000, mil: true }],
+      sells: [{ date: "2026-07-03", item: "가위", qty: 2, meso: 5 }],
+    });
+    const r = itemSummary(led, all, { fee: 0.05, effD: 0.1, mileageR: 0.3 }, 3000);
+    // spend = 2 * 10000 * (1-0.3) * (1-0.1) = 12600
+    expect(r[0].spend).toBeCloseTo(12600, 10);
+    // sold = 2 * 5 * 0.95 = 9.5억 → 9.5 * 3000 = 28500원
+    expect(r[0].sold).toBeCloseTo(9.5, 10);
+    expect(r[0].profit).toBeCloseTo(28500 - 12600, 10);
+  });
+
+  it("rateWon 이 0/음수/NaN 이면 profit 은 null (거짓 손익을 내지 않는다)", () => {
+    const led = L({ sells: [{ date: "2026-07-03", item: "가위", qty: 1, meso: 5 }] });
+    expect(itemSummary(led, all, env, 0)[0].profit).toBeNull();
+    expect(itemSummary(led, all, env, -1)[0].profit).toBeNull();
+    expect(itemSummary(led, all, env, NaN)[0].profit).toBeNull();
+    expect(itemSummary(led, all, env, undefined)[0].profit).toBeNull();
+  });
+
+  it("기간 내 거래가 없는 품목은 행에서 빠진다 (재고만 있어도)", () => {
+    const led = L({ buys: [{ date: "2026-01-01", item: "옛날거", qty: 3, price: 100 }] });
+    expect(itemSummary(led, (d) => d >= "2026-07-01", env, 3000)).toEqual([]);
   });
 });
 

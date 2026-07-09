@@ -424,7 +424,33 @@ tbody tr{transition:background .12s}
 .calwrap th.sep,.calwrap td.sep{border-right:1px solid var(--line);padding-right:12px}
 .calwrap th.sep + th,.calwrap td.sep + td{padding-left:12px}
 .wktot-row td{border-bottom:none;border-top:1.5px solid var(--line);font-weight:800;background:color-mix(in srgb,var(--sub) 5%,transparent)}
-.wktot-row td:first-child{color:var(--sub);font-size:12px;font-weight:700}
+/* 라벨 칸('13주 합계'). 펼치기 열이 첫 칸이라 :first-child 로는 못 잡는다. */
+.wktot-row td.lh{color:var(--sub);font-size:12px;font-weight:700}
+
+/* ===== 품목별 내역: 주차 확장 행 + 누적 요약 토글 ===== */
+/* 첫 칸(펼치기 버튼)은 폭 최소화. 주/품목 칸은 왼쪽 정렬을 되살린다(th:first-child 규칙이 밀려남). */
+.calwrap th.exph,.calwrap td.expc{width:1%;padding-left:0;padding-right:4px}
+.calwrap th.lh,.calwrap td.lh{text-align:left}
+
+.disc{display:inline-flex;align-items:center;gap:7px;background:none;border:none;color:var(--sub);font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:8px 2px;margin-top:6px;border-radius:var(--r-sm)}
+.disc:hover,.disc.on{color:var(--accent)}
+.disc:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.disc .caret{display:inline-block;font-size:9px;line-height:1;transition:transform .14s}
+.disc.on .caret{transform:rotate(90deg)}
+.disc.xs{padding:4px 5px;gap:0;margin-top:0}
+@media(prefers-reduced-motion:reduce){.disc .caret{transition:none}}
+
+/* 품목 서브행: 부모 주차 행에 딸린 것으로 읽히게 들여쓰기 + 옅은 바탕 */
+tr.opened td{border-bottom-color:transparent}
+tr.itemrow td{background:color-mix(in srgb,var(--sub) 4%,transparent);border-bottom:1px dashed var(--line);padding-top:6px;padding-bottom:6px;font-size:12.3px}
+tr.itemrow td.lh{padding-left:14px}
+tr.itemrow td.avgc{color:var(--sub);font-size:11.7px}
+/* 확장 그룹의 마지막 품목행만 실선으로 닫는다(:last-of-type 는 tbody 전체의 마지막만 잡혀서 못 씀) */
+tr.itemrow.lastitem td{border-bottom:1px solid var(--line)}
+
+.iname{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.iname .int{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(42vw,200px)}
+.calwrap td.stock{font-weight:700;color:var(--txt)}
 
 /* ===== 통계 그룹 카드 (대표 지표 1 + 보조 지표 목록) ===== */
 .sgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:14px}

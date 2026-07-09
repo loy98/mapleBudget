@@ -556,7 +556,9 @@ export const PlLabel = ({ p }) =>
 export const MilUse = ({ n }) =>
   n > 0 ? <span className="mil"><span className="num">{mlN(n)}</span><span className="u"> 마일리지 소모</span></span> : <>–</>;
 export const IconView = ({ icon }) => {
-  if (!icon) return null;
+  // 문자열만 렌더. app_config(DB)에서 온 malformed 아이콘(객체/배열/숫자)이 오면
+  // {icon} 을 그대로 렌더할 때 "Objects are not valid as a React child" 크래시가 나므로 여기서 차단.
+  if (typeof icon !== "string" || !icon) return null;
   // http(s) URL만 이미지로. referrerPolicy=no-referrer 로 트래킹 리퍼러 유출 차단, lazy 로딩.
   // (data:/javascript: 는 여기서 자동 제외 → 이모지 span 으로 폴백, img 스크립트 벡터 없음.)
   return /^https?:\/\//.test(icon) ? (
