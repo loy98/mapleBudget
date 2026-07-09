@@ -7,7 +7,12 @@ import { TIERS, WINDOW_WEEKS } from "./constants.js";
 //   · 마일리지 결제 비율 = 거래일에 유효한 넥슨 규칙 (rulesAt)
 //   · 경매장 수수료 / 충전 할인 = 거래 행의 스냅샷(_fee/_effD), 없으면 현재 설정으로 폴백
 // 숫자도 그대로 받는다(구 호출부·테스트 호환). 이 헬퍼가 둘을 흡수한다.
-const rate = (r, row) => (typeof r === "function" ? +r(row) || 0 : +r || 0);
+// 유한하지 않은 값은 0으로 떨어뜨린다. malformed 스냅샷을 '수수료 0%'로 조용히 바꾸지 않으려면
+// **호출측(env)이 먼저** 유효성을 검사해 현재 설정으로 폴백해야 한다(useLedgerDerived 참고).
+const rate = (r, row) => {
+  const n = +(typeof r === "function" ? r(row) : r);
+  return Number.isFinite(n) ? n : 0;
+};
 
 // ===== 주간 과금 (MVP 주: 목~수) =====
 export function weeklyAch(ledger, ws, mileageR) {

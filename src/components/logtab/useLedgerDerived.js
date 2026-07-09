@@ -3,6 +3,12 @@ import { WINDOW_WEEKS, rulesAt } from "../../lib/constants.js";
 import { mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu } from "../../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, mesoWeeks, weeklyItems, itemSummary } from "../../lib/ledger.js";
 
+// 요율 스냅샷으로 인정할 값인가. 수수료·충전 할인은 0 이상 1 미만의 비율이다.
+// 우리가 기록하는 값은 항상 number 이고 JSONB 왕복에서도 number 로 남는다 →
+// 문자열("", "0.05")은 신뢰하지 않는다. `+""` 가 0 이라 '수수료 0%' 로 새는 것을 막는다.
+// null/undefined(구 데이터)뿐 아니라 malformed 값도 '없음'으로 보고 현재 설정으로 폴백한다.
+export const hasSnapshot = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1;
+
 // LogTab 의 파생값 전부를 한 곳에 모은다. 원장·계산기 값에서 나오는 순수 파생이라
 // 렌더 로직과 섞여 있을 이유가 없고, 섞여 있으면 useMemo 의존성 실수가 눈에 띄지 않는다.
 // 반환값은 LogTab 이 각 패널에 나눠 넘긴다.
@@ -13,15 +19,17 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
   //  · fee/effD : 사용자 상태(등급·충전 방식)에서 나오므로 거래 행에 스냅샷을 남긴다.
   //               스냅샷이 없는 구 데이터는 현재 설정으로 폴백한다(과거 값을 복원할 방법이 없다).
   //               cashes.rate 가 없으면 won 으로 폴백하는 것과 같은 패턴.
+  // 스냅샷 값이 유효할 때만 인정한다. malformed(문자열·NaN·범위 밖)면 '스냅샷 없음'으로 취급해
+  // 현재 설정으로 폴백한다 — 조용히 '수수료 0%'가 되어 틀린 금액을 내는 것보다 낫다.
   const env = useMemo(() => ({
     mileageR: (b) => (rulesAt(ruleHistory, b && b.date).mileageRate || 0) / 100,
-    fee: (sl) => (sl && sl._fee != null ? +sl._fee || 0 : calc.f),
-    effD: (b) => (b && b._effD != null ? +b._effD || 0 : calc.effD),
+    fee: (sl) => (sl && hasSnapshot(sl._fee) ? sl._fee : calc.f),
+    effD: (b) => (b && hasSnapshot(b._effD) ? b._effD : calc.effD),
   }), [ruleHistory, calc.f, calc.effD]);
 
-  // 구 데이터가 하나라도 있으면 '현재 설정 기준 추정'임을 UI에 알린다.
+  // 스냅샷이 없거나 못 믿을 행이 하나라도 있으면 '현재 설정 기준 추정'임을 UI에 알린다.
   const hasLegacyRows = useMemo(
-    () => ledger.buys.some((b) => b._effD == null) || ledger.sells.some((s) => s._fee == null),
+    () => ledger.buys.some((b) => !hasSnapshot(b._effD)) || ledger.sells.some((s) => !hasSnapshot(s._fee)),
     [ledger.buys, ledger.sells]
   );
 

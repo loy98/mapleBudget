@@ -2,7 +2,7 @@ import {
   DEFAULT_SETTINGS, DEFAULT_CHARGES, DEFAULT_CALC_ITEMS, DEFAULT_ITEMS,
   LEDGER_BUCKETS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX,
 } from "./constants.js";
-import { uid } from "./util.js";
+import { uid, padDate } from "./util.js";
 
 // 기존 단일 HTML 버전과 동일한 키 → 사용자 데이터 그대로 승계
 export const KEY = "mvpCalc_v4";
@@ -161,7 +161,12 @@ export function normalizeLedger(d, now = null, ceiling = now) {
   LEDGER_BUCKETS.forEach((k) => {
     // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
     const rows = asArray(src[k]).filter((x) => x && typeof x === "object");
-    rows.forEach((x) => { if (!safeRowId(x.id)) x.id = uid(); });
+    rows.forEach((x) => {
+      if (!safeRowId(x.id)) x.id = uid();
+      // 날짜 비교는 전부 사전식 문자열 비교다 → zero-pad 되어 있지 않으면 주차 집계에서 조용히 누락되고
+      // 규칙 선택(rulesAt)도 엉뚱한 시점을 고른다. 패딩만으로 고칠 수 있는 형태는 여기서 바로잡는다.
+      if (x.date != null) x.date = padDate(x.date);
+    });
     // 로컬에 tombstone 이 있는데 항목도 남아 있으면(가져오기·구데이터) 삭제를 존중한다.
     led[k] = rows.filter((x) => !isDeleted(led.deleted, x.id));
   });

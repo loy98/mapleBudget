@@ -6,6 +6,7 @@ import {
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { CHARGE_METHODS, DEFAULT_RULES, resolveRules, resolveRuleHistory } from "./constants.js";
+import { todayStr } from "./util.js";
 
 // app_config에서 settings로 반영하는 시세 스칼라 키(기본값 적용·force가 공유 → 새 키 추가 시 한 곳만 수정).
 const CONFIG_RATE_KEYS = ["mesoRate", "giftRatio", "marketRatio"];
@@ -89,7 +90,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         if (valid.length) setChargeOptions(valid);
       }
       // resolveRules 가 항목별로 검증 → malformed 키는 버리고 기본값 유지(전체 폐기 아님).
-      setRules(resolveRules(cfg.rules));
+      // today 를 명시적으로 넘긴다(기본 인자의 new Date() 에 의존하지 않음 — 테스트 안정성).
+      setRules(resolveRules(cfg.rules, todayStr()));
       setRuleHistory(resolveRuleHistory(cfg.rules));
       setAppConfig(cfg);
     });

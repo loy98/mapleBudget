@@ -5,8 +5,9 @@ import {
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
+import { hasSnapshot } from "../components/logtab/useLedgerDerived.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
-import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
+import { uid, estGrade, fmtD, weekStartThu, padDate } from "./util.js";
 import { computeForecast, cumNow } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
 import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt } from "./constants.js";
@@ -1068,5 +1069,83 @@ describe("B-5 · rulesAt 의 날짜 처리", () => {
   it("history 가 비었거나 배열이 아니면 기본 규칙", () => {
     expect(rulesAt([], "2026-01-01")).toBe(DEFAULT_RULES);
     expect(rulesAt(null, "2026-01-01")).toBe(DEFAULT_RULES);
+  });
+});
+
+// Codex A: malformed 스냅샷이 조용히 '수수료 0%'가 되면 안 된다 → '스냅샷 없음'으로 취급해 현재 설정 폴백.
+describe("B-5 · malformed 스냅샷 방어 (Codex A)", () => {
+  const all = () => true;
+  const CUR_FEE = 0.03, CUR_EFFD = 0.10;
+  const envOf = () => ({
+    mileageR: () => 0,
+    fee: (s) => (s && hasSnapshot(s._fee) ? s._fee : CUR_FEE),
+    effD: (b) => (b && hasSnapshot(b._effD) ? b._effD : CUR_EFFD),
+  });
+
+  it("hasSnapshot 계약", () => {
+    expect(hasSnapshot(0)).toBe(true);        // 0% 는 유효한 스냅샷
+    expect(hasSnapshot(0.05)).toBe(true);
+    expect(hasSnapshot(null)).toBe(false);
+    expect(hasSnapshot(undefined)).toBe(false);
+    expect(hasSnapshot("bad")).toBe(false);   // NaN
+    expect(hasSnapshot("")).toBe(false);      // +"" = 0 이지만 스냅샷으로 인정하지 않는다
+    expect(hasSnapshot("0.05")).toBe(false);  // 숫자 타입만 인정(우리가 쓰는 값은 항상 number)
+    expect(hasSnapshot(NaN)).toBe(false);
+    expect(hasSnapshot(Infinity)).toBe(false);
+    expect(hasSnapshot(-0.1)).toBe(false);    // 음수 요율 없음
+    expect(hasSnapshot(1)).toBe(false);       // 100% 수수료/할인은 없음
+    expect(hasSnapshot(1.5)).toBe(false);
+  });
+
+  it('_fee: "bad" 가 수수료 0% 로 새지 않는다 (현재 설정으로 폴백)', () => {
+    const led = { buys: [], sells: [{ id: "s", date: "2026-06-01", qty: 1, meso: 10, _fee: "bad" }], cashes: [], spends: [] };
+    const st = ledgerStats(led, all, envOf());
+    expect(st.meso).toBeCloseTo(10 * (1 - CUR_FEE), 10); // 10 이 아니라 9.7
+  });
+
+  it("_effD 가 범위를 벗어나면 현재 설정으로 폴백", () => {
+    const led = { buys: [{ id: "b", date: "2026-06-01", qty: 1, price: 10000, _effD: 1.5 }], sells: [], cashes: [], spends: [] };
+    const st = ledgerStats(led, all, envOf());
+    expect(st.spend).toBeCloseTo(10000 * (1 - CUR_EFFD), 10); // 음수 지출이 되지 않는다
+  });
+
+  it("유효한 0 스냅샷은 폴백하지 않는다", () => {
+    const led = { buys: [{ id: "b", date: "2026-06-01", qty: 1, price: 10000, _effD: 0 }], sells: [], cashes: [], spends: [] };
+    expect(ledgerStats(led, all, envOf()).spend).toBeCloseTo(10000, 10);
+  });
+});
+
+// Codex C: 원장의 날짜는 zero-padded 여야 사전식 비교가 성립한다.
+describe("padDate · 날짜 정규화 (Codex C)", () => {
+  it("패딩만 하면 되는 형태를 바로잡는다", () => {
+    expect(padDate("2026-7-2")).toBe("2026-07-02");
+    expect(padDate("2026-07-2")).toBe("2026-07-02");
+    expect(padDate(" 2026-7-02 ")).toBe("2026-07-02");
+    expect(padDate("2026-07-02")).toBe("2026-07-02");
+  });
+
+  it("해석할 수 없는 값은 건드리지 않는다 (임의로 다른 날로 바꾸지 않는다)", () => {
+    expect(padDate("어제")).toBe("어제");
+    expect(padDate("2026/07/02")).toBe("2026/07/02");
+    expect(padDate(null)).toBe(null);
+    expect(padDate(20260702)).toBe(20260702);
+  });
+
+  it("normalizeLedger 가 행 날짜를 정규화한다 — 주차 집계에서 조용히 누락되지 않는다", () => {
+    const n = normalizeLedger({ buys: [{ id: "b", date: "2026-7-2", qty: 1, price: 100 }] });
+    expect(n.buys[0].date).toBe("2026-07-02");
+
+    // 정규화 전이라면 이 거래는 그 주에서 빠진다("2026-7-2" <= "2026-07-08" 이 false)
+    const ws = new Date("2026-07-02T00:00:00");
+    expect(weeklyMeso(n, ws, 0).buyQty).toBe(1);
+  });
+
+  it("정규화된 날짜로 규칙이 올바르게 선택된다", () => {
+    const H = resolveRuleHistory([
+      { effectiveFrom: "2025-01-01", mileageRate: 40 },
+      { effectiveFrom: "2026-01-01", mileageRate: 30 },
+    ]);
+    const n = normalizeLedger({ buys: [{ id: "b", date: "2026-7-2" }] });
+    expect(rulesAt(H, n.buys[0].date).mileageRate).toBe(30); // 정규화 전이라면 40(가장 이른 규칙)
   });
 });

@@ -27,6 +27,17 @@ export function fmtD(dt) {
   );
 }
 export const todayStr = () => fmtD(new Date());
+
+// 원장의 날짜는 zero-padded "YYYY-MM-DD" 여야 한다 — 주차 필터·규칙 선택이 모두 사전식 문자열 비교이기 때문.
+// "2026-7-2" 같은 값은 `"2026-7-2" >= "2026-07-02"` 가 true, `<= "2026-07-08"` 이 false 라
+// **모든 주에서 조용히 누락**된다. 앱이 만드는 날짜는 항상 fmtD 지만 가져오기·클라우드 행은 임의 문자열일 수 있다.
+// 패딩만 하면 되는 형태는 고쳐주고, 그 외에는 원본을 그대로 둔다(임의로 해석해 다른 날로 바꾸지 않는다).
+export function padDate(v) {
+  if (typeof v !== "string") return v;
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v.trim());
+  if (!m) return v;
+  return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+}
 export function curMonth() {
   const d = new Date();
   return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
