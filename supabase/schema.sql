@@ -7,7 +7,9 @@ create table if not exists public.user_data (
   user_id    uuid primary key references auth.users(id) on delete cascade,
   calc       jsonb        not null default '{}'::jsonb,
   my_items   jsonb        not null default '[]'::jsonb,
-  ledger     jsonb        not null default '{"buys":[],"sells":[],"cashes":[],"spends":[]}'::jsonb,
+  -- deleted = 삭제 표식(tombstone) { "<항목 id>": <삭제시각 ms> }. 삭제를 다른 기기로 전파한다.
+  -- 구버전 행에는 이 키가 없다 → 클라이언트 normalizeLedger 가 빈 객체로 채운다(마이그레이션 불필요).
+  ledger     jsonb        not null default '{"buys":[],"sells":[],"cashes":[],"spends":[],"deleted":{}}'::jsonb,
   updated_at timestamptz  not null default now()
 );
 

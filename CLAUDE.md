@@ -29,7 +29,8 @@
 - **설정 주입**: 공개 설정(`VITE_SUPABASE_URL`, publishable key)은 저장소 `.env`에 커밋(브라우저 노출이 정상, 보안은 RLS가 담당). **시크릿(service key, SMTP/앱 비밀번호 등)은 절대 커밋 금지.**
 - **앱 공용 설정(시세성 기본값)**: `app_config` 테이블(1행, JSONB `config`; RLS = 누구나 SELECT / 쓰기정책 없음)에서 `mesoRate`/`giftRatio`/`marketRatio`·`chargeMethods`·`defaultItems`를 로드(`fetchAppConfig`). **DB에서 고치면 재배포 없이 반영**, fetch 실패/오프라인은 `constants.js` 폴백. 대시보드(service role)로만 수정.
   - **적용 규칙**: 충전 프리셋 목록은 전역(모두). 시세/기본아이템은 **저장 이력 없는 새 게스트에게만**(freshRef+configAppliedRef, auth 해석 후 게스트만). `config.force` 배열에 든 키는 **모든 유저에게 강제 덮어씀**(force). 상세는 프로젝트 메모리 `app-config-db`.
-- **동기화 불변식(깨면 데이터 꼬임 — 절대 유지)**: ① 업로드는 **단일 in-flight 직렬화**(`upsertingRef`; `upsertingRef`를 외부에서 리셋하지 말 것 — 계정 전환 복구는 `syncNonce` 재예약으로). ② 각 upsert write 직전 `liveUserIdRef.current === 캡처 userId` 확인 → **다른 계정 행에 쓰지 않음**. ③ 최초 로그인 프롬프트는 계정별 마커(`mvpCloudSyncedUid`)로 **1회만**(새로고침 X). ④ ledger는 항목 id 기준 **합집합 병합**(손실 없음).
+- **동기화 불변식(깨면 데이터 꼬임 — 절대 유지)**: ① 업로드는 **단일 in-flight 직렬화**(`upsertingRef`; `upsertingRef`를 외부에서 리셋하지 말 것 — 계정 전환 복구는 `syncNonce` 재예약으로). ② 각 upsert write 직전 `liveUserIdRef.current === 캡처 userId` 확인 → **다른 계정 행에 쓰지 않음**. ③ 최초 로그인 프롬프트는 계정별 마커(`mvpCloudSyncedUid`)로 **1회만**(새로고침 X). ④ ledger는 항목 id 기준 **합집합 병합 + tombstone 차감**(추가는 손실 없음, 삭제는 전파됨). ⑤ 로컬 데이터에는 **소유자 마커**(`mvpDataOwnerUid`)가 붙는다 — 소유자가 다른 계정이면 병합하지 않고 클라우드만 채택(공용 브라우저에서 남의 원장이 섞이는 것을 막음). 로그아웃은 계정 데이터를 지운다. ⑥ 업로드는 **조건부 쓰기**(`updated_at` 버전 일치) — 무조건 upsert 금지. 충돌 시 서버 최신본을 읽어 `mergeForUpload` 로 병합 후 재시도(설정은 이 탭 우선, 원장은 합집합+tombstone 차감).
+- **삭제는 반드시 `deleteLedgerEntry`로**: 배열에서 항목만 빼면 그 항목을 아직 가진 기기가 다음 접속 때 되살린다(단일 기기도 — 디바운스 전에 탭을 닫으면 동일). `ledger.deleted = { [id]: 삭제시각 }`에 표식을 남겨야 전파된다. 병합은 **삭제 우선**(한쪽이 지우고 다른 쪽이 수정했으면 삭제가 이김). 표식은 `TOMBSTONE_TTL_DAYS`(1년) 후 만료 — 그보다 오래 오프라인이던 기기는 부활시킬 수 있다(수용된 한계).
 - 상세는 프로젝트 메모리 `supabase-multiuser-sync` 참고.
 
 ## 배포

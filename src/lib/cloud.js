@@ -1,5 +1,6 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearAccountData } from "./storage.js";
+import { clearAccountData, mergeDeleted, isDeleted } from "./storage.js";
+import { LEDGER_BUCKETS } from "./constants.js";
 
 export { cloudEnabled };
 
@@ -82,14 +83,62 @@ export async function fetchUserData(userId) {
   if (error) throw error;
   return data; // 없으면 null
 }
-export async function upsertUserData(userId, snap) {
-  const { error } = await supabase
+// ===== 낙관적 동시성 제어 =====
+// 이전에는 무조건 upsert(행 전체 덮어쓰기)였다. 그래서 오래된 스냅샷을 든 탭이 나중에 쓰면
+// 다른 탭이 올린 거래와 삭제 표식(tombstone)을 통째로 지웠다 — 삭제 전파의 존재 이유가 무너진다.
+//
+// 서버가 트리거로 채우는 updated_at 을 '버전'으로 삼는다. 내가 마지막으로 본 버전일 때만 쓰기가 성립하고,
+// 그 사이 누가 썼다면 0행이 갱신되어 conflict 로 돌아온다(로컬 PostgreSQL 로 실측 확인).
+// 호출측은 다시 읽어 병합한 뒤 재시도한다.
+//
+// 반환: { updatedAt } 성공 | { conflict: true } 버전 불일치(또는 첫 삽입 경쟁)
+export async function writeUserData(userId, snap, expectedUpdatedAt) {
+  const row = { calc: snap.calc, my_items: snap.my_items, ledger: snap.ledger };
+
+  // 아직 행이 없다고 알고 있는 경우 → INSERT. 다른 기기가 먼저 만들었으면 23505 로 conflict.
+  if (!expectedUpdatedAt) {
+    const { data, error } = await supabase
+      .from("user_data")
+      .insert({ user_id: userId, ...row })
+      .select("updated_at")
+      .maybeSingle();
+    if (!error) return { updatedAt: data?.updated_at ?? null };
+    if (error.code === "23505") return { conflict: true };
+    throw error;
+  }
+
+  const { data, error } = await supabase
     .from("user_data")
-    .upsert(
-      { user_id: userId, calc: snap.calc, my_items: snap.my_items, ledger: snap.ledger },
-      { onConflict: "user_id" }
-    );
+    .update(row)
+    .eq("user_id", userId)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("updated_at")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) return { conflict: true }; // 0행 = 그 사이 다른 기기가 씀(또는 행이 사라짐)
+  return { updatedAt: data.updated_at };
+}
+
+// 업로드 충돌 시의 병합 규칙.
+// calc/my_items = 지금 이 탭의 값이 이긴다(사용자가 방금 편집한 것). 설정은 last-writer-wins 로 충분하다.
+// ledger = 합집합 + tombstone 차감. 거래는 손실도 부활도 없어야 하므로 여기서만 진짜 병합이 필요하다.
+export function mergeForUpload(localSnap, cloud, clientNow = Date.now()) {
+  const t = tombstoneClock(cloud, clientNow);
+  return {
+    calc: localSnap.calc,
+    my_items: localSnap.my_items,
+    ledger: mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, t.now, t.ceiling),
+  };
+}
+
+// tombstone 시각 파라미터를 한 곳에서 만든다(만료 기준과 clamp 상한을 혼동하지 않도록).
+//  now     = 서버 updated_at (없으면 null → 만료 정리 안 함)
+//  ceiling = max(서버 시각, 내 시계) — 방금 만든 로컬 표식이 과거로 되감기지 않게.
+export function tombstoneClock(cloud, clientNow = Date.now()) {
+  const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+  const now = isFinite(serverNow) ? serverNow : null;
+  const ceiling = Math.max(isFinite(serverNow) ? serverNow : -Infinity, clientNow);
+  return { now, ceiling: isFinite(ceiling) ? ceiling : null };
 }
 
 // ===== 병합 (최초 로그인 시 로컬 ↔ 클라우드) =====
@@ -100,7 +149,7 @@ export async function upsertUserData(userId, snap) {
 // opts.localTouched: 이 기기에서 사용자가 계산기/아이템을 직접 편집했는지(거래 없이 설정만 바꾼 경우 포착 — P1-4).
 export function mergeSnapshots(local, cloud, opts = {}) {
   if (!cloud) return { snapshot: local, conflict: false };
-  const ledger = mergeLedger(local.ledger, cloud.ledger);
+  const ledger = mergeLedger(local.ledger, cloud.ledger, opts.now, opts.ceiling);
   const cloudHasItems = !!(cloud.my_items && cloud.my_items.length);
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
   const my_items = cloudHasItems ? cloud.my_items : local.my_items;
@@ -113,17 +162,26 @@ export function mergeSnapshots(local, cloud, opts = {}) {
   const conflict = (cloudHasCalc || cloudHasItems) && localActive;
   return { snapshot: { calc, my_items, ledger }, conflict };
 }
-function mergeLedger(a = {}, b = {}) {
+// id 합집합 + tombstone 차감.
+// 합집합만으로는 '삭제'를 표현할 수 없어, 삭제된 항목을 아직 가진 기기가 접속하면 부활시켰다.
+// (단일 기기에서도: 삭제 후 디바운스 안에 탭을 닫으면 로컬엔 없고 클라우드엔 있는 상태가 된다.)
+// 이제 양쪽 tombstone 을 먼저 합치고, 그 id 는 어느 쪽 버킷에 있든 결과에서 제거한다.
+// now     : TTL 만료 기준(서버 updated_at). null 이면 만료 정리를 하지 않는다.
+// ceiling : 미래 시각 clamp 상한('정상적인 지금'). 기본은 now 지만 호출측이 max(서버, 로컬)을 넘긴다.
+export function mergeLedger(a = {}, b = {}, now = null, ceiling = now) {
   const out = {};
   // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
   const arr = (v) => (Array.isArray(v) ? v : []);
-  ["buys", "sells", "cashes", "spends"].forEach((k) => {
+  const deleted = mergeDeleted(a && a.deleted, b && b.deleted, now, ceiling);
+  LEDGER_BUCKETS.forEach((k) => {
     const map = new Map();
     arr(a[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
     // 같은 id면 클라우드(b) 우선. 항목별 타임스탬프가 없어 정밀 비교는 불가(알려진 한계).
     // 서로 다른 id는 모두 보존되므로 '거래가 사라지는' 손실은 없음.
     arr(b[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
-    out[k] = [...map.values()];
+    // 삭제 우선: 한쪽이 지우고 다른 쪽이 수정했어도 되살리지 않는다.
+    out[k] = [...map.values()].filter((x) => !isDeleted(deleted, x.id));
   });
+  out.deleted = deleted;
   return out;
 }

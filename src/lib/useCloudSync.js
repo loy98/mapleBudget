@@ -4,7 +4,7 @@ import {
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
   getDataOwner, setDataOwner,
 } from "./storage.js";
-import { onAuthChange, fetchUserData, upsertUserData, mergeSnapshots, fetchAppConfig } from "./cloud.js";
+import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { CHARGE_METHODS, DEFAULT_RULES, resolveRules } from "./constants.js";
 
 // app_config에서 settings로 반영하는 시세 스칼라 키(기본값 적용·force가 공유 → 새 키 추가 시 한 곳만 수정).
@@ -18,7 +18,8 @@ function configRatePatch(cfg, onlyKeys) {
 }
 const validItems = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof x.name === "string") : []);
 // 다른 계정 소유의 로컬 데이터를 병합에서 배제할 때 쓰는 '아무것도 없음' 스냅샷.
-const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [] } };
+// deleted 도 비운다 — 남의 계정 tombstone 이 내 계정 거래를 지우면 안 된다.
+const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [], deleted: {} } };
 
 // ============================================================
 // useCloudSync — 세션·app_config·클라우드 동기화·업로드를 한 곳에 응집(App.jsx의 SRP 회복).
@@ -63,6 +64,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const retryTimer = useRef(null);
   const retryAtRef = useRef(0);   // 연속 업로드 실패 횟수(백오프 단계)
   const runUploadRef = useRef(null);
+  // 내가 마지막으로 본 서버 행 버전(updated_at). 조건부 쓰기의 기준. null = 행이 없다고 알고 있음.
+  const lastSeenRef = useRef(null);
 
   const userId = session?.user?.id ?? null;
   // 최신 스냅샷·현재 userId를 렌더 본문에서 ref에 반영(의도적). async 콜백(디바운스 업로드·가드)만 읽으므로
@@ -131,6 +134,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     // 디바운스 이펙트가 cloudReady=true 로 재무장해 '이전 유저의 dataRef' 를 새 유저 행에 올릴 수 있다
     // (liveUserIdRef 가드는 이미 새 uid 이므로 이 경우를 잡지 못한다).
     setCloudReady(false);
+    lastSeenRef.current = null; // 새 컨텍스트 → 이 계정 행의 버전을 아직 모른다(첫 쓰기는 INSERT 시도)
     if (!userId) {
       pendingCloudSyncMarkRef.current = null;
       return;
@@ -141,6 +145,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         setSyncState("syncing");
         const cloud = await fetchUserData(userId);
         if (cancelled) return;
+        // 조건부 쓰기의 기준 버전. 행이 없으면 null → 첫 업로드는 INSERT.
+        lastSeenRef.current = cloud?.updated_at ?? null;
         const firstLogin = !isCloudSynced(userId);
         pendingCloudSyncMarkRef.current = firstLogin ? userId : null;
         // 로컬 데이터의 소유자가 다른 계정이면 병합하지 않는다. 공용 브라우저에서 A 로그아웃 → B 로그인 시
@@ -150,7 +156,14 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const localUsable = !owner || owner === userId;
         const local = localUsable ? localSnapshot() : EMPTY_SNAPSHOT;
         // 거래 없이 설정/아이템만 바꾼 게스트도 보호: 사용자 직접 편집 여부를 병합 판정에 전달(P1-4).
-        const { snapshot, conflict } = mergeSnapshots(local, cloud, { localTouched: localUsable && isUserTouched() });
+        // tombstone 만료 기준은 서버 updated_at, 미래 clamp 상한은 max(서버, 내 시계).
+        // 둘을 겸용하면 오래 접속하지 않은 유저의 새 표식이 과거로 되감겨 조기 만료된다.
+        const clock = tombstoneClock(cloud);
+        const { snapshot, conflict } = mergeSnapshots(local, cloud, {
+          localTouched: localUsable && isUserTouched(),
+          now: clock.now,
+          ceiling: clock.ceiling,
+        });
         let finalSnap = snapshot;
         if (conflict && firstLogin) {
           // 네이티브 confirm 대신 App이 렌더하는 테마 모달로 선택을 받는다(테스트 가능·UI 일관성).
@@ -205,7 +218,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
 
   // ===== 업로드 러너(통합): 디바운스·플러시가 공유 =====
   // 단일 in-flight 직렬화 + do-while dirty-retry + 계정 가드 + 마커 + 재예약. captured uid로 동작.
-  // refs + 안정 setter(setSyncState/setSyncNonce)만 읽으므로 useCallback([])로 안정화 → 이펙트 deps에 넣어도 재실행 없음.
+  // refs + 안정 setter(setSyncState/setSyncNonce/setLedger)만 읽으므로 안정화 → 이펙트 deps에 넣어도 재실행 없음.
+  // setLedger 는 React useState 세터라 identity 가 고정이다(훅 계약).
   const runUpload = useCallback(async (uid) => {
     if (upsertingRef.current) { dirtyRef.current = true; return; } // in-flight면 dirty만 표시(러너가 소비)
     upsertingRef.current = true;
@@ -219,7 +233,28 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         // 이 payload 에 담긴 변경은 지금 업로드된다 → 여기서 플러시 부채를 턴다.
         // (루프가 끝난 뒤에 털면, await 중 들어온 편집까지 '플러시됨'으로 오인해 탭 종료 시 유실된다.)
         dirtyForFlushRef.current = false;
-        await upsertUserData(uid, payload);
+
+        // 조건부 쓰기: 내가 마지막으로 본 버전일 때만 성립. 그 사이 다른 탭/기기가 썼으면 conflict.
+        let res = await writeUserData(uid, payload, lastSeenRef.current);
+        for (let tries = 0; res.conflict && tries < 5; tries++) {
+          if (liveUserIdRef.current !== uid) { aborted = true; break; }
+          // 서버 최신본을 읽어 병합한다. 거래는 합집합 + tombstone 차감,
+          // 설정/아이템은 이 탭의 값이 이긴다(방금 편집한 것).
+          const cloud = await fetchUserData(uid);
+          if (liveUserIdRef.current !== uid) { aborted = true; break; }
+          lastSeenRef.current = cloud?.updated_at ?? null;
+          const merged = mergeForUpload(dataRef.current, cloud);
+          // 병합 결과를 반드시 화면(상태)에도 반영한다. 우리는 merged 를 서버에 쓰므로,
+          // 로컬 상태가 merged 와 어긋난 채 남으면 다음 업로드가 그 어긋난 값을 올바른 버전으로
+          // 덮어써 다른 기기의 거래를 지우고 삭제된 거래를 되살린다.
+          // (항목 '개수'만 비교해 건너뛰면 안 된다 — 한 건이 지워지고 한 건이 추가된 경우 개수가 같다.)
+          setLedger(normalizeLedger(merged.ledger));
+          res = await writeUserData(uid, merged, lastSeenRef.current);
+        }
+        if (aborted) break;
+        if (res.conflict) throw new Error("write-conflict"); // 5회 재시도에도 실패 → 백오프로 넘긴다
+        // 쓰기 도중 계정이 바뀌었으면 새 계정의 버전을 옛 행의 값으로 덮지 않는다.
+        if (liveUserIdRef.current === uid) lastSeenRef.current = res.updatedAt;
       } while (dirtyRef.current);
       // 실제로 이 uid 업로드가 완료된 경우에만 성공 처리 — 중단(계정 전환)된 업로드를 성공으로 오인하지 않는다.
       if (!aborted) {
@@ -246,7 +281,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       upsertingRef.current = false;
       if (liveUserIdRef.current && liveUserIdRef.current !== uid) setSyncNonce((n) => n + 1); // 새 계정 업로드 재예약
     }
-  }, []);
+  }, [setLedger]);
 
   runUploadRef.current = runUpload; // 파생값 재기록 → StrictMode 이중 렌더에도 idempotent
 
