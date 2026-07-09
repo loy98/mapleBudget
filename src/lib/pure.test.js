@@ -4,7 +4,7 @@ import {
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
-import { mergeSnapshots, mergeLedger } from "./cloud.js";
+import { mergeSnapshots, mergeLedger, mergeForUpload } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
 import { computeForecast } from "./ledger.js";
@@ -712,5 +712,52 @@ describe("tombstone — 신뢰할 수 없는 시각/키 방어", () => {
     expect(written.sells).toEqual([]);                        // 배열 아닌 버킷 강등
     expect(written.deleted.bad).toBeUndefined();              // malformed 시각 제거
     expect(written.deleted.evil).toBeLessThanOrEqual(Date.now()); // 미래 시각 clamp
+  });
+});
+
+// Codex HIGH: 오래된 스냅샷을 든 탭이 업로드하면 서버의 tombstone 을 덮어써 삭제가 부활했다.
+// 낙관적 동시성 제어(updated_at 조건부 쓰기) + 충돌 시 재병합으로 막는다.
+describe("업로드 충돌 병합 (mergeForUpload)", () => {
+  const iso = (ms) => new Date(ms).toISOString();
+
+  it("stale 탭의 업로드가 서버 tombstone 을 지우지 않는다 (부활 방지)", () => {
+    // 탭 A가 x 를 지우고 업로드 완료 → 서버에 tombstone
+    const cloud = { ...deleteLedgerEntry(LED([{ id: "x" }, { id: "y" }]), "buys", "x", T0), updated_at: iso(T0) };
+    // 탭 B는 stale: x 를 아직 들고 있고 표식 없음. 다른 거래 z 를 추가해 업로드 시도.
+    const localB = { calc: { a: 1 }, my_items: [], ledger: LED([{ id: "x" }, { id: "y" }, { id: "z" }]) };
+
+    const merged = mergeForUpload(localB, { ledger: cloud, updated_at: iso(T0 + 1000) });
+
+    expect(merged.ledger.buys.map((b) => b.id).sort()).toEqual(["y", "z"]); // x 부활 안 함, z 는 보존
+    expect(merged.ledger.deleted).toEqual({ x: T0 });                        // 표식 유지 → 계속 전파
+    expect(merged.calc).toEqual({ a: 1 });                                   // 이 탭의 설정이 이긴다
+  });
+
+  it("반대로 stale 탭이 지운 것도 서버에 전파된다", () => {
+    const cloud = { ledger: LED([{ id: "x" }, { id: "y" }]), updated_at: iso(T0 + 1000) };
+    const localB = { calc: {}, my_items: [], ledger: deleteLedgerEntry(LED([{ id: "x" }, { id: "y" }]), "buys", "y", T0) };
+    const merged = mergeForUpload(localB, cloud);
+    expect(merged.ledger.buys.map((b) => b.id)).toEqual(["x"]);
+    expect(merged.ledger.deleted).toEqual({ y: T0 });
+  });
+
+  it("양쪽이 서로 다른 거래를 추가했으면 둘 다 살아남는다", () => {
+    const cloud = { ledger: LED([{ id: "fromA" }]), updated_at: iso(T0) };
+    const localB = { calc: {}, my_items: [], ledger: LED([{ id: "fromB" }]) };
+    expect(mergeForUpload(localB, cloud).ledger.buys.map((b) => b.id).sort()).toEqual(["fromA", "fromB"]);
+  });
+
+  it("서버 행이 없으면(첫 업로드) 로컬을 그대로 쓴다", () => {
+    const localB = { calc: { a: 1 }, my_items: [{ name: "i" }], ledger: LED([{ id: "x" }]) };
+    const merged = mergeForUpload(localB, null);
+    expect(merged.ledger.buys.map((b) => b.id)).toEqual(["x"]);
+    expect(merged.my_items).toEqual([{ name: "i" }]);
+  });
+
+  it("TTL 정리는 서버 updated_at 기준으로 한다", () => {
+    const stale = T0 - (TOMBSTONE_TTL_DAYS + 1) * 86400000;
+    const cloud = { ledger: LED([], { old: stale }), updated_at: iso(T0) };
+    const localB = { calc: {}, my_items: [], ledger: LED([]) };
+    expect(mergeForUpload(localB, cloud).ledger.deleted).toEqual({});
   });
 });

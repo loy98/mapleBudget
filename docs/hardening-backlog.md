@@ -121,19 +121,20 @@ Codex + 전문 에이전트 3종(아키텍처/SOLID, 보안/RLS, 코드품질)�
 **남은 한계**:
 1. TTL 보다 오래 오프라인이던 기기가 삭제된 항목을 아직 들고 있으면 부활시킨다.
    실사용에서 사실상 발생하지 않으며, 영구 보존하면 원장 blob 이 무한히 커진다.
-2. **B-2(full-blob LWW)가 미해결인 한 완전하지 않다.** 오래된 스냅샷을 든 탭이 업로드하면
-   클라우드의 tombstone 까지 덮어써 지운다. 삭제한 탭 자신은 로컬 표식으로 보호되지만,
-   그 표식을 아직 받지 못한 제3의 기기는 항목을 되살릴 수 있다. → B-2 를 먼저 해결해야 완결된다.
+2. ~~B-2(full-blob LWW)로 인한 표식 덮어쓰기~~ — ✅ 함께 해결(아래 B-2 참고).
 3. **시계 오차**: 삭제한 기기의 시계가 TTL(1년) 이상 과거로 틀어져 있으면, 정상 시계의 다른 기기가
    그 표식을 즉시 만료로 판단해 버려 삭제가 전파되지 않는다. 근본 해법은 '기기가 그 표식을 처음 본 시각'을
    따로 기록하는 것(firstSeen)이지만, 발생 빈도 대비 복잡도가 커서 채택하지 않았다.
 
-### B-2. 탭 2개가 서로를 통째로 덮어씀 (full-blob LWW) — HIGH
-최초 동기화 이후 재fetch·realtime 구독·`storage` 이벤트 리스너가 없다. `updated_at` 은 select 만 하고
-비교에 안 쓴다. 업로드 경로에는 병합이 전혀 없다(초기 동기화에만 있음).
-→ 같은 계정 탭 2개에서, 탭2가 stale 스냅샷으로 행 전체를 upsert 하면 탭1의 거래가 소멸.
-→ upsert 전 `updated_at` 조건부 쓰기(`.eq('updated_at', lastSeen)`) 후 충돌 시 재병합.
-   `BroadcastChannel`/`storage` 리스너로 탭 간 케이스만 막아도 비용 대비 효과가 크다.
+### ~~B-2. 탭 2개가 서로를 통째로 덮어씀 (full-blob LWW)~~ — ✅ 해결 (feature/ledger-tombstones)
+`updated_at` 을 버전으로 쓰는 **낙관적 동시성 제어**로 대체. `update ... where user_id=? and updated_at=?`
+가 stale 이면 0행 → conflict → 서버 최신본을 읽어 재병합(`mergeForUpload`) 후 재시도(최대 5회).
+행이 없으면 INSERT 시도, 경쟁하면 23505 → conflict. 로컬 PostgreSQL 18 로 전제 실측 확인:
+트리거의 updated_at 증가, stale 조건부 UPDATE 0행, ISO 문자열 왕복 일치, 중복 INSERT 23505.
+병합 규칙: 설정/아이템은 이 탭 우선(last-writer-wins), 원장은 합집합 + tombstone 차감.
+이로써 B-1(tombstone)의 "stale 탭이 서버 표식을 덮어쓴다"는 한계도 함께 해소된다.
+**남은 것**: 탭 간 즉시 반영(BroadcastChannel/`storage` 이벤트)은 없다 — 다른 탭의 변경은
+그 탭이 다음 업로드에서 충돌·병합할 때 화면에 반영된다. 정합성 문제는 아니고 UX 지연이다.
 
 ### B-3. localStorage 파싱 실패 시 원본 파괴 — HIGH
 `readJSON` 이 파싱 에러를 삼키고 `null` → 빈 상태로 로드 → `App.jsx` 의 자동저장 이펙트가

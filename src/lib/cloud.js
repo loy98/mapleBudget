@@ -83,14 +83,52 @@ export async function fetchUserData(userId) {
   if (error) throw error;
   return data; // 없으면 null
 }
-export async function upsertUserData(userId, snap) {
-  const { error } = await supabase
+// ===== 낙관적 동시성 제어 =====
+// 이전에는 무조건 upsert(행 전체 덮어쓰기)였다. 그래서 오래된 스냅샷을 든 탭이 나중에 쓰면
+// 다른 탭이 올린 거래와 삭제 표식(tombstone)을 통째로 지웠다 — 삭제 전파의 존재 이유가 무너진다.
+//
+// 서버가 트리거로 채우는 updated_at 을 '버전'으로 삼는다. 내가 마지막으로 본 버전일 때만 쓰기가 성립하고,
+// 그 사이 누가 썼다면 0행이 갱신되어 conflict 로 돌아온다(로컬 PostgreSQL 로 실측 확인).
+// 호출측은 다시 읽어 병합한 뒤 재시도한다.
+//
+// 반환: { updatedAt } 성공 | { conflict: true } 버전 불일치(또는 첫 삽입 경쟁)
+export async function writeUserData(userId, snap, expectedUpdatedAt) {
+  const row = { calc: snap.calc, my_items: snap.my_items, ledger: snap.ledger };
+
+  // 아직 행이 없다고 알고 있는 경우 → INSERT. 다른 기기가 먼저 만들었으면 23505 로 conflict.
+  if (!expectedUpdatedAt) {
+    const { data, error } = await supabase
+      .from("user_data")
+      .insert({ user_id: userId, ...row })
+      .select("updated_at")
+      .maybeSingle();
+    if (!error) return { updatedAt: data?.updated_at ?? null };
+    if (error.code === "23505") return { conflict: true };
+    throw error;
+  }
+
+  const { data, error } = await supabase
     .from("user_data")
-    .upsert(
-      { user_id: userId, calc: snap.calc, my_items: snap.my_items, ledger: snap.ledger },
-      { onConflict: "user_id" }
-    );
+    .update(row)
+    .eq("user_id", userId)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("updated_at")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) return { conflict: true }; // 0행 = 그 사이 다른 기기가 씀(또는 행이 사라짐)
+  return { updatedAt: data.updated_at };
+}
+
+// 업로드 충돌 시의 병합 규칙.
+// calc/my_items = 지금 이 탭의 값이 이긴다(사용자가 방금 편집한 것). 설정은 last-writer-wins 로 충분하다.
+// ledger = 합집합 + tombstone 차감. 거래는 손실도 부활도 없어야 하므로 여기서만 진짜 병합이 필요하다.
+export function mergeForUpload(localSnap, cloud) {
+  const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+  return {
+    calc: localSnap.calc,
+    my_items: localSnap.my_items,
+    ledger: mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, isFinite(serverNow) ? serverNow : null),
+  };
 }
 
 // ===== 병합 (최초 로그인 시 로컬 ↔ 클라우드) =====
