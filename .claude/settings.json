@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "//": "모델: 목표가 정해지면 '작업 과정'은 전부 허용(Bash(*) + 툴). 사람의 판단은 명령 단위가 아니라 '결정 지점'에서만 — 방향성·커밋 여부는 Claude가 대화로 묻고(권한 규칙 아님, 행동 규약), 되돌리기 어렵거나 바깥으로 나가는 것(git push, main 체크아웃, 배포, 시크릿 읽기)은 ask로 확인, 파괴적·강제·시크릿파일은 deny로 차단. 우선순위 deny > ask > allow 라서 allow에 Bash(*)가 있어도 ask/deny가 이긴다.",
+
+  "//limits": "Bash(*)를 열었으므로 cat/grep/sed/node 등으로 시크릿을 읽는 우회는 권한 규칙만으로 완전히는 못 막는다(아래 deny의 *.env.local* 등은 speed bump일 뿐, base64·변수확장 등으로 뚫린다). 진짜 경계는 (1) 시크릿을 .gitignore로 커밋 제외, (2) 시크릿을 저장소에 두지 않기, (3) git push/main 배포를 사람이 확인. Claude는 요청받지 않은 한 시크릿을 읽지 않고, 외부로 데이터를 보내지 않는다.",
+
+  "permissions": {
+    "defaultMode": "acceptEdits",
+
+    "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "TodoWrite",
+      "Task",
+      "WebFetch",
+      "WebSearch",
+      "Skill",
+
+      "mcp__claude-in-chrome",
+      "mcp__context7",
+      "mcp__filesystem",
+      "mcp__git",
+      "mcp__everything-search"
+    ],
+
+    "//ask": "여기 있는 것만 실행 전 확인(대화 + 프롬프트). 되돌리기 어렵거나 바깥으로 나가는 것.",
+    "ask": [
+      "Bash(git push*)",
+      "Bash(git -C * push*)",
+      "Bash(git checkout main*)",
+      "Bash(git switch main*)",
+      "Bash(git remote *)",
+      "Bash(gh pr merge*)",
+      "Bash(gh release*)",
+      "Bash(npm publish*)",
+      "Bash(npx wrangler*)",
+      "Bash(wrangler*)",
+      "Bash(supabase *)",
+
+      "PowerShell(*git push*)",
+      "PowerShell(*git checkout main*)",
+      "PowerShell(*git switch main*)",
+      "PowerShell(*wrangler*)",
+      "PowerShell(*supabase*)",
+      "PowerShell(*npm publish*)",
+
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Write(./.env)",
+      "Write(./.env.*)",
+      "Edit(./.env)",
+      "Edit(./.env.*)"
+    ],
+
+    "//deny": "무조건 차단. 파괴적·강제·시크릿파일. *.env.local* 등 셸 패턴은 speed bump(완전 차단 아님).",
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rm -r *)",
+      "Bash(sudo *)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -fd*)",
+      "Bash(git filter-branch*)",
+
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push *--force*)",
+      "Bash(git push *-f *)",
+      "Bash(git push * +*)",
+
+      "Bash(git add -f*)",
+      "Bash(git add --force*)",
+      "Bash(git add *-f *)",
+      "Bash(git add *--force*)",
+
+      "Bash(*.env.local*)",
+      "Bash(*.env.*.local*)",
+      "Bash(*service_role*)",
+      "Bash(*id_rsa*)",
+
+      "PowerShell(*Remove-Item*-Recurse*-Force*)",
+      "PowerShell(*-Recurse*-Force*)",
+      "PowerShell(*.env.local*)",
+      "PowerShell(*.env.*.local*)",
+      "PowerShell(*service_role*)",
+      "PowerShell(*id_rsa*)",
+
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Read(**/id_rsa*)",
+      "Read(**/*service_role*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Write(./.env.local)",
+      "Write(./.env.*.local)",
+      "Edit(./.env.local)",
+      "Edit(./.env.*.local)"
+    ]
+  }
+}

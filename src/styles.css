@@ -390,20 +390,85 @@ tbody tr{transition:background .12s}
 
 /* ===== 리디자인: 주간 추세 스파크라인 박스 ===== */
 .trendbox{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px 12px;margin:14px 0 6px}
-.trend-top{display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.trend-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .trend-lbl{font-size:12px;color:var(--sub);font-weight:600}
 .trend-big{font-family:var(--font-num);font-size:26px;font-weight:800;letter-spacing:-.03em;line-height:1.15;margin-top:2px}
 .trend-grade{font-size:12.5px;color:var(--sub);white-space:nowrap}
 .trend-grade b{color:var(--accent2);font-weight:800}
-.spark-wrap{width:100%;margin-top:8px}
+.spark-wrap{position:relative;width:100%;margin-top:8px;outline:none;touch-action:pan-y}
+.spark-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:8px}
 .spark{display:block;max-width:100%;height:88px}
-.xlab{display:flex;justify-content:space-between;font-size:10.5px;color:var(--hint);margin-top:2px}
-/* 추세 차트 도구(등급 + 모드 토글) */
-.trend-tools{display:flex;align-items:center;gap:12px}
+/* x축 눈금: 모든 라벨을 데이터 포인트 x좌표 '가운데'에 배치.
+   양끝 라벨이 차트 폭을 살짝 넘치므로 .trendbox 좌우 패딩 안으로 흘러나가게 둔다(overflow:visible). */
+.spark-x{position:relative;height:15px;margin-top:3px;overflow:visible}
+.spark-x .sx{position:absolute;top:0;transform:translateX(-50%);font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--hint);white-space:nowrap;transition:color .12s}
+.spark-x .sx.on{color:var(--accent);font-weight:800}
+/* 호버 툴팁 */
+.spark-tip{position:absolute;transform:translate(-50%,-100%);pointer-events:none;z-index:3;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-sm);box-shadow:var(--shadow);padding:6px 10px;white-space:nowrap}
+.spark-tip.down{transform:translate(-50%,0)}
+.spark-tip .st-d{font-size:10.5px;color:var(--sub);font-weight:700}
+.spark-tip .st-v{font-size:13.5px;font-weight:800;letter-spacing:-.02em;margin-top:1px}
+/* 추세 차트 도구(등급 + 모드 토글) — 카드 상단선에 맞춰 붙인다 */
+.trend-tools{display:flex;align-items:center;gap:14px;margin-top:-2px}
+.trend-grade{line-height:1.5}
+.chart-mode{display:flex;align-items:center;gap:7px}
+.cm-lbl{font-size:11px;color:var(--hint);font-weight:600;white-space:nowrap}
 .chart-toggle{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px}
-.chart-toggle button{background:none;border:none;color:var(--sub);font:inherit;font-size:11.5px;font-weight:700;padding:4px 11px;border-radius:99px;cursor:pointer}
+.chart-toggle button{background:none;border:none;color:var(--sub);font:inherit;font-size:11.5px;font-weight:700;padding:4px 13px;border-radius:99px;cursor:pointer}
 .chart-toggle button.on{background:var(--accent);color:var(--on-accent)}
-@media(max-width:600px){.trend-tools{flex-direction:column;align-items:flex-end;gap:6px}}
+@media(max-width:600px){.trend-tools{flex-direction:column;align-items:flex-end;gap:6px;margin-top:0}}
+
+/* ===== 주차별 거래 현황 표: 구매/판매 개수 열 + 13주 합계 행 ===== */
+.calwrap th.qh,.calwrap td.qty{width:1%;white-space:nowrap}
+.calwrap td.qty .u{font-size:10.5px;margin-left:1px}
+.calwrap th.sep,.calwrap td.sep{border-right:1px solid var(--line);padding-right:12px}
+.calwrap th.sep + th,.calwrap td.sep + td{padding-left:12px}
+.wktot-row td{border-bottom:none;border-top:1.5px solid var(--line);font-weight:800;background:color-mix(in srgb,var(--sub) 5%,transparent)}
+/* 라벨 칸('13주 합계'). 펼치기 열이 첫 칸이라 :first-child 로는 못 잡는다. */
+.wktot-row td.lh{color:var(--sub);font-size:12px;font-weight:700}
+
+/* ===== 품목별 내역: 주차 확장 행 + 누적 요약 토글 ===== */
+/* 첫 칸(펼치기 버튼)은 폭 최소화. 주/품목 칸은 왼쪽 정렬을 되살린다(th:first-child 규칙이 밀려남). */
+.calwrap th.exph,.calwrap td.expc{width:1%;padding-left:0;padding-right:4px}
+.calwrap th.lh,.calwrap td.lh{text-align:left}
+
+.disc{display:inline-flex;align-items:center;gap:7px;background:none;border:none;color:var(--sub);font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:8px 2px;margin-top:6px;border-radius:var(--r-sm)}
+.disc:hover,.disc.on{color:var(--accent)}
+.disc:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.disc .caret{display:inline-block;font-size:9px;line-height:1;transition:transform .14s}
+.disc.on .caret{transform:rotate(90deg)}
+.disc.xs{padding:4px 5px;gap:0;margin-top:0}
+@media(prefers-reduced-motion:reduce){.disc .caret{transition:none}}
+
+/* 품목 서브행: 부모 주차 행에 딸린 것으로 읽히게 들여쓰기 + 옅은 바탕 */
+tr.opened td{border-bottom-color:transparent}
+tr.itemrow td{background:color-mix(in srgb,var(--sub) 4%,transparent);border-bottom:1px dashed var(--line);padding-top:6px;padding-bottom:6px;font-size:12.3px}
+tr.itemrow td.lh{padding-left:14px}
+tr.itemrow td.avgc{color:var(--sub);font-size:11.7px}
+/* 확장 그룹의 마지막 품목행만 실선으로 닫는다(:last-of-type 는 tbody 전체의 마지막만 잡혀서 못 씀) */
+tr.itemrow.lastitem td{border-bottom:1px solid var(--line)}
+
+.iname{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.iname .int{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(42vw,200px)}
+.calwrap td.stock{font-weight:700;color:var(--txt)}
+
+/* ===== 통계 그룹 카드 (대표 지표 1 + 보조 지표 목록) ===== */
+.sgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:14px}
+.sgrp{display:flex;flex-direction:column;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;transition:border-color .14s,box-shadow .14s}
+.sgrp.best{box-shadow:0 0 0 1px var(--accent) inset, var(--shadow);background:color-mix(in srgb,var(--accent) 7%,var(--panel2))}
+.sg-head{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:800;color:var(--sub);letter-spacing:.02em}
+.sg-ico{font-size:13px;line-height:1}
+.sg-lbl{font-size:11.5px;color:var(--sub);font-weight:600;margin-top:12px}
+.sg-val{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.2;margin-top:3px}
+.sg-badge{margin-top:6px;font-size:11.5px;color:var(--sub)}
+.sg-badge b{color:var(--accent2);font-weight:800}
+.sg-rows{margin:12px 0 0;padding:2px 0 0;border-top:1px solid var(--line);display:flex;flex-direction:column}
+.sg-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:7px 0;font-size:12px}
+.sg-row + .sg-row{border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.sg-row dt{color:var(--sub);font-weight:600;word-break:keep-all}
+.sg-row dd{margin:0;font-weight:700;text-align:right;word-break:keep-all}
+.sg-hint{font-size:11px;color:var(--hint);line-height:1.5;margin-top:9px}
+@media(max-width:600px){.sg-val{font-size:20px}}
 
 /* ===== 리디자인: 등급 사다리 (현재 위치 강조) ===== */
 .ladder{display:flex;flex-direction:column;margin:4px 0 8px;max-width:440px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:6px 16px}
