@@ -33,6 +33,10 @@
       "Bash(wc *)",
       "Bash(mkdir *)",
       "Bash(touch *)",
+      "Bash(sleep *)",
+      "Bash(netstat *)",
+      "Bash(curl http://localhost:*)",
+      "Bash(curl http://127.0.0.1:*)",
 
       "Bash(npm run *)",
       "Bash(npm install)",
