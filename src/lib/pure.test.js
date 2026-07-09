@@ -944,6 +944,29 @@ describe("저장소 손상 방어 (B-3)", () => {
     expect(saveLedger({ buys: [] })).toBe(true); // 쓰기 차단 없음
   });
 
+  it("이미 다른 슬롯에 백업돼 있으면 쿼터가 꽉 차도 백업 성공으로 본다 (Codex B)", () => {
+    const [s1, s2] = corruptSlots(LKEY);
+    const RAW = '{"x":';
+    store.set(s1, "다른-손상본"); // 첫 슬롯은 다른 내용
+    store.set(s2, RAW);           // 두 번째 슬롯에 이미 이 원본이 안전하게 보관돼 있다
+    store.set(LKEY, RAW);
+    failWrites.add("*");          // 이제 어디에도 쓸 수 없다
+
+    loadLedger();
+    // 새로 쓸 필요가 없으므로 '백업됨'이어야 한다 → 쓰기가 불필요하게 막히지 않는다
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+  });
+
+  it("첫 슬롯에 이미 같은 원본이 있으면 쿼터와 무관하게 백업됨", () => {
+    const [s1] = corruptSlots(LKEY);
+    const RAW = '{"y":';
+    store.set(s1, RAW);
+    store.set(LKEY, RAW);
+    failWrites.add("*");
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+  });
+
   it("백업 자체가 불가능할 때만 쓰기를 막는다 (원본이 제자리에 남는다)", () => {
     const THIRD = '{"third":"corrupt';
     store.set(LKEY, THIRD);

@@ -74,18 +74,21 @@ export const corruptSlots = (key) => [key + CORRUPT_SUFFIX, key + CORRUPT_SUFFIX
 
 function backupCorrupt(key, raw) {
   const [first, latest] = corruptSlots(key);
+  const holds = (slot) => { try { return localStorage.getItem(slot) === raw; } catch { return false; } };
+
+  // 쓰기를 시도하기 '전에' 두 슬롯을 모두 확인한다. 첫 슬롯 setItem 이 쿼터로 던진다는 이유로
+  // 두 번째 슬롯에 이미 안전하게 보관된 원본을 못 보고 '백업 실패'로 판정하면, 쓰기가 불필요하게 막힌다.
+  if (holds(first) || holds(latest)) return true;
+
   try {
-    const f = localStorage.getItem(first);
-    if (f === raw) return true;                 // 이미 최초 슬롯에 보관 중
-    if (f == null) {
+    if (localStorage.getItem(first) == null) {
       localStorage.setItem(first, raw);
       return localStorage.getItem(first) === raw;
     }
-    if (localStorage.getItem(latest) === raw) return true; // 이미 최근 슬롯에 보관 중
-    localStorage.setItem(latest, raw);          // 최근 슬롯을 밀어낸다
+    localStorage.setItem(latest, raw); // 두 슬롯이 다른 내용으로 차 있다 → 최근 슬롯을 밀어낸다
     return localStorage.getItem(latest) === raw;
   } catch {
-    return false; // 공간 부족 등 → 백업 실패. 이 경우에만 쓰기가 막힌다.
+    return false; // 저장소에 아예 쓸 수 없다 → 백업 실패. 이 경우에만 쓰기가 막힌다.
   }
 }
 
