@@ -113,13 +113,13 @@ Codex + 전문 에이전트 3종(아키텍처/SOLID, 보안/RLS, 코드품질)�
 
 ## ⏳ 미해결 — 설계 필요 (착수 전 반드시 읽을 것)
 
-### B-1. 삭제 전파 부재 (tombstone) — HIGH
-`mergeSnapshots` 는 userId 있는 **모든 마운트마다** 실행되고 ledger 는 순수 id 합집합이다.
-→ 기기 A가 거래 X를 지워도, X를 아직 가진 기기 B가 앱을 열면 X가 부활하고 A에도 되돌아온다.
-단일 기기 변형: X 삭제 후 800ms 디바운스 안에 탭을 닫으면(또는 오프라인) 다음 로드에서 X 복귀.
-**즉 해당 항목을 한 번이라도 본 기기가 있으면 삭제 기능이 동작하지 않는다.**
-1차 백로그 P2-3은 이를 'lost-update 정밀도'로 서술했으나 실제로는 더 강한 결함.
-→ 항목별 `deletedAt` tombstone(보존 90일) + `mergeLedger` 에서 tombstone id 제거.
+### ~~B-1. 삭제 전파 부재 (tombstone)~~ — ✅ 해결 (feature/ledger-tombstones)
+`ledger.deleted = { [id]: 삭제시각 }` 도입. 병합은 양쪽 표식을 먼저 합친 뒤(같은 id 는 더 늦은 시각)
+그 id 를 어느 쪽 버킷에 있든 제거한다(**삭제 우선** — 한쪽이 지우고 다른 쪽이 수정해도 되살리지 않음).
+단일 기기 변형(디바운스 전 탭 닫기)도 함께 해결된다. `ledger` 가 JSONB 라 DB 마이그레이션 불필요.
+삭제 진입점은 `deleteLedgerEntry` 하나. 표식은 `TOMBSTONE_TTL_DAYS`(1년) 후 만료.
+**남은 한계**: TTL 보다 오래 오프라인이던 기기가 삭제된 항목을 아직 들고 있으면 부활시킨다.
+실사용에서 사실상 발생하지 않으며, 영구 보존하면 원장 blob 이 무한히 커진다.
 
 ### B-2. 탭 2개가 서로를 통째로 덮어씀 (full-blob LWW) — HIGH
 최초 동기화 이후 재fetch·realtime 구독·`storage` 이벤트 리스너가 없다. `updated_at` 은 select 만 하고

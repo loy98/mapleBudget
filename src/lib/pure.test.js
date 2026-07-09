@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
-  getDataOwner, setDataOwner, clearAccountData,
+  getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
-import { mergeSnapshots } from "./cloud.js";
+import { mergeSnapshots, mergeLedger } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
 import { computeForecast } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
-import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS } from "./constants.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -210,8 +210,8 @@ describe("normalizeLedger", () => {
     expect(l.cashes[0].rate == null).toBe(true);
     expect(l.cashes[0].won).toBe(1000);
   });
-  it("빈/누락 입력에도 4버킷 반환", () => {
-    expect(normalizeLedger(null)).toEqual({ buys: [], sells: [], cashes: [], spends: [] });
+  it("빈/누락 입력에도 4버킷 + 빈 삭제표식 반환", () => {
+    expect(normalizeLedger(null)).toEqual({ buys: [], sells: [], cashes: [], spends: [], deleted: {} });
   });
 });
 
@@ -538,5 +538,108 @@ describe("resolveRules — Codex 재검수 반영", () => {
     expect(r.feeBase).toBe(5);
     expect(r.mileageAccrual).toBe(0.05);
     expect(r.tiers).toEqual(seed.tiers);
+  });
+});
+
+// ===== 삭제 전파(tombstone) =====
+// id 합집합 병합은 '없음'을 표현하지 못해, 삭제된 항목을 아직 가진 기기가 되살렸다.
+const LED = (buys, deleted) => ({ buys, sells: [], cashes: [], spends: [], ...(deleted ? { deleted } : {}) });
+const T0 = 1_700_000_000_000; // 고정 시각(테스트 결정성)
+
+describe("tombstone — 삭제 전파", () => {
+  it("deleteLedgerEntry: 항목 제거 + 표식 기록", () => {
+    const before = LED([{ id: "x" }, { id: "y" }]);
+    const after = deleteLedgerEntry(before, "buys", "x", T0);
+    expect(after.buys.map((b) => b.id)).toEqual(["y"]);
+    expect(after.deleted).toEqual({ x: T0 });
+    expect(before.buys).toHaveLength(2); // 원본 불변
+  });
+
+  it("기기 A가 지운 거래를, 아직 들고 있는 기기 B가 되살리지 못한다", () => {
+    const a = deleteLedgerEntry(LED([{ id: "x" }, { id: "y" }]), "buys", "x", T0); // A: x 삭제
+    const b = LED([{ id: "x" }, { id: "y" }]);                                     // B: 아직 x 보유
+    const merged = mergeLedger(a, b, T0 + 1000);
+    expect(merged.buys.map((r) => r.id)).toEqual(["y"]);
+    expect(merged.deleted).toEqual({ x: T0 }); // 표식은 살아남아 계속 전파
+  });
+
+  it("반대 방향도 동일 — 클라우드의 표식이 로컬 항목을 지운다", () => {
+    const local = LED([{ id: "x" }, { id: "y" }]);
+    const cloud = deleteLedgerEntry(LED([{ id: "x" }, { id: "y" }]), "buys", "x", T0);
+    const merged = mergeLedger(local, cloud, T0 + 1000);
+    expect(merged.buys.map((r) => r.id)).toEqual(["y"]);
+  });
+
+  it("삭제 우선: 한쪽이 지우고 다른 쪽이 수정해도 되살아나지 않는다", () => {
+    const a = deleteLedgerEntry(LED([{ id: "x", qty: 1 }]), "buys", "x", T0);
+    const b = LED([{ id: "x", qty: 99 }]); // 다른 기기에서 수정
+    expect(mergeLedger(a, b, T0 + 1000).buys).toEqual([]);
+  });
+
+  it("단일 기기: 삭제 후 디바운스 안에 탭을 닫아도 다음 로드에서 부활하지 않는다", () => {
+    // 로컬은 즉시 저장(표식 포함), 클라우드는 아직 옛 상태(x 있음)
+    const local = deleteLedgerEntry(LED([{ id: "x" }]), "buys", "x", T0);
+    const cloud = LED([{ id: "x" }]);
+    const { snapshot } = mergeSnapshots(
+      { calc: {}, my_items: [], ledger: local },
+      { calc: {}, my_items: [], ledger: cloud },
+      { now: T0 + 1000 }
+    );
+    expect(snapshot.ledger.buys).toEqual([]);
+  });
+
+  it("삭제하지 않은 거래는 양쪽에서 모두 보존된다 (합집합 유지)", () => {
+    const a = LED([{ id: "a1" }]);
+    const b = LED([{ id: "b1" }]);
+    expect(mergeLedger(a, b, T0).buys.map((r) => r.id).sort()).toEqual(["a1", "b1"]);
+  });
+
+  it("TTL 만료된 표식은 정리된다 (원장 blob 무한 증가 방지)", () => {
+    const old = T0 - (TOMBSTONE_TTL_DAYS + 1) * 86400000;
+    const led = LED([], { stale: old, fresh: T0 - 1000 });
+    const n = normalizeLedger(led, T0);
+    expect(n.deleted).toEqual({ fresh: T0 - 1000 });
+  });
+
+  it("같은 id 의 표식이 양쪽에 있으면 더 늦은 시각을 남긴다 (오래 살아야 안전)", () => {
+    const merged = mergeDeleted({ x: T0 }, { x: T0 + 5000 }, T0);
+    expect(merged.x).toBe(T0 + 5000);
+  });
+
+  it("normalizeLedger: 로컬에 표식과 항목이 동시에 있으면 삭제를 존중한다", () => {
+    const n = normalizeLedger(LED([{ id: "x" }, { id: "y" }], { x: T0 }), T0);
+    expect(n.buys.map((b) => b.id)).toEqual(["y"]);
+  });
+
+  it("구버전 원장(deleted 없음)도 그대로 동작한다", () => {
+    const n = normalizeLedger({ buys: [{ id: "x" }] }, T0);
+    expect(n.deleted).toEqual({});
+    expect(n.buys).toHaveLength(1);
+  });
+
+  it("malformed deleted 는 흡수한다", () => {
+    expect(normalizeLedger(LED([], "nope"), T0).deleted).toEqual({});
+    expect(normalizeLedger(LED([], [1, 2]), T0).deleted).toEqual({});
+    expect(normalizeLedger(LED([], { x: "abc", y: -1, z: null }), T0).deleted).toEqual({});
+  });
+
+  it("프로토타입 오염과 상속 키에 안전하다", () => {
+    // "__proto__" 키는 받지 않는다
+    const n = normalizeLedger(LED([], JSON.parse('{"__proto__": 1, "ok": ' + T0 + '}')), T0);
+    expect(n.deleted).toEqual({ ok: T0 });
+    expect(Object.prototype.polluted).toBeUndefined();
+    // id 가 "toString" 인 항목이 상속 키 때문에 잘못 삭제되면 안 된다
+    const merged = mergeLedger(LED([{ id: "toString" }]), LED([]), T0);
+    expect(merged.buys.map((b) => b.id)).toEqual(["toString"]);
+    // 실제로 지운 경우엔 지워져야 한다
+    const del = deleteLedgerEntry(LED([{ id: "toString" }]), "buys", "toString", T0);
+    expect(del.buys).toEqual([]);
+    expect(mergeLedger(del, LED([{ id: "toString" }]), T0).buys).toEqual([]);
+  });
+
+  it("남의 계정 표식이 내 거래를 지우지 않는다 (소유자 게이트와 함께 동작)", () => {
+    const EMPTY = { buys: [], sells: [], cashes: [], spends: [], deleted: {} };
+    const cloudMine = LED([{ id: "mine" }]);
+    expect(mergeLedger(EMPTY, cloudMine, T0).buys.map((b) => b.id)).toEqual(["mine"]);
   });
 });

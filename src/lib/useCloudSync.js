@@ -18,7 +18,8 @@ function configRatePatch(cfg, onlyKeys) {
 }
 const validItems = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof x.name === "string") : []);
 // 다른 계정 소유의 로컬 데이터를 병합에서 배제할 때 쓰는 '아무것도 없음' 스냅샷.
-const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [] } };
+// deleted 도 비운다 — 남의 계정 tombstone 이 내 계정 거래를 지우면 안 된다.
+const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [], deleted: {} } };
 
 // ============================================================
 // useCloudSync — 세션·app_config·클라우드 동기화·업로드를 한 곳에 응집(App.jsx의 SRP 회복).

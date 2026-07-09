@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { TIERS } from "../lib/constants.js";
 import { fmtD, todayStr, curMonth, weekStartThu, uid } from "../lib/util.js";
-import { loadCalMode, saveCalMode } from "../lib/storage.js";
+import { loadCalMode, saveCalMode, deleteLedgerEntry } from "../lib/storage.js";
 import { useLedgerDerived } from "./logtab/useLedgerDerived.js";
 import StatsPanel from "./logtab/StatsPanel.jsx";
 import CalendarPanel from "./logtab/CalendarPanel.jsx";
@@ -32,7 +32,8 @@ export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS
   // ----- 원장 조작 -----
   const patchEntry = (kind, id, patch) =>
     setLedger({ ...ledger, [kind]: ledger[kind].map((x) => (x.id === id ? { ...x, ...patch } : x)) });
-  const delEntry = (kind, id) => setLedger({ ...ledger, [kind]: ledger[kind].filter((x) => x.id !== id) });
+  // 삭제 표식을 남겨야 다른 기기로 전파된다. 배열에서 빼기만 하면 그 항목을 아직 가진 기기가 되살린다.
+  const delEntry = (kind, id) => setLedger(deleteLedgerEntry(ledger, kind, id));
   const addEntryOn = (kind, base) => {
     const d = selectedDate || todayStr();
     setLedger({ ...ledger, [kind]: [...ledger[kind], { id: uid(), date: d, ...base }] });

@@ -1,5 +1,6 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearAccountData } from "./storage.js";
+import { clearAccountData, mergeDeleted, isDeleted } from "./storage.js";
+import { LEDGER_BUCKETS } from "./constants.js";
 
 export { cloudEnabled };
 
@@ -100,7 +101,7 @@ export async function upsertUserData(userId, snap) {
 // opts.localTouched: 이 기기에서 사용자가 계산기/아이템을 직접 편집했는지(거래 없이 설정만 바꾼 경우 포착 — P1-4).
 export function mergeSnapshots(local, cloud, opts = {}) {
   if (!cloud) return { snapshot: local, conflict: false };
-  const ledger = mergeLedger(local.ledger, cloud.ledger);
+  const ledger = mergeLedger(local.ledger, cloud.ledger, opts.now);
   const cloudHasItems = !!(cloud.my_items && cloud.my_items.length);
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
   const my_items = cloudHasItems ? cloud.my_items : local.my_items;
@@ -113,17 +114,24 @@ export function mergeSnapshots(local, cloud, opts = {}) {
   const conflict = (cloudHasCalc || cloudHasItems) && localActive;
   return { snapshot: { calc, my_items, ledger }, conflict };
 }
-function mergeLedger(a = {}, b = {}) {
+// id 합집합 + tombstone 차감.
+// 합집합만으로는 '삭제'를 표현할 수 없어, 삭제된 항목을 아직 가진 기기가 접속하면 부활시켰다.
+// (단일 기기에서도: 삭제 후 디바운스 안에 탭을 닫으면 로컬엔 없고 클라우드엔 있는 상태가 된다.)
+// 이제 양쪽 tombstone 을 먼저 합치고, 그 id 는 어느 쪽 버킷에 있든 결과에서 제거한다.
+export function mergeLedger(a = {}, b = {}, now = Date.now()) {
   const out = {};
   // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
   const arr = (v) => (Array.isArray(v) ? v : []);
-  ["buys", "sells", "cashes", "spends"].forEach((k) => {
+  const deleted = mergeDeleted(a && a.deleted, b && b.deleted, now);
+  LEDGER_BUCKETS.forEach((k) => {
     const map = new Map();
     arr(a[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
     // 같은 id면 클라우드(b) 우선. 항목별 타임스탬프가 없어 정밀 비교는 불가(알려진 한계).
     // 서로 다른 id는 모두 보존되므로 '거래가 사라지는' 손실은 없음.
     arr(b[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
-    out[k] = [...map.values()];
+    // 삭제 우선: 한쪽이 지우고 다른 쪽이 수정했어도 되살리지 않는다.
+    out[k] = [...map.values()].filter((x) => !isDeleted(deleted, x.id));
   });
+  out.deleted = deleted;
   return out;
 }

@@ -35,6 +35,15 @@ export const MILEAGE_ACCRUAL = 0.05;
 // 창 합계는 [i-(N-1) … i] 로 정확히 N개 항이어야 한다.
 export const WINDOW_WEEKS = 13;
 
+// 거래 원장의 4개 버킷. 한 곳에서 정의해 병합·정규화·통계가 같은 목록을 쓴다.
+export const LEDGER_BUCKETS = ["buys", "sells", "cashes", "spends"];
+
+// 삭제 표식(tombstone) 보존 기간(일).
+// 삭제는 '없음'이라서 id 합집합 병합으로는 표현할 수 없다 → 삭제된 id 를 명시적으로 기록해 전파한다.
+// 영구 보존하면 원장 blob 이 무한히 커지므로 만료시킨다. 대가: 이 기간보다 오래 오프라인이던 기기가
+// 삭제된 항목을 아직 들고 있으면 그 항목이 되살아난다. 1년이면 실사용에서 사실상 발생하지 않는다.
+export const TOMBSTONE_TTL_DAYS = 365;
+
 // ===== 게임 규칙(rules) =====
 // 시세가 아니라 넥슨이 정하는 '규칙'이라 사용자가 편집하지 않는다. 따라서 settings(사용자 소유)가 아니라
 // 순수 함수의 인자로 흘려보낸다 — 전역 상태를 읽지 않으므로 computeCalc/estGrade 는 순수하게 남는다.

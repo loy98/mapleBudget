@@ -1,4 +1,7 @@
-import { DEFAULT_SETTINGS, DEFAULT_CHARGES, DEFAULT_CALC_ITEMS, DEFAULT_ITEMS } from "./constants.js";
+import {
+  DEFAULT_SETTINGS, DEFAULT_CHARGES, DEFAULT_CALC_ITEMS, DEFAULT_ITEMS,
+  LEDGER_BUCKETS, TOMBSTONE_TTL_DAYS,
+} from "./constants.js";
 import { uid } from "./util.js";
 
 // 기존 단일 HTML 버전과 동일한 키 → 사용자 데이터 그대로 승계
@@ -79,14 +82,54 @@ export function loadMyItems() {
 }
 export const saveMyItems = (items) => writeJSON(ITEMS_KEY, items);
 
-// ===== 거래 원장 =====
-export function normalizeLedger(d) {
-  const src = d && typeof d === "object" ? d : {};
-  const led = { buys: asArray(src.buys), sells: asArray(src.sells), cashes: asArray(src.cashes), spends: asArray(src.spends) };
-  // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
-  ["buys", "sells", "cashes", "spends"].forEach((k) => {
-    led[k] = led[k].filter((x) => x && typeof x === "object");
-    led[k].forEach((x) => { if (!x.id) x.id = uid(); });
+// ===== 거래 원장 · 삭제 표식(tombstone) =====
+// 삭제는 '항목이 없다'는 사실이라, id 합집합 병합으로는 표현할 수 없다.
+// 그래서 삭제된 id 를 시각과 함께 ledger.deleted 에 남겨 다른 기기로 전파한다.
+//
+// 규칙:
+//  · 병합 시 tombstone 에 든 id 는 어느 쪽 버킷에 있든 제거한다(삭제 우선).
+//    → 한쪽이 지우고 다른 쪽이 수정했다면 '삭제'가 이긴다. 되살아나는 것보다 낫다.
+//  · tombstone 은 TTL 후 만료(원장이 무한히 커지지 않도록).
+//  · 키는 JSON 에서 오므로 프로토타입 오염과 "toString" 같은 상속 키에 안전해야 한다
+//    → 항상 hasOwn 으로 확인하고, 위험 키는 애초에 받지 않는다.
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function normalizeDeleted(d, now = Date.now()) {
+  const out = {};
+  if (!d || typeof d !== "object" || Array.isArray(d)) return out;
+  const cutoff = now - TOMBSTONE_TTL_DAYS * 86400000;
+  Object.keys(d).forEach((id) => {
+    if (!id || UNSAFE_KEYS.has(id) || !hasOwn(d, id)) return;
+    const t = Number(d[id]);
+    if (!isFinite(t) || t <= 0 || t < cutoff) return; // 만료·malformed 는 버린다
+    out[id] = t;
+  });
+  return out;
+}
+
+// 두 tombstone 집합의 합집합. 같은 id 면 더 '늦은' 삭제 시각을 남긴다 —
+// tombstone 은 오래 살아야 안전하다(일찍 만료되면 그 항목을 아직 든 기기가 되살린다).
+export function mergeDeleted(a, b, now = Date.now()) {
+  const out = normalizeDeleted(a, now);
+  const bb = normalizeDeleted(b, now);
+  Object.keys(bb).forEach((id) => {
+    out[id] = hasOwn(out, id) ? Math.max(out[id], bb[id]) : bb[id];
+  });
+  return out;
+}
+
+export const isDeleted = (deleted, id) => !!id && hasOwn(deleted, id);
+
+export function normalizeLedger(d, now = Date.now()) {
+  const src = d && typeof d === "object" && !Array.isArray(d) ? d : {};
+  const led = { deleted: normalizeDeleted(src.deleted, now) };
+  LEDGER_BUCKETS.forEach((k) => {
+    // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
+    const rows = asArray(src[k]).filter((x) => x && typeof x === "object");
+    rows.forEach((x) => { if (!x.id) x.id = uid(); });
+    // 로컬에 tombstone 이 있는데 항목도 남아 있으면(가져오기·구데이터) 삭제를 존중한다.
+    led[k] = rows.filter((x) => !isDeleted(led.deleted, x.id));
   });
   // 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
   // meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.
@@ -96,6 +139,18 @@ export function normalizeLedger(d) {
     }
   });
   return led;
+}
+
+// 항목 삭제 = 버킷에서 제거 + tombstone 기록. 삭제 경로는 반드시 이 함수를 거쳐야 전파된다.
+export function deleteLedgerEntry(ledger, kind, id, now = Date.now()) {
+  if (!id) return ledger;
+  const deleted = { ...normalizeDeleted(ledger.deleted, now) };
+  if (!UNSAFE_KEYS.has(id)) deleted[id] = now;
+  return {
+    ...ledger,
+    [kind]: asArray(ledger[kind]).filter((x) => x.id !== id),
+    deleted,
+  };
 }
 export function loadLedger() {
   return normalizeLedger(readJSON(LKEY));
@@ -107,9 +162,10 @@ export function localSnapshot() {
   return {
     calc: readJSON(KEY) || {},
     my_items: readJSON(ITEMS_KEY) || [],
-    ledger: readJSON(LKEY) || { buys: [], sells: [], cashes: [], spends: [] },
+    ledger: readJSON(LKEY) || emptyLedger(),
   };
 }
+export const emptyLedger = () => ({ buys: [], sells: [], cashes: [], spends: [], deleted: {} });
 export function writeLocalSnapshot({ calc, my_items, ledger }) {
   if (calc) writeJSON(KEY, calc);
   if (my_items) writeJSON(ITEMS_KEY, my_items);
