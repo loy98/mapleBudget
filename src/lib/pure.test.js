@@ -1149,3 +1149,31 @@ describe("padDate · 날짜 정규화 (Codex C)", () => {
     expect(rulesAt(H, n.buys[0].date).mileageRate).toBe(30); // 정규화 전이라면 40(가장 이른 규칙)
   });
 });
+
+// M-7: normalizeLedger 가 입력 객체를 제자리 변형하면, 호출자가 들고 있는 객체(클라우드 행 등)가 오염된다.
+describe("normalizeLedger 는 입력을 변형하지 않는다 (M-7)", () => {
+  it("행에 id/date 를 심지 않는다", () => {
+    const row = { qty: 1, date: "2026-7-2" };
+    const input = { buys: [row], sells: [], cashes: [], spends: [] };
+    const out = normalizeLedger(input);
+
+    expect(row.id).toBeUndefined();        // 입력은 그대로
+    expect(row.date).toBe("2026-7-2");
+    expect(out.buys[0].id).toBeTruthy();   // 출력만 정규화
+    expect(out.buys[0].date).toBe("2026-07-02");
+    expect(out.buys[0]).not.toBe(row);
+  });
+
+  it("현금화 rate 승계도 입력을 건드리지 않는다", () => {
+    const c = { id: "c", meso: 3, won: 1000 };
+    const out = normalizeLedger({ cashes: [c] });
+    expect(c.rate).toBeUndefined();
+    expect(out.cashes[0].rate).toBeCloseTo(1000 / 3, 10);
+  });
+
+  it("요율 스냅샷은 복사본에도 보존된다", () => {
+    const out = normalizeLedger({ buys: [{ id: "b", _effD: 0.1 }], sells: [{ id: "s", _fee: 0.05 }] });
+    expect(out.buys[0]._effD).toBe(0.1);
+    expect(out.sells[0]._fee).toBe(0.05);
+  });
+});
