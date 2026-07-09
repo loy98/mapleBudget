@@ -60,8 +60,15 @@ export default function App() {
     if (m) m.setAttribute("content", theme === "light" ? "#f4efe4" : "#0a0b0e");
   }, [theme]);
 
-  // 파생 계산 (기존 render()의 순수 버전)
-  const calc = useMemo(() => computeCalc(settings, charges, items), [settings, charges, items]);
+  // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
+  // 파생 계산보다 먼저 호출해야 rules(게임 규칙)를 computeCalc 에 넘길 수 있다.
+  const { session, syncState, chargeOptions, conflictPrompt, rules } = useCloudSync({
+    settings, charges, items, myItems, ledger,
+    setCalcState, setMyItems, setLedger,
+  });
+
+  // 파생 계산 (기존 render()의 순수 버전). rules 는 app_config 에서 오거나 constants 폴백.
+  const calc = useMemo(() => computeCalc(settings, charges, items, rules), [settings, charges, items, rules]);
 
   // 로컬 자동 저장 (게스트/로그인 공통 캐시)
   useEffect(() => saveCalcState(settings, charges, items), [settings, charges, items]);
@@ -75,12 +82,6 @@ export default function App() {
   const setCharges = (charges) => { markUserTouched(); setCalcState((s) => ({ ...s, charges: withRowKeys(charges) })); };
   const setItems = (items) => { markUserTouched(); setCalcState((s) => ({ ...s, items: withRowKeys(items) })); };
   const applyMyItems = (arr) => { markUserTouched(); setMyItems(withRowKeys(arr)); };
-
-  // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
-  const { session, syncState, chargeOptions, conflictPrompt } = useCloudSync({
-    settings, charges, items, myItems, ledger,
-    setCalcState, setMyItems, setLedger,
-  });
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
@@ -131,12 +132,13 @@ export default function App() {
           myItems={myItems} setMyItems={applyMyItems}
           chargeMethods={chargeOptions}
           calc={calc}
+          tiers={rules.tiers}
         />
       )}
       {tab === "log" && (
         <LogTab ledger={ledger} setLedger={setLedger} myItems={myItems} calc={calc} />
       )}
-      {tab === "fore" && <ForecastTab ledger={ledger} calc={calc} />}
+      {tab === "fore" && <ForecastTab ledger={ledger} calc={calc} tiers={rules.tiers} />}
 
       <footer className="site">
         <div className="backupbar" style={{ justifyContent: "center" }}>

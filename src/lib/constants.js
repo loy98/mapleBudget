@@ -31,6 +31,39 @@ export const DEFAULT_ITEMS = [
 
 export const MILEAGE_ACCRUAL = 0.05;
 
+// ===== 게임 규칙(rules) =====
+// 시세가 아니라 넥슨이 정하는 '규칙'이라 사용자가 편집하지 않는다. 따라서 settings(사용자 소유)가 아니라
+// 순수 함수의 인자로 흘려보낸다 — 전역 상태를 읽지 않으므로 computeCalc/estGrade 는 순수하게 남는다.
+// app_config.config.rules 로 덮어쓸 수 있고(재배포 없이 대응), fetch 실패·malformed 면 아래 기본값.
+//   feeMvp  : MVP 브론즈 이상 또는 프리미엄 PC방일 때 경매장 수수료(%)
+//   feeBase : 그 외 경매장 수수료(%)
+//   mileageAccrual : 넥슨캐시 결제액 대비 마일리지 적립률(0~1)
+//   tiers   : MVP 등급별 13주 누적 기준액(오름차순)
+export const DEFAULT_RULES = {
+  feeMvp: 3,
+  feeBase: 5,
+  mileageAccrual: MILEAGE_ACCRUAL,
+  tiers: TIERS,
+};
+
+// DB에서 온 rules 는 신뢰하지 않는다. 항목별로 검증해 통과한 것만 기본값 위에 얹는다.
+// (하나라도 malformed 면 그 키만 버리고 나머지는 적용 — 전체를 버리면 DB 수정의 의미가 없다)
+const posNum = (v, max) => typeof v === "number" && isFinite(v) && v >= 0 && v <= max;
+export function resolveRules(cfgRules) {
+  const r = { ...DEFAULT_RULES };
+  if (!cfgRules || typeof cfgRules !== "object" || Array.isArray(cfgRules)) return r;
+  if (posNum(cfgRules.feeMvp, 100)) r.feeMvp = cfgRules.feeMvp;
+  if (posNum(cfgRules.feeBase, 100)) r.feeBase = cfgRules.feeBase;
+  if (posNum(cfgRules.mileageAccrual, 1)) r.mileageAccrual = cfgRules.mileageAccrual;
+  if (Array.isArray(cfgRules.tiers) && cfgRules.tiers.length) {
+    const t = cfgRules.tiers.filter((x) => x && typeof x.name === "string" && posNum(x.amt, 1e12));
+    // estGrade 는 오름차순 순회로 마지막 통과 등급을 고른다 → 정렬이 깨지면 등급이 틀린다.
+    const ascending = t.every((x, i) => i === 0 || t[i - 1].amt <= x.amt);
+    if (t.length === cfgRules.tiers.length && ascending) r.tiers = t;
+  }
+  return r;
+}
+
 export const SPLITS = [
   { label: "한 번에", n: 1, span: 1 },
   { label: "2회 분할 (2개월)", n: 2, span: 2 },

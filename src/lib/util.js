@@ -73,9 +73,10 @@ export function uid() {
   return t + "-" + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
 }
 
-export function estGrade(total) {
+// tiers 는 오름차순 전제(resolveRules 가 보장). 마지막으로 통과한 등급이 결과.
+export function estGrade(total, tiers = TIERS) {
   let g = "무등급";
-  TIERS.forEach((t) => {
+  tiers.forEach((t) => {
     if (total >= t.amt) g = t.name;
   });
   return g;

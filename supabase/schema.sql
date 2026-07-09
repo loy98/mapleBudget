@@ -68,10 +68,26 @@ create trigger app_config_touch
   before update on public.app_config
   for each row execute function public.touch_updated_at();
 
--- 초기 시드(원하는 값으로 수정). 시세성 기본값 + 충전 프리셋 + 기본 아이템.
+-- 초기 시드(원하는 값으로 수정). 시세성 기본값 + 충전 프리셋 + 기본 아이템 + 게임 규칙.
 -- force: 모든 유저에게 강제 반영할 키 배열(예: ["mesoRate"]). 비우면 강제 안 함.
+--
+-- rules: 넥슨이 정하는 규칙(사용자가 편집하지 않음) → force 와 무관하게 항상 모든 유저에게 적용.
+--   feeMvp/feeBase = 경매장 수수료(%), mileageAccrual = 마일리지 적립률(0~1),
+--   tiers = MVP 등급별 13주 누적 기준액(오름차순 필수 — 깨지면 클라이언트가 통째로 무시하고 폴백).
+--   클라이언트 src/lib/constants.js resolveRules 가 항목별로 검증한다.
 insert into public.app_config (id, config) values (1, '{
   "mesoRate": 3000, "giftRatio": 8000, "marketRatio": 7500, "force": [],
+  "rules": {
+    "feeMvp": 3, "feeBase": 5, "mileageAccrual": 0.05,
+    "tiers": [
+      {"name":"브론즈","amt":150000},
+      {"name":"실버","amt":300000},
+      {"name":"골드","amt":600000},
+      {"name":"다이아","amt":900000},
+      {"name":"레드","amt":1500000},
+      {"name":"블랙","amt":3000000}
+    ]
+  },
   "chargeMethods": [
     {"name":"정가 (할인 없음)","rate":0,"limit":0},
     {"name":"컬쳐랜드 상품권","rate":7,"limit":200000},

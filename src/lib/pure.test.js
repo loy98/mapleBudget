@@ -4,7 +4,9 @@ import {
 } from "./storage.js";
 import { mergeSnapshots } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
-import { uid } from "./util.js";
+import { uid, estGrade } from "./util.js";
+import { computeCalc, computeFeePct } from "./calc.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -346,5 +348,61 @@ describe("malformed 입력 방어", () => {
     let res;
     expect(() => { res = mergeSnapshots(local, cloud); }).not.toThrow();
     expect(res.snapshot.ledger.buys).toHaveLength(1); // 로컬 거래는 보존
+  });
+});
+
+// app_config.rules 는 DB에서 오므로 신뢰하지 않는다. 항목별 검증 후 통과한 것만 기본값 위에 얹는다.
+describe("resolveRules", () => {
+  it("null/malformed 이면 기본값 그대로", () => {
+    expect(resolveRules(null)).toEqual(DEFAULT_RULES);
+    expect(resolveRules("x")).toEqual(DEFAULT_RULES);
+    expect(resolveRules([])).toEqual(DEFAULT_RULES);
+  });
+  it("유효한 스칼라만 덮어쓴다", () => {
+    const r = resolveRules({ feeMvp: 2, feeBase: "5", mileageAccrual: 0.1 });
+    expect(r.feeMvp).toBe(2);
+    expect(r.feeBase).toBe(DEFAULT_RULES.feeBase); // 문자열은 거부
+    expect(r.mileageAccrual).toBe(0.1);
+  });
+  it("범위를 벗어난 값은 거부", () => {
+    const r = resolveRules({ feeMvp: -1, mileageAccrual: 2 });
+    expect(r.feeMvp).toBe(DEFAULT_RULES.feeMvp);
+    expect(r.mileageAccrual).toBe(DEFAULT_RULES.mileageAccrual);
+  });
+  it("tiers: 오름차순이 아니면 통째로 거부(등급 판정이 틀어지므로)", () => {
+    const r = resolveRules({ tiers: [{ name: "a", amt: 100 }, { name: "b", amt: 50 }] });
+    expect(r.tiers).toBe(DEFAULT_RULES.tiers);
+  });
+  it("tiers: 원소 하나라도 malformed 면 거부", () => {
+    const r = resolveRules({ tiers: [{ name: "a", amt: 100 }, { amt: 200 }] });
+    expect(r.tiers).toBe(DEFAULT_RULES.tiers);
+  });
+  it("tiers: 유효하면 교체", () => {
+    const t = [{ name: "a", amt: 100 }, { name: "b", amt: 200 }];
+    expect(resolveRules({ tiers: t }).tiers).toEqual(t);
+  });
+});
+
+describe("rules 주입", () => {
+  it("computeFeePct: 수수료율이 rules 에서 온다", () => {
+    const rules = { ...DEFAULT_RULES, feeMvp: 1, feeBase: 9 };
+    expect(computeFeePct("2", "0", rules)).toBe(1);
+    expect(computeFeePct("0", "0", rules)).toBe(9);
+    expect(computeFeePct("0", "1", rules)).toBe(1); // 프리미엄 PC방
+  });
+  it("computeFeePct: rules 미지정이면 기본값", () => {
+    expect(computeFeePct("0", "0")).toBe(DEFAULT_RULES.feeBase);
+  });
+  it("estGrade: tiers 를 주입할 수 있고, 미달이면 무등급", () => {
+    const t = [{ name: "낮음", amt: 10 }, { name: "높음", amt: 20 }];
+    expect(estGrade(5, t)).toBe("무등급");
+    expect(estGrade(15, t)).toBe("낮음");
+    expect(estGrade(25, t)).toBe("높음");
+  });
+  it("computeCalc: mileageAccrual 이 rules 에서 온다", () => {
+    const s = { ...DEFAULT_SETTINGS, tierAmt: 1200000, curAchieved: 0, months: "0", milCap: 0 };
+    const a = computeCalc(s, DEFAULT_CHARGES, [], { ...DEFAULT_RULES, mileageAccrual: 0.05 });
+    const b = computeCalc(s, DEFAULT_CHARGES, [], { ...DEFAULT_RULES, mileageAccrual: 0.10 });
+    expect(b.rawMonth).toBeCloseTo(a.rawMonth * 2, 6);
   });
 });

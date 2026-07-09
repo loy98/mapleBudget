@@ -210,9 +210,11 @@ export function dayInfo(ledger, mileageR) {
 }
 
 // ===== 예상 & 추천: 목표 등급 유지 스케줄 =====
-export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, optPer10k) {
+export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, optPer10k, tiers = TIERS) {
   const C = cumNow(ledger, mileageR);
-  const T = TIERS[tierIdx].amt;
+  // tierIdx 는 셀렉트 값이라 tiers 길이가 DB에서 바뀌면 범위를 벗어날 수 있다 → 마지막 등급으로 클램프.
+  const tier = tiers[tierIdx] || tiers[tiers.length - 1];
+  const T = tier.amt;
   const cur = weekStartThu(new Date());
   const weekOf = (o) => addDays(cur, o * 7);
   const achPast = (o) => weeklyAch(ledger, weekOf(o), mileageR);
@@ -261,7 +263,7 @@ export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, 
       we = addDays(ws, 6);
     let sum = 0;
     for (let oo = i - 12; oo <= i; oo++) sum += achAt(oo);
-    const g = estGrade(sum);
+    const g = estGrade(sum, tiers);
     if (reached === null && sum >= T) reached = i;
     rows.push({ i, ws, we, charge: x[i] > 0 ? x[i] : 0, sum, grade: g });
   }
