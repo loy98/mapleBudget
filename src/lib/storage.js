@@ -1,6 +1,6 @@
 import {
   DEFAULT_SETTINGS, DEFAULT_CHARGES, DEFAULT_CALC_ITEMS, DEFAULT_ITEMS,
-  LEDGER_BUCKETS, TOMBSTONE_TTL_DAYS,
+  LEDGER_BUCKETS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX,
 } from "./constants.js";
 import { uid } from "./util.js";
 
@@ -124,6 +124,17 @@ export function normalizeDeleted(d, now = null, ceiling = now) {
     if (t < cutoff) return; // TTL 만료
     out[id] = t;
   });
+  return compactDeleted(out);
+}
+
+// 개수 상한. TTL 정리는 서버 시각이 있을 때만 하므로 게스트에게는 적용되지 않는다 →
+// 시계와 무관하게(상대 순서만 사용) 증가를 묶는다. 넘치면 오래된 표식부터 버린다.
+function compactDeleted(d) {
+  const ids = Object.keys(d);
+  if (ids.length <= TOMBSTONE_MAX) return d;
+  ids.sort((a, b) => d[b] - d[a]); // 최신 우선
+  const out = {};
+  for (let i = 0; i < TOMBSTONE_MAX; i++) out[ids[i]] = d[ids[i]];
   return out;
 }
 
@@ -135,7 +146,7 @@ export function mergeDeleted(a, b, now = null, ceiling = now) {
   Object.keys(bb).forEach((id) => {
     out[id] = hasOwn(out, id) ? Math.max(out[id], bb[id]) : bb[id];
   });
-  return out;
+  return compactDeleted(out); // 합집합이 상한을 넘길 수 있다
 }
 
 export const isDeleted = (deleted, id) => !!id && hasOwn(deleted, id);

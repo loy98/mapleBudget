@@ -9,7 +9,7 @@ import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
 import { computeForecast } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
-import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS } from "./constants.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -827,5 +827,35 @@ describe("tombstone 시계 — 만료 기준과 clamp 상한의 분리", () => {
     const stale = NOW - (TOMBSTONE_TTL_DAYS + 1) * 86400000;
     const local = { calc: {}, my_items: [], ledger: LED([], { old: stale }) };
     expect(mergeForUpload(local, null, NOW).ledger.deleted).toEqual({ old: stale });
+  });
+});
+
+// Codex D: 클라우드 병합이 없는 게스트는 TTL 정리가 돌지 않아 표식이 무한히 쌓인다.
+// 시계에 의존하지 않는 개수 상한으로 묶는다(상대 순서만 사용).
+describe("tombstone 개수 상한", () => {
+  const many = (n, base = T0) => {
+    const d = {};
+    for (let i = 0; i < n; i++) d["id" + i] = base + i; // i 가 클수록 최신
+    return d;
+  };
+
+  it("상한을 넘으면 오래된 표식부터 버린다 (게스트도 무한히 쌓이지 않는다)", () => {
+    const n = normalizeLedger(LED([], many(TOMBSTONE_MAX + 50)));
+    const ids = Object.keys(n.deleted);
+    expect(ids).toHaveLength(TOMBSTONE_MAX);
+    expect(ids).toContain("id" + (TOMBSTONE_MAX + 49)); // 최신은 남고
+    expect(ids).not.toContain("id0");                   // 가장 오래된 것은 버려진다
+  });
+
+  it("상한 이하면 그대로 둔다", () => {
+    const n = normalizeLedger(LED([], many(10)));
+    expect(Object.keys(n.deleted)).toHaveLength(10);
+  });
+
+  it("병합 합집합이 상한을 넘겨도 묶인다", () => {
+    const a = LED([], many(TOMBSTONE_MAX, T0));
+    const b = LED([], many(100, T0 + 10_000_000)); // 더 최신인 별개 id 들
+    const merged = mergeLedger(a, b, null);
+    expect(Object.keys(merged.deleted).length).toBeLessThanOrEqual(TOMBSTONE_MAX);
   });
 });
