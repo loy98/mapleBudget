@@ -64,23 +64,29 @@ const isQuotaError = (e) =>
   !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22 || e.code === 1014);
 
 // 백업 슬롯. 한 슬롯만 두고 '이미 있으면 성공'으로 치면, **다른 내용**으로 다시 손상됐을 때
-// 지금 살려야 할 원본이 백업되지 않은 채 자동저장에 덮인다. 서로 다른 손상본 2개까지 보관하고,
-// 둘 다 차면 그 키에 대한 쓰기를 막는다(원본이 제자리에 남아 있는 편이 낫다).
+// 지금 살려야 할 원본이 백업되지 않은 채 자동저장에 덮인다.
+//
+// 지켜야 할 불변식은 하나다: **지금 덮어쓸 원본이 어딘가에 백업돼 있을 것.**
+// 그래서 슬롯 2개를 '최초 손상본'과 '가장 최근 손상본'으로 쓴다. 둘 다 차 있고 새 손상본이
+// 들어오면 최근 슬롯을 밀어낸다 — 잃는 것은 이미 대체된 옛 손상본이고, 지키는 것은 지금 사라질 원본이다.
+// (슬롯이 차면 쓰기를 영구 차단하는 대안은 불변식은 지키지만 앱이 그 키를 저장하지 못하고 얼어붙는다.)
 export const corruptSlots = (key) => [key + CORRUPT_SUFFIX, key + CORRUPT_SUFFIX + ".2"];
 
 function backupCorrupt(key, raw) {
-  for (const slot of corruptSlots(key)) {
-    try {
-      const existing = localStorage.getItem(slot);
-      if (existing === raw) return true;        // 이미 이 내용을 보관 중
-      if (existing != null) continue;           // 다른 손상본이 들어 있다 → 다음 슬롯
-      localStorage.setItem(slot, raw);
-      if (localStorage.getItem(slot) === raw) return true;
-    } catch {
-      return false; // 공간 부족 등 → 백업 실패
+  const [first, latest] = corruptSlots(key);
+  try {
+    const f = localStorage.getItem(first);
+    if (f === raw) return true;                 // 이미 최초 슬롯에 보관 중
+    if (f == null) {
+      localStorage.setItem(first, raw);
+      return localStorage.getItem(first) === raw;
     }
+    if (localStorage.getItem(latest) === raw) return true; // 이미 최근 슬롯에 보관 중
+    localStorage.setItem(latest, raw);          // 최근 슬롯을 밀어낸다
+    return localStorage.getItem(latest) === raw;
+  } catch {
+    return false; // 공간 부족 등 → 백업 실패. 이 경우에만 쓰기가 막힌다.
   }
-  return false; // 슬롯이 모두 다른 내용으로 차 있다
 }
 
 function readJSON(key) {
@@ -447,13 +453,10 @@ export function importAll(text) {
   if (wrote.some((ok) => ok === false)) {
     return { ok: false, error: "저장 공간이 부족해 복원하지 못했습니다. 브라우저 저장소를 비운 뒤 다시 시도해 주세요." };
   }
-  // 전부 성공했다 = 사용자가 이 키들을 의도적으로 복원했다.
-  // 손상 표시를 걷고, 이제는 낡은(복원 이전의) 백업 슬롯도 비운다 —
-  // 남겨두면 다음 손상 때 슬롯이 차서 진짜 살려야 할 원본을 백업하지 못한다.
-  // (복원 이전 원본이 필요했다면 exportAll 의 corruptRaw 로 이미 빠져나갔다.)
-  targets.forEach((k) => {
-    clearCorruptFlag(k);
-    try { corruptSlots(k).forEach((s) => localStorage.removeItem(s)); } catch { /* ignore */ }
-  });
+  // 전부 성공했다 = 사용자가 이 키들을 의도적으로 복원했다 → 손상 표시를 걷는다.
+  // 백업 슬롯(.corrupt)은 **남긴다**. 슬롯이 차도 최근 슬롯을 밀어내므로 다음 손상 백업을 막지 않고,
+  // 사용자가 내보내기를 하지 않았다면 이게 복원 이전 원본의 유일한 사본이다. 지우는 쪽이 더 파괴적이다.
+  // (로그아웃·저장소 정리 시에는 clearAccountData 가 함께 지운다 — 공용 브라우저 프라이버시.)
+  targets.forEach(clearCorruptFlag);
   return { ok: true };
 }

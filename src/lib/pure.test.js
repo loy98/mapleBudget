@@ -930,12 +930,24 @@ describe("저장소 손상 방어 (B-3)", () => {
     expect(store.has(corruptSlots(LKEY)[1])).toBe(false);
   });
 
-  it("슬롯이 모두 다른 내용으로 차면 그 키에 쓰지 않는다 (원본이 제자리에 남는다)", () => {
+  it("슬롯이 차면 최근 슬롯을 밀어내고 현재 원본을 백업한다 (앱이 얼어붙지 않는다)", () => {
     const [s1, s2] = corruptSlots(LKEY);
-    store.set(s1, "old-1");
-    store.set(s2, "old-2");
+    store.set(s1, "first-corrupt");
+    store.set(s2, "old-latest");
     const THIRD = '{"third":"corrupt';
     store.set(LKEY, THIRD);
+    loadLedger();
+    // 불변식: 지금 덮어쓸 원본이 어딘가에 백업돼 있다
+    expect([store.get(s1), store.get(s2)]).toContain(THIRD);
+    expect(store.get(s1)).toBe("first-corrupt"); // 최초 손상본은 지킨다
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+    expect(saveLedger({ buys: [] })).toBe(true); // 쓰기 차단 없음
+  });
+
+  it("백업 자체가 불가능할 때만 쓰기를 막는다 (원본이 제자리에 남는다)", () => {
+    const THIRD = '{"third":"corrupt';
+    store.set(LKEY, THIRD);
+    failWrites.add("*"); // 어떤 슬롯에도 쓸 수 없다
     loadLedger();
     expect(getStorageIssues().unbackedKeys).toContain(LKEY);
     expect(saveLedger({ buys: [] })).toBe(false);
@@ -966,7 +978,7 @@ describe("저장소 손상 방어 (B-3)", () => {
 
   it("백업 못한 원본이 있으면 가져오기도 거부한다 (덮어쓰면 복구 불가능하다)", () => {
     store.set(LKEY, CORRUPT);
-    failWrites.add(corruptSlots(LKEY)[0]);
+    failWrites.add("*");
     loadLedger();
     expect(getStorageIssues().unbackedKeys).toContain(LKEY); // 쓰기 차단 상태
 
@@ -1069,8 +1081,7 @@ describe("저장소 손상 방어 — importAll 경로 (Codex HIGH/MEDIUM)", () 
   it("가져오기가 실패해도 손상 차단이 유지되어 원본이 파괴되지 않는다", () => {
     // 백업조차 못한 상태(슬롯 쓰기 실패)
     store.set(LKEY, CORRUPT);
-    failWrites.add(corruptSlots(LKEY)[0]);
-    failWrites.add(corruptSlots(LKEY)[1]);
+    failWrites.add("*");
     loadLedger();
     expect(getStorageIssues().unbackedKeys).toContain(LKEY);
 
@@ -1087,7 +1098,7 @@ describe("저장소 손상 방어 — importAll 경로 (Codex HIGH/MEDIUM)", () 
 
   it("공간이 생기면 가져오기가 백업을 재시도해 성공한다", () => {
     store.set(LKEY, CORRUPT);
-    failWrites.add(corruptSlots(LKEY)[0]);
+    failWrites.add("*");
     loadLedger();
     expect(getStorageIssues().unbackedKeys).toContain(LKEY);
 
@@ -1102,8 +1113,8 @@ describe("저장소 손상 방어 — importAll 경로 (Codex HIGH/MEDIUM)", () 
     store.set(KEY, CORRUPT);
     failWrites.add(corruptSlots(KEY)[0]);
     failWrites.add(corruptSlots(KEY)[1]);
-    loadLedger();
-    loadCalcState();
+    loadLedger();   // ledger 는 정상 백업
+    loadCalcState(); // calc 는 백업 실패 → 차단
     expect(getStorageIssues().unbackedKeys).toContain(KEY);
 
     // ledger 만 담긴 파일 → calc 의 가드는 그대로여야 한다
@@ -1113,14 +1124,14 @@ describe("저장소 손상 방어 — importAll 경로 (Codex HIGH/MEDIUM)", () 
     expect(store.get(KEY)).toBe(CORRUPT); // calc 원본 보존
   });
 
-  it("복원에 성공하면 낡은 백업 슬롯을 비운다 (다음 손상 때 슬롯이 차 있지 않도록)", () => {
+  it("복원에 성공해도 백업 슬롯은 남긴다 (사용자가 내보내기를 안 했다면 유일한 사본)", () => {
     store.set(LKEY, CORRUPT);
     loadLedger();
-    expect(store.has(corruptSlots(LKEY)[0])).toBe(true);
+    expect(store.get(corruptSlots(LKEY)[0])).toBe(CORRUPT);
 
     expect(importAll(backup({ ledger: { buys: [] } })).ok).toBe(true);
-    corruptSlots(LKEY).forEach((s) => expect(store.has(s)).toBe(false));
-    expect(getStorageIssues().corruptKeys).toEqual([]);
+    expect(store.get(corruptSlots(LKEY)[0])).toBe(CORRUPT); // 증거 보존
+    expect(getStorageIssues().corruptKeys).toEqual([]);      // 표시는 걷힌다
   });
 
   it("내보내기는 모든 슬롯의 원본을 담는다", () => {
@@ -1133,5 +1144,56 @@ describe("저장소 손상 방어 — importAll 경로 (Codex HIGH/MEDIUM)", () 
     const [s1, s2] = corruptSlots(LKEY);
     expect(store.get(s1)).toBe(CORRUPT);
     expect(store.get(s2)).toBe(SECOND);
+  });
+});
+
+// 이 기능의 유일한 불변식을 무작위 시퀀스로 검증한다:
+//   "localStorage[key] 를 덮어쓸 때, 그 내용이 파싱 불가라면 어딘가에 백업돼 있어야 한다."
+//   백업할 수 없으면 덮어쓰지 않는다.
+// 앱의 실제 흐름(마운트 시 load → 상태 변경 시 save)을 모사한다.
+// 슬롯 쓰기만 실패하는 상태를 따로 둔다 — 그래야 '백업 실패인데 본문은 써지는' 위험 구간이 재현된다.
+describe("저장소 손상 방어 — 불변식 (무작위 시퀀스)", () => {
+  it("어떤 순서로 손상·저장이 반복돼도 백업 없는 원본이 파괴되지 않는다", () => {
+    const CORRUPTS = ['{"a":', '{"b":[1,', "not json", '{"c":{"d":', "["];
+    let seed = 1;
+    // LCG 하위 비트는 주기가 짧다 → 상위 비트를 쓴다.
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return ((seed >>> 16) % n); };
+    const isSlot = (k) => k.includes(CORRUPT_SUFFIX);
+    let checked = 0;
+
+    for (let trial = 0; trial < 300; trial++) {
+      const store = new Map();
+      let blockSlots = false; // 백업(.corrupt*) 쓰기만 실패
+      globalThis.localStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => {
+          if (blockSlots && isSlot(k)) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+          store.set(k, String(v));
+        },
+        removeItem: (k) => store.delete(k),
+      };
+      __resetStorageIssues();
+
+      for (let step = 0; step < 10; step++) {
+        if (rnd(2) === 0) store.set(LKEY, CORRUPTS[rnd(CORRUPTS.length)]); // 손상 발생
+        blockSlots = rnd(3) === 0;                                          // 백업 공간 없음
+        loadLedger();                                                       // 앱 마운트
+
+        const before = store.get(LKEY);
+        const parsable = (() => { try { JSON.parse(before); return true; } catch { return false; } })();
+        const wrote = saveLedger({ buys: [{ id: "s" + step }] });           // 자동저장
+
+        if (before != null && !parsable) {
+          checked++;
+          if (wrote) {
+            // 파싱 불가한 원본을 덮어썼다 → 어느 슬롯엔가 반드시 남아 있어야 한다
+            expect(corruptSlots(LKEY).map((sl) => store.get(sl))).toContain(before);
+          } else {
+            expect(store.get(LKEY)).toBe(before); // 쓰지 않았으면 원본이 제자리에
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100); // 위험 구간을 실제로 밟았는지 확인
   });
 });
