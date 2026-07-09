@@ -147,8 +147,11 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             <div className="hint">적용 수수료 <b>{c.feePct}%</b> — {feeBenefit ? "MVP 브론즈+ 또는 PC방" : "기본 요율"}</div>
 
             <div className="subhead">마일리지</div>
-            <label>마일리지 결제 비율 (%)</label>
-            <NumInput value={settings.mileageRate} step={1} onChange={(v) => setSettings({ mileageRate: v })} />
+            {/* 마일리지 결제 비율은 넥슨이 정하는 상한이라 사용자가 바꾸는 값이 아니다.
+                예전에는 입력칸이었고, 바꾸면 13주 누적 과금이 재계산되어 과거 기록과 표시 등급이 흔들렸다. */}
+            <div className="hint" style={{ marginTop: 8 }}>
+              마일리지 결제 비율 <b>{Math.round((c.mileageR || 0) * 100)}%</b> — 게임 규칙(고정)
+            </div>
             <label>월 사용 가능 마일리지</label>
             <NumInput value={settings.milAvail} step={1000} onChange={(v) => setSettings({ milAvail: v })} />
             <label>월 적립 한도 (참고)</label>

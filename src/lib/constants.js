@@ -56,11 +56,15 @@ export const TOMBSTONE_MAX = 2000;
 //   feeMvp  : MVP 브론즈 이상 또는 프리미엄 PC방일 때 경매장 수수료(%)
 //   feeBase : 그 외 경매장 수수료(%)
 //   mileageAccrual : 넥슨캐시 결제액 대비 마일리지 적립률(0~1)
+//   mileageRate    : 아이템 가격 중 마일리지로 결제 가능한 비율(%). 넥슨이 정하는 상한이며
+//                    사용자 취향이 아니다. 예전엔 settings 에 있어 사용자가 바꿀 수 있었고,
+//                    바꾸는 순간 13주 누적 과금(cum)이 재계산되어 표시 등급까지 흔들렸다.
 //   tiers   : MVP 등급별 13주 누적 기준액(오름차순)
 export const DEFAULT_RULES = {
   feeMvp: 3,
   feeBase: 5,
   mileageAccrual: MILEAGE_ACCRUAL,
+  mileageRate: 30,
   tiers: TIERS,
 };
 
@@ -74,6 +78,8 @@ export function resolveRules(cfgRules) {
   if (posNum(cfgRules.feeMvp, 100)) r.feeMvp = cfgRules.feeMvp;
   if (posNum(cfgRules.feeBase, 100)) r.feeBase = cfgRules.feeBase;
   if (posNum(cfgRules.mileageAccrual, 1)) r.mileageAccrual = cfgRules.mileageAccrual;
+  // 100% 는 buildPlan 의 achM = cash*(1-mileageR) 를 0으로 만들어 NaN/Infinity 를 유발한다 → 배제.
+  if (posNum(cfgRules.mileageRate, 100) && cfgRules.mileageRate < 100) r.mileageRate = cfgRules.mileageRate;
   if (Array.isArray(cfgRules.tiers) && cfgRules.tiers.length) {
     // 등급 기준액은 0보다 커야 한다(0이면 무등급과 구분되지 않는다).
     const t = cfgRules.tiers.filter((x) => x && typeof x.name === "string" && posNum(x.amt, 1e12) && x.amt > 0);
@@ -103,7 +109,8 @@ export const DEFAULT_SETTINGS = {
   marketRatio: 7500,
   mvpGrade: "0",
   pcRoom: "0",
-  mileageRate: 30,
+  // mileageRate 는 넥슨 규칙이므로 여기 없다 → DEFAULT_RULES.mileageRate (app_config 로 덮어씀).
+  // 구 저장본에 남아 있어도 parseCalcState 가 DEFAULT_SETTINGS 키만 복사하므로 무시된다.
   milAvail: 30000,
   milCap: 50000,
   tierSel: "4",

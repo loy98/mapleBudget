@@ -75,12 +75,13 @@ create trigger app_config_touch
 --
 -- rules: 넥슨이 정하는 규칙(사용자가 편집하지 않음) → force 와 무관하게 항상 모든 유저에게 적용.
 --   feeMvp/feeBase = 경매장 수수료(%), mileageAccrual = 마일리지 적립률(0~1),
+--   mileageRate    = 아이템 가격 중 마일리지로 결제 가능한 비율(%). 100 미만이어야 한다.
 --   tiers = MVP 등급별 13주 누적 기준액(오름차순 필수 — 깨지면 클라이언트가 통째로 무시하고 폴백).
 --   클라이언트 src/lib/constants.js resolveRules 가 항목별로 검증한다.
 insert into public.app_config (id, config) values (1, '{
   "mesoRate": 3000, "giftRatio": 8000, "marketRatio": 7500, "force": [],
   "rules": {
-    "feeMvp": 3, "feeBase": 5, "mileageAccrual": 0.05,
+    "feeMvp": 3, "feeBase": 5, "mileageAccrual": 0.05, "mileageRate": 30,
     "tiers": [
       {"name":"브론즈","amt":150000},
       {"name":"실버","amt":300000},

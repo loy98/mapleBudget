@@ -7,7 +7,7 @@ import {
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
-import { computeForecast } from "./ledger.js";
+import { computeForecast, cumNow } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
 import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX } from "./constants.js";
 
@@ -857,5 +857,51 @@ describe("tombstone 개수 상한", () => {
     const b = LED([], many(100, T0 + 10_000_000)); // 더 최신인 별개 id 들
     const merged = mergeLedger(a, b, null);
     expect(Object.keys(merged.deleted).length).toBeLessThanOrEqual(TOMBSTONE_MAX);
+  });
+});
+
+// B-5 (1단계): 마일리지 결제 비율은 넥슨 규칙이다. 사용자 설정이 아니다.
+// 예전엔 settings 에 있어 사용자가 바꿀 수 있었고, 바꾸면 cumNow 가 재계산되어
+// 13주 누적 과금과 표시 등급이 흔들렸다(등급 판정의 기준 숫자가 소급해 변함).
+describe("B-5 · 마일리지 결제 비율은 규칙이지 설정이 아니다", () => {
+  const thisWeek = fmtD(weekStartThu(new Date()));
+  const led = {
+    buys: [{ id: "b", date: thisWeek, qty: 10, price: 5900, mil: true }],
+    sells: [], cashes: [], spends: [],
+  };
+
+  it("settings 에 mileageRate 가 없다", () => {
+    expect(DEFAULT_SETTINGS.mileageRate).toBeUndefined();
+    expect(DEFAULT_RULES.mileageRate).toBe(30);
+  });
+
+  it("사용자가 settings 에 mileageRate 를 심어도 계산에 영향이 없다", () => {
+    const base = computeCalc(DEFAULT_SETTINGS, DEFAULT_CHARGES, []);
+    const 오염 = computeCalc({ ...DEFAULT_SETTINGS, mileageRate: 90 }, DEFAULT_CHARGES, []);
+    expect(오염.mileageR).toBe(base.mileageR); // settings 는 무시된다
+  });
+
+  it("구 저장본의 mileageRate 는 승계되지 않는다 (parseCalcState)", () => {
+    const s = parseCalcState({ mileageRate: 90, mesoRate: 3200 });
+    expect(s.settings.mileageRate).toBeUndefined();
+    expect(s.settings.mesoRate).toBe(3200); // 다른 값은 정상 승계
+  });
+
+  it("13주 누적 과금은 사용자 설정으로 흔들리지 않는다 (등급 판정의 기준)", () => {
+    const a = computeCalc(DEFAULT_SETTINGS, DEFAULT_CHARGES, []);
+    const b = computeCalc({ ...DEFAULT_SETTINGS, mileageRate: 20, mvpGrade: "3" }, DEFAULT_CHARGES, []);
+    expect(cumNow(led, b.mileageR)).toBe(cumNow(led, a.mileageR));
+  });
+
+  it("규칙이 바뀌면(app_config) 계산도 바뀐다 — 그게 유일한 변경 경로다", () => {
+    const r20 = resolveRules({ mileageRate: 20 });
+    expect(r20.mileageRate).toBe(20);
+    const c = computeCalc(DEFAULT_SETTINGS, DEFAULT_CHARGES, [], r20);
+    expect(c.mileageR).toBeCloseTo(0.2, 10);
+  });
+
+  it("mileageRate = 100 은 거부한다 (buildPlan 에 NaN/Infinity 유입)", () => {
+    expect(resolveRules({ mileageRate: 100 }).mileageRate).toBe(DEFAULT_RULES.mileageRate);
+    expect(resolveRules({ mileageRate: 99 }).mileageRate).toBe(99);
   });
 });

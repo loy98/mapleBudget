@@ -90,7 +90,8 @@ export function computeCalc(settings, charges, items, rules = DEFAULT_RULES) {
   const remain = Math.max(0, target - cur);
   const alloc = allocateCharge(remain, months, charges);
   const effD = alloc.disc;
-  const mileageR = (+settings.mileageRate || 0) / 100;
+  // 마일리지 결제 비율은 넥슨 규칙(rules)이다. 사용자 설정이 아니다.
+  const mileageR = (+rules.mileageRate || 0) / 100;
 
   const gr = +settings.giftRatio || 0,
     mr = +settings.marketRatio || 0;
