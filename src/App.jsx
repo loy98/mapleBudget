@@ -149,6 +149,16 @@ export default function App() {
             ? "로그인하면 기기 간 자동 동기화됩니다. 로그인 없이는 이 브라우저(localStorage)에만 저장됩니다."
             : "모든 데이터는 이 브라우저(localStorage)에만 저장됩니다. 기기 변경 시 내보내기/가져오기를 사용하세요."}
         </p>
+        {/* 정적 페이지(public/)라 SPA 라우팅이 아닌 전체 이동. 크롤러가 직접 읽을 수 있어야 함. */}
+        <p className="legal-links">
+          <a href="/privacy.html">개인정보처리방침</a>
+          <span aria-hidden="true"> · </span>
+          <a href="/terms.html">이용약관</a>
+        </p>
+        <p className="disclaimer">
+          본 사이트는 넥슨코리아 및 「메이플스토리」와 무관한 비공식 팬 사이트입니다.
+          「메이플스토리」와 관련 명칭·이미지의 모든 권리는 ㈜넥슨코리아에 있습니다.
+        </p>
       </footer>
 
       {conflictPrompt && <ConflictModal onChoose={conflictPrompt.onChoose} />}

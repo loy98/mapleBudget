@@ -317,6 +317,11 @@
 /* ===== 백업/복원 ===== */
 .backupbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--sub);font-size:11.5px;text-align:center}
+footer.site .legal-links{margin-top:10px}
+footer.site .legal-links a{color:var(--sub);text-decoration:underline;text-underline-offset:2px}
+footer.site .legal-links a:hover{color:var(--txt)}
+/* 넥슨 IP 고지 — 상표권자 요구사항이므로 항상 노출 */
+footer.site .disclaimer{margin-top:8px;opacity:.75;line-height:1.6;max-width:640px;margin-inline:auto}
 
 /* ===== 리디자인: 히어로 요약(핵심 수치 + 진행률 링) ===== */
 .hero.herox{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;padding:22px 24px;align-items:center}
