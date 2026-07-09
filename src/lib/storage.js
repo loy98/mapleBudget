@@ -109,22 +109,30 @@ function readJSON(key) {
   }
 }
 
-// 손상으로 쓰기가 막힌 키를 다시 쓸 수 있게 만든다(백업을 재시도). 공간이 생겼으면 성공한다.
-// 백업하지 못하면 false — 그 키에 쓰면 복구 불가능한 원본이 사라진다.
+const isParsable = (raw) => { try { JSON.parse(raw); return true; } catch { return false; } };
+
+// 이 키를 지금 덮어써도 되는지 판정한다. **매번 실제 상태를 다시 확인한다** —
+// backedUp:true 는 과거의 기록일 뿐이고, 그 사이 다른 탭이나 브라우저의 저장소 정리로
+// 슬롯이 사라졌다면 그 기록은 거짓이다.
+// 백업을 재시도하므로, 공간이 생겼다면 막혔던 키가 다시 쓰기 가능해진다.
 function ensureWritable(key) {
-  const c = corrupted.get(key);
-  if (!c || c.backedUp) return true;
-  let raw = null;
-  try { raw = localStorage.getItem(key); } catch { return false; }
-  if (raw == null) { corrupted.delete(key); return true; } // 원본이 이미 없다
+  if (!corrupted.has(key)) return true;
+  let raw;
+  try { raw = localStorage.getItem(key); } catch { return false; } // 저장소를 못 읽으면 보장할 수 없다
+  if (raw == null) return true;       // 지킬 원본이 없다
+  // 이미 덮였거나 복원되어 더 이상 손상본이 아니다 → 다시 백업하면 정상 값이 손상 백업을 밀어낸다.
+  if (isParsable(raw)) return true;
   const ok = backupCorrupt(key, raw);
-  if (ok) corrupted.set(key, { backedUp: true });
+  corrupted.set(key, { backedUp: ok });
   return ok;
 }
 
 function writeJSON(key, val) {
-  const c = corrupted.get(key);
-  if (c && !c.backedUp) return false; // 원본을 지키지 못했다 → 덮어쓰지 않는다
+  // 손상된 키에 쓸 때는 '지금 이 순간' 원본이 백업돼 있는지 다시 확인한다.
+  // backedUp:true 는 과거 시점의 기록일 뿐이다 — 그 뒤 다른 탭이나 브라우저의 저장소 정리로
+  // 슬롯이 사라졌다면 그 기록은 거짓이 되고, 우리는 백업 없는 원본을 덮어쓰게 된다.
+  // (정상 키는 corrupted 에 없으므로 이 경로를 타지 않는다 — 일반 저장 성능에 영향 없음.)
+  if (corrupted.has(key) && !ensureWritable(key)) { emitIssue(); return false; }
   try {
     localStorage.setItem(key, JSON.stringify(val));
     // 쓰기가 다시 성공했다 = 공간이 생겼다. 경고를 걷는다(그러지 않으면 배너가 새로고침까지 남는다).

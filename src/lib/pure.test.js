@@ -967,6 +967,43 @@ describe("저장소 손상 방어 (B-3)", () => {
     expect(getStorageIssues().unbackedKeys).toEqual([]);
   });
 
+  it("백업 기록 후 슬롯이 사라지면 다시 백업하고, 못하면 쓰지 않는다 (Codex LOW)", () => {
+    const RAW = '{"z":';
+    store.set(LKEY, RAW);
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toEqual([]); // 백업됨으로 기록
+
+    // 다른 탭/브라우저 정리로 슬롯이 사라짐 + 이제 어디에도 쓸 수 없음
+    corruptSlots(LKEY).forEach((sl) => store.delete(sl));
+    failWrites.add("*");
+
+    expect(saveLedger({ buys: [] })).toBe(false); // 과거 기록을 믿지 않고 재확인
+    expect(store.get(LKEY)).toBe(RAW);            // 원본 보존
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+  });
+
+  it("슬롯이 사라졌어도 공간이 있으면 다시 백업하고 쓴다", () => {
+    const RAW = '{"z":';
+    store.set(LKEY, RAW);
+    loadLedger();
+    corruptSlots(LKEY).forEach((sl) => store.delete(sl));
+
+    expect(saveLedger({ buys: [] })).toBe(true);
+    expect(store.get(corruptSlots(LKEY)[0])).toBe(RAW); // 사라진 백업을 되살림
+  });
+
+  it("이미 덮인 뒤(정상 JSON)에는 재백업하지 않는다 — 정상 값이 손상 백업을 밀어내면 안 된다", () => {
+    const RAW = '{"z":';
+    store.set(LKEY, RAW);
+    loadLedger();
+    expect(saveLedger({ buys: [] })).toBe(true);      // 원본은 백업됐고 자리는 덮였다
+    expect(saveLedger({ buys: [{ id: "x" }] })).toBe(true); // 두 번째 저장
+
+    const [s1, s2] = corruptSlots(LKEY);
+    expect(store.get(s1)).toBe(RAW);   // 손상본 그대로
+    expect(store.has(s2)).toBe(false); // 정상 JSON 이 슬롯을 차지하지 않았다
+  });
+
   it("백업 자체가 불가능할 때만 쓰기를 막는다 (원본이 제자리에 남는다)", () => {
     const THIRD = '{"third":"corrupt';
     store.set(LKEY, THIRD);
