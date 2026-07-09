@@ -1,15 +1,18 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_ITEMS, DEFAULT_SETTINGS } from "../lib/constants.js";
 import { won, pct, eok, ml, mlN } from "../lib/util.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
 
-const tierOptions = TIERS.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
+const tierOptionsOf = (tiers) =>
+  tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
 const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
 const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
 
-export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, chargeMethods = CHARGE_METHODS, calc }) {
+export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
+  // 등급 기준은 app_config(rules.tiers)에서 올 수 있다 → 목록 길이가 바뀌어도 인덱스가 깨지지 않게 방어.
+  const tierOptions = useMemo(() => tierOptionsOf(tiers), [tiers]);
   // 충전 방식 프리셋 옵션 — DB 설정 목록(chargeMethods) 기반. DB에 malformed/null 원소가 섞여도
   // 안전하도록 name 있는 원소만 사용(옵션·addPreset이 같은 목록을 써 인덱스 정합 유지). 기본은 constants.
   const validCharges = (chargeMethods || []).filter((m) => m && typeof m.name === "string");
@@ -24,7 +27,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   const curAch = +settings.curAchieved || 0;
   const rawProgPct = c.remain <= 0 ? 100 : goalAmt > 0 ? (curAch / goalAmt) * 100 : 0;
   const progPct = Math.max(0, Math.min(100, Number.isFinite(rawProgPct) ? rawProgPct : 0));
-  const targetName = (TIERS[+settings.tierSel] || {}).name || "목표";
+  const targetName = (tiers[+settings.tierSel] || {}).name || "목표";
   const optName = c.useItem ? "경매장 되팔기" : basicName;
   const bestBasicVal = Math.min(c.gift, c.market);
   // 순비용은 음수(이득)일 수 있어 0을 포함한 범위로 정규화 후 0~100 클램프(바 폭 왜곡 방지)
@@ -219,7 +222,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
               <div>
                 <label>목표 등급</label>
                 <CSelect value={settings.tierSel} options={tierOptions}
-                  onChange={(v) => setSettings({ tierSel: v, tierAmt: TIERS[+v].amt })} />
+                  onChange={(v) => setSettings({ tierSel: v, tierAmt: (tiers[+v] || tiers[tiers.length - 1]).amt })} />
               </div>
               <div><label>목표 기준 금액 (원)</label><NumInput value={settings.tierAmt} step={10000} onChange={(v) => setSettings({ tierAmt: v })} /></div>
               <div><label>현재 누적 실적 (원)</label><NumInput value={settings.curAchieved} step={10000} onChange={(v) => setSettings({ curAchieved: v })} /></div>

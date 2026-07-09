@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { submitFeedback, cloudEnabled } from "../lib/cloud.js";
 import { CSelect } from "./ui.jsx";
+import Modal from "./Modal.jsx";
 
 const CATEGORIES = [
   { value: "suggestion", label: "💡 건의 · 개선" },
@@ -31,6 +32,8 @@ export default function FeedbackModal({ onClose, session }) {
       setErrMsg(
         error.message === "cloud-disabled"
           ? "지금은 피드백 전송을 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+          : error.message === "rate-limited"
+          ? "짧은 시간에 너무 많이 보내셨어요. 10분 뒤에 다시 시도해 주세요."
           : "전송에 실패했어요. 잠시 후 다시 시도해 주세요."
       );
       return;
@@ -39,8 +42,8 @@ export default function FeedbackModal({ onClose, session }) {
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="피드백 보내기" onClick={onClose}>
-      <div className="modal-card feedback" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} label="피드백 보내기" cardClass="feedback">
+      <>
         <div className="modal-head">
           <div className="modal-title">💬 피드백 보내기</div>
           <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
@@ -99,7 +102,7 @@ export default function FeedbackModal({ onClose, session }) {
             </div>
           </>
         )}
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

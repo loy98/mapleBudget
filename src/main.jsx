@@ -9,10 +9,13 @@ import "@fontsource/sora/500.css";
 import "@fontsource/sora/700.css";
 import "@fontsource/sora/800.css";
 import App from "./App.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );

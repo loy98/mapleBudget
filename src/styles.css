@@ -208,7 +208,10 @@
   .csel.open .csel-pop{display:block}
   .csel-opt{padding:8px 12px;border-radius:7px;font-size:13.5px;cursor:pointer;color:var(--txt);white-space:nowrap}
   .csel-opt:hover{background:var(--panel2)}
+  /* 키보드 하이라이트 — 마우스 hover 와 같은 표현이라 두 입력수단이 같은 위치를 가리킨다 */
+  .csel-opt.active{background:var(--panel2)}
   .csel-opt.sel{background:var(--accent);color:var(--on-accent);font-weight:700}
+  .csel-opt.sel.active{filter:brightness(1.08)}
   /* 아이템 콤보 (자유 입력 + 항상 열리는 목록) */
   .icombo{position:relative;display:inline-block;width:100%;vertical-align:middle}
   .icombo-inp{width:100%;padding-right:26px}
@@ -317,6 +320,19 @@
 /* ===== 백업/복원 ===== */
 .backupbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--sub);font-size:11.5px;text-align:center}
+/* ===== 치명적 렌더 오류 폴백(ErrorBoundary) ===== */
+.card.fatal{margin-top:40px}
+.card.fatal .modal-actions{margin-top:16px}
+.fatal-detail{margin-top:16px;font-size:12px;color:var(--sub)}
+.fatal-detail summary{cursor:pointer}
+.fatal-detail pre{margin-top:8px;padding:10px;background:var(--bg2,rgba(0,0,0,.2));border:1px solid var(--line);
+  border-radius:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5}
+
+footer.site .legal-links{margin-top:10px}
+footer.site .legal-links a{color:var(--sub);text-decoration:underline;text-underline-offset:2px}
+footer.site .legal-links a:hover{color:var(--txt)}
+/* 넥슨 IP 고지 — 상표권자 요구사항이므로 항상 노출 */
+footer.site .disclaimer{margin-top:8px;opacity:.75;line-height:1.6;max-width:640px;margin-inline:auto}
 
 /* ===== 리디자인: 히어로 요약(핵심 수치 + 진행률 링) ===== */
 .hero.herox{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;padding:22px 24px;align-items:center}

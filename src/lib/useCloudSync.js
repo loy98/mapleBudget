@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
+  getDataOwner, setDataOwner,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, upsertUserData, mergeSnapshots, fetchAppConfig } from "./cloud.js";
-import { CHARGE_METHODS } from "./constants.js";
+import { CHARGE_METHODS, DEFAULT_RULES, resolveRules } from "./constants.js";
 
 // app_config에서 settings로 반영하는 시세 스칼라 키(기본값 적용·force가 공유 → 새 키 추가 시 한 곳만 수정).
 const CONFIG_RATE_KEYS = ["mesoRate", "giftRatio", "marketRatio"];
@@ -16,6 +17,8 @@ function configRatePatch(cfg, onlyKeys) {
   return patch;
 }
 const validItems = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof x.name === "string") : []);
+// 다른 계정 소유의 로컬 데이터를 병합에서 배제할 때 쓰는 '아무것도 없음' 스냅샷.
+const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [] } };
 
 // ============================================================
 // useCloudSync — 세션·app_config·클라우드 동기화·업로드를 한 곳에 응집(App.jsx의 SRP 회복).
@@ -38,6 +41,9 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
   const [syncNonce, setSyncNonce] = useState(0);       // 계정 전환 후 새 계정 업로드 재예약 트리거
   const [chargeOptions, setChargeOptions] = useState(CHARGE_METHODS);
+  // 게임 규칙(수수료·마일리지 적립률·등급 기준). settings 와 달리 사용자 소유가 아니라 전역이므로
+  // 저장 이력·로그인 여부와 무관하게 '모든 유저'에게 즉시 적용한다(force 대상이 아님).
+  const [rules, setRules] = useState(DEFAULT_RULES);
   const [appConfig, setAppConfig] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [conflictPrompt, setConflictPrompt] = useState(null); // 최초 로그인 병합 충돌 시 { onChoose } — App이 모달 렌더
@@ -54,6 +60,9 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const liveUserIdRef = useRef(null);
   const syncedUserRef = useRef(null);
   const dirtyForFlushRef = useRef(false);
+  const retryTimer = useRef(null);
+  const retryAtRef = useRef(0);   // 연속 업로드 실패 횟수(백오프 단계)
+  const runUploadRef = useRef(null);
 
   const userId = session?.user?.id ?? null;
   // 최신 스냅샷·현재 userId를 렌더 본문에서 ref에 반영(의도적). async 콜백(디바운스 업로드·가드)만 읽으므로
@@ -73,6 +82,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const valid = cfg.chargeMethods.filter((m) => m && typeof m.name === "string");
         if (valid.length) setChargeOptions(valid);
       }
+      // resolveRules 가 항목별로 검증 → malformed 키는 버리고 기본값 유지(전체 폐기 아님).
+      setRules(resolveRules(cfg.rules));
       setAppConfig(cfg);
     });
     return () => { cancelled = true; };
@@ -116,9 +127,12 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   // 최초 로그인 동기화: 클라우드 fetch → 로컬 병합 → 상태 반영. userId 키잉으로 로그인 1회만.
   useEffect(() => {
     syncedUserRef.current = null; // 새 컨텍스트 진입 → 이 유저 데이터 로드 완료 전까지 force 미정착(재로그인 stale 방지)
+    // uid → 다른 uid 로 바뀔 때도 반드시 내린다. 그러지 않으면 새 유저 fetch 가 진행 중인데
+    // 디바운스 이펙트가 cloudReady=true 로 재무장해 '이전 유저의 dataRef' 를 새 유저 행에 올릴 수 있다
+    // (liveUserIdRef 가드는 이미 새 uid 이므로 이 경우를 잡지 못한다).
+    setCloudReady(false);
     if (!userId) {
       pendingCloudSyncMarkRef.current = null;
-      setCloudReady(false);
       return;
     }
     let cancelled = false;
@@ -129,9 +143,14 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         if (cancelled) return;
         const firstLogin = !isCloudSynced(userId);
         pendingCloudSyncMarkRef.current = firstLogin ? userId : null;
-        const local = localSnapshot();
+        // 로컬 데이터의 소유자가 다른 계정이면 병합하지 않는다. 공용 브라우저에서 A 로그아웃 → B 로그인 시
+        // A의 원장이 id 합집합으로 B 계정에 영구 유입되는 것을 막는다(tombstone이 없어 되돌릴 수 없다).
+        // 소유자 없음(=진짜 게스트) 또는 같은 계정일 때만 로컬을 병합 대상으로 삼는다.
+        const owner = getDataOwner();
+        const localUsable = !owner || owner === userId;
+        const local = localUsable ? localSnapshot() : EMPTY_SNAPSHOT;
         // 거래 없이 설정/아이템만 바꾼 게스트도 보호: 사용자 직접 편집 여부를 병합 판정에 전달(P1-4).
-        const { snapshot, conflict } = mergeSnapshots(local, cloud, { localTouched: isUserTouched() });
+        const { snapshot, conflict } = mergeSnapshots(local, cloud, { localTouched: localUsable && isUserTouched() });
         let finalSnap = snapshot;
         if (conflict && firstLogin) {
           // 네이티브 confirm 대신 App이 렌더하는 테마 모달로 선택을 받는다(테스트 가능·UI 일관성).
@@ -150,6 +169,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         setCalcState({ settings: c.settings, charges: c.charges, items: c.items });
         setMyItems(normalizeMyItems(finalSnap.my_items));
         setLedger(normalizeLedger(finalSnap.ledger));
+        // 이제 이 기기의 로컬 데이터는 이 계정 것이다. 이후 다른 계정이 로그인하면 병합 게이트가 막는다.
+        setDataOwner(userId);
         syncedUserRef.current = userId; // 이 유저 데이터 로드 완료 → force 정착 신호
         setCloudReady(true);
       } catch (e) {
@@ -169,6 +190,19 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     };
   }, [userId]);
 
+  // ===== 업로드 실패 재시도(지수 백오프) =====
+  // 오프라인·일시 장애로 실패한 업로드를 다시 시도한다. 성공하면 retryAtRef 를 0으로 되돌린다.
+  // runUpload 를 ref 로 참조해 두 useCallback 의 순환 의존을 피한다(둘 다 deps [] 로 안정).
+  const scheduleRetry = useCallback((uid) => {
+    const n = Math.min(retryAtRef.current + 1, 5);
+    retryAtRef.current = n;
+    const delay = Math.min(2000 * 2 ** (n - 1), 60000); // 2s,4s,8s,16s,32s → 이후 60s 고정
+    clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => {
+      if (liveUserIdRef.current === uid) runUploadRef.current?.(uid);
+    }, delay);
+  }, []);
+
   // ===== 업로드 러너(통합): 디바운스·플러시가 공유 =====
   // 단일 in-flight 직렬화 + do-while dirty-retry + 계정 가드 + 마커 + 재예약. captured uid로 동작.
   // refs + 안정 setter(setSyncState/setSyncNonce)만 읽으므로 useCallback([])로 안정화 → 이펙트 deps에 넣어도 재실행 없음.
@@ -181,11 +215,18 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       do {
         dirtyRef.current = false;
         if (liveUserIdRef.current !== uid) { aborted = true; break; } // 계정 전환 → 옛 행에 쓰지 않고 중단
-        await upsertUserData(uid, dataRef.current);
+        const payload = dataRef.current;
+        // 이 payload 에 담긴 변경은 지금 업로드된다 → 여기서 플러시 부채를 턴다.
+        // (루프가 끝난 뒤에 털면, await 중 들어온 편집까지 '플러시됨'으로 오인해 탭 종료 시 유실된다.)
+        dirtyForFlushRef.current = false;
+        await upsertUserData(uid, payload);
       } while (dirtyRef.current);
       // 실제로 이 uid 업로드가 완료된 경우에만 성공 처리 — 중단(계정 전환)된 업로드를 성공으로 오인하지 않는다.
       if (!aborted) {
-        dirtyForFlushRef.current = false; // 업로드 성공 → 미반영 변경 없음
+        // 성공 → 백오프 초기화 + 예약된 재시도 취소.
+        // (취소하지 않으면 이미 clean 한 상태에서 타이머가 울려 불필요한 중복 업로드가 한 번 더 돈다.)
+        retryAtRef.current = 0;
+        clearTimeout(retryTimer.current);
         if (pendingCloudSyncMarkRef.current === uid) {
           if (!isCloudSynced(uid)) markCloudSynced(uid);
           pendingCloudSyncMarkRef.current = null;
@@ -194,21 +235,51 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       }
     } catch (e) {
       console.error("[cloud] 저장 실패", e);
+      // 실패한 변경은 아직 클라우드에 없다 → 플러시 부채를 되살리고 백오프 재시도를 예약한다.
+      // (이전에는 error 표시만 하고 끝나서, 사용자가 더 편집하지 않으면 변경이 영영 로컬에만 남았고
+      //  다음 새로고침에서 클라우드의 낡은 값이 이겼다.)
+      dirtyForFlushRef.current = true;
+      dirtyRef.current = true;
       setSyncState("error");
+      scheduleRetry(uid);
     } finally {
       upsertingRef.current = false;
       if (liveUserIdRef.current && liveUserIdRef.current !== uid) setSyncNonce((n) => n + 1); // 새 계정 업로드 재예약
     }
   }, []);
 
+  runUploadRef.current = runUpload; // 파생값 재기록 → StrictMode 이중 렌더에도 idempotent
+
   // 데이터 변경 → 디바운스 후 업로드.
   useEffect(() => {
     if (!userId || !cloudReady) return;
     dirtyForFlushRef.current = true; // 대기 중 미반영 변경(탭 숨김 시 즉시 플러시 대상)
+    // 업로드가 in-flight 라면 러너의 do-while 이 이 변경을 소비하게 표시한다.
+    // (이전에는 재진입 runUpload 호출에서만 세워져, await 중 들어온 편집을 재시도 루프가 보지 못했다.)
+    dirtyRef.current = true;
     clearTimeout(upsertTimer.current);
-    upsertTimer.current = setTimeout(() => { runUpload(userId); }, 800);
+    upsertTimer.current = setTimeout(() => {
+      if (!dirtyForFlushRef.current) return; // in-flight 러너가 이미 올렸으면 중복 업로드 생략
+      runUpload(userId);
+    }, 800);
     return () => clearTimeout(upsertTimer.current);
   }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce, runUpload]);
+
+  // 오프라인에서 실패한 업로드를 온라인 복귀 즉시 재시도. 백오프 타이머는 계정 전환·언마운트 시 정리.
+  useEffect(() => {
+    if (!userId) return;
+    const onOnline = () => {
+      if (dirtyForFlushRef.current && liveUserIdRef.current === userId) {
+        retryAtRef.current = 0;
+        runUpload(userId);
+      }
+    };
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      clearTimeout(retryTimer.current);
+    };
+  }, [userId, runUpload]);
 
   // 마지막 편집 유실 방지: 탭 숨김 시 대기 중 변경을 즉시 업로드(같은 runUpload → dirty-retry 공유).
   useEffect(() => {
@@ -223,5 +294,5 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     return () => document.removeEventListener("visibilitychange", onHide);
   }, [userId, cloudReady, runUpload]);
 
-  return { session, syncState, chargeOptions, conflictPrompt };
+  return { session, syncState, chargeOptions, conflictPrompt, rules };
 }

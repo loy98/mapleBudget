@@ -1,12 +1,13 @@
-import { MILEAGE_ACCRUAL, SPLITS } from "./constants.js";
+import { SPLITS, DEFAULT_RULES } from "./constants.js";
 
 // ===== 기본 파라미터 =====
 // 메소→원 환산 계수: (원/1억메소) / 1e8
 export const mesoS = (mesoRate) => (+mesoRate || 0) / 1e8;
 
-// 경매장 수수료(%): MVP 브론즈+ 또는 프리미엄 PC방이면 3%, 아니면 5%
-export function computeFeePct(mvpGrade, pcRoom) {
-  return +mvpGrade >= 1 || pcRoom === "1" ? 3 : 5;
+// 경매장 수수료(%): MVP 브론즈+ 또는 프리미엄 PC방이면 우대 수수료, 아니면 기본 수수료.
+// 수수료율은 넥슨이 정하는 규칙이므로 rules 로 주입받는다(app_config 로 재배포 없이 변경 가능).
+export function computeFeePct(mvpGrade, pcRoom, rules = DEFAULT_RULES) {
+  return +mvpGrade >= 1 || pcRoom === "1" ? rules.feeMvp : rules.feeBase;
 }
 
 // ===== 충전 배분 =====
@@ -77,9 +78,9 @@ export function buildPlan(monthlyAch, availMil, f, s, bestBasic, giftBest, itemL
 
 // ===== 계산기 전체 파생값 =====
 // settings: DEFAULT_SETTINGS 형태, charges: [{name,rate,limit}], items: [{name,cash,sell,mAllowed,mil}]
-export function computeCalc(settings, charges, items) {
+export function computeCalc(settings, charges, items, rules = DEFAULT_RULES) {
   const s = mesoS(settings.mesoRate);
-  const feePct = computeFeePct(settings.mvpGrade, settings.pcRoom);
+  const feePct = computeFeePct(settings.mvpGrade, settings.pcRoom, rules);
   const f = feePct / 100;
   const sp = SPLITS[+settings.months || 0] || SPLITS[0];
   const months = sp.span,
@@ -151,7 +152,7 @@ export function computeCalc(settings, charges, items) {
   const milCap = +settings.milCap || 0,
     milAvail = +settings.milAvail || 0;
   const monthlyCharge = remain / months;
-  const rawMonth = monthlyCharge * MILEAGE_ACCRUAL;
+  const rawMonth = monthlyCharge * rules.mileageAccrual;
   const capM = milCap > 0 ? milCap : Infinity;
   const earnPerMonth = Math.min(rawMonth, capM);
 

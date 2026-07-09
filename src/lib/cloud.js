@@ -1,5 +1,5 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearCloudSynced } from "./storage.js";
+import { clearAccountData } from "./storage.js";
 
 export { cloudEnabled };
 
@@ -22,9 +22,14 @@ export function signInWithEmail(email) {
     options: { emailRedirectTo: window.location.origin },
   });
 }
-export function signOut() {
-  clearCloudSynced(); // 재로그인 시 게스트↔클라우드 선택을 다시 판별하도록 마커 제거
-  return supabase.auth.signOut();
+// 로그아웃은 '이 기기에서 계정 데이터를 떼어내는' 동작이다.
+// 지우기 전에 signOut 성공을 확인한다 — 실패했는데 로컬만 비우면 세션은 살아 있는 채로
+// 다음 새로고침에서 빈 로컬이 클라우드와 병합돼 혼란을 준다(구현은 마커만 지워 이 문제가 있었다).
+// 데이터는 클라우드에 있으므로 재로그인하면 복원된다. 호출측이 성공 시 페이지를 리로드해 상태를 초기화한다.
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (!error) clearAccountData();
+  return { error };
 }
 
 // ===== 앱 공용 설정 (app_config 1행, 누구나 읽기) =====
@@ -60,6 +65,10 @@ export async function submitFeedback({ message, category, email } = {}) {
     user_agent: (typeof navigator !== "undefined" ? navigator.userAgent : "").slice(0, 500),
   };
   const { error } = await supabase.from("feedback").insert(row);
+  // DB 트리거(feedback_rate_limit)가 던지는 토큰을 안정적인 사유 코드로 바꿔 UI에 넘긴다.
+  if (error && String(error.message || "").includes("feedback_rate_limited")) {
+    return { error: new Error("rate-limited") };
+  }
   return { error };
 }
 
@@ -106,12 +115,14 @@ export function mergeSnapshots(local, cloud, opts = {}) {
 }
 function mergeLedger(a = {}, b = {}) {
   const out = {};
+  // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
+  const arr = (v) => (Array.isArray(v) ? v : []);
   ["buys", "sells", "cashes", "spends"].forEach((k) => {
     const map = new Map();
-    (a[k] || []).forEach((x) => { if (x && x.id) map.set(x.id, x); });
+    arr(a[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
     // 같은 id면 클라우드(b) 우선. 항목별 타임스탬프가 없어 정밀 비교는 불가(알려진 한계).
     // 서로 다른 id는 모두 보존되므로 '거래가 사라지는' 손실은 없음.
-    (b[k] || []).forEach((x) => { if (x && x.id) map.set(x.id, x); });
+    arr(b[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
     out[k] = [...map.values()];
   });
   return out;

@@ -1,9 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
+  getDataOwner, setDataOwner, clearAccountData,
+  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
 import { mergeSnapshots } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
+import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
+import { computeForecast } from "./ledger.js";
+import { computeCalc, computeFeePct } from "./calc.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -291,5 +297,246 @@ describe("mergeSnapshots", () => {
     const cloud = mk({ calc: {}, my_items: [] });
     const { conflict } = mergeSnapshots(local, cloud, { localTouched: true });
     expect(conflict).toBe(false);
+  });
+});
+
+describe("uid", () => {
+  it("같은 밀리초에 대량 생성해도 충돌하지 않는다 (ledger 병합이 id 합집합이라 충돌=거래 소실)", () => {
+    const N = 20000;
+    const ids = new Set();
+    for (let i = 0; i < N; i++) ids.add(uid());
+    expect(ids.size).toBe(N);
+  });
+  it("문자열이고 비어 있지 않다", () => {
+    const v = uid();
+    expect(typeof v).toBe("string");
+    expect(v.length).toBeGreaterThan(8);
+  });
+});
+
+// malformed 데이터(손상된 localStorage · 클라우드 행 · 가져오기 파일)가 렌더 중 예외를 던지면
+// React 18은 트리 전체를 언마운트한다 → 백지 화면. 데이터 계층에서 반드시 흡수해야 한다.
+describe("malformed 입력 방어", () => {
+  it("normalizeLedger: 버킷이 배열이 아니면 빈 배열로 강등", () => {
+    const out = normalizeLedger({ buys: {}, sells: "x", cashes: null, spends: 42 });
+    expect(out.buys).toEqual([]);
+    expect(out.sells).toEqual([]);
+    expect(out.cashes).toEqual([]);
+    expect(out.spends).toEqual([]);
+  });
+  it("normalizeLedger: 객체가 아닌 원소는 걸러낸다", () => {
+    const out = normalizeLedger({ buys: [null, "a", 3, { qty: 1 }] });
+    expect(out.buys).toHaveLength(1);
+    expect(out.buys[0].id).toBeTruthy();
+  });
+  it("normalizeLedger: d 자체가 배열/문자열이어도 던지지 않는다", () => {
+    expect(() => normalizeLedger([])).not.toThrow();
+    expect(() => normalizeLedger("nope")).not.toThrow();
+  });
+  it("normalizeMyItems: 배열이 아니면 기본 목록으로 폴백", () => {
+    expect(normalizeMyItems({}).length).toBeGreaterThan(0);
+    expect(normalizeMyItems("x").length).toBeGreaterThan(0);
+  });
+  it("parseCalcState: charge/items가 배열이 아니어도 던지지 않는다", () => {
+    expect(() => parseCalcState({ charge: {}, items: "x" })).not.toThrow();
+    expect(() => parseCalcState([])).not.toThrow();
+  });
+  it("withRowKeys: 배열이 아니면 빈 배열", () => {
+    expect(withRowKeys({})).toEqual([]);
+    expect(withRowKeys(null)).toEqual([]);
+  });
+  it("mergeSnapshots: 클라우드 ledger 버킷이 malformed여도 병합이 던지지 않는다", () => {
+    const local = { calc: {}, my_items: [], ledger: { buys: [{ id: "a" }], sells: [], cashes: [], spends: [] } };
+    const cloud = { calc: {}, my_items: [], ledger: { buys: {}, sells: null } };
+    let res;
+    expect(() => { res = mergeSnapshots(local, cloud); }).not.toThrow();
+    expect(res.snapshot.ledger.buys).toHaveLength(1); // 로컬 거래는 보존
+  });
+});
+
+// app_config.rules 는 DB에서 오므로 신뢰하지 않는다. 항목별 검증 후 통과한 것만 기본값 위에 얹는다.
+describe("resolveRules", () => {
+  it("null/malformed 이면 기본값 그대로", () => {
+    expect(resolveRules(null)).toEqual(DEFAULT_RULES);
+    expect(resolveRules("x")).toEqual(DEFAULT_RULES);
+    expect(resolveRules([])).toEqual(DEFAULT_RULES);
+  });
+  it("유효한 스칼라만 덮어쓴다", () => {
+    const r = resolveRules({ feeMvp: 2, feeBase: "5", mileageAccrual: 0.1 });
+    expect(r.feeMvp).toBe(2);
+    expect(r.feeBase).toBe(DEFAULT_RULES.feeBase); // 문자열은 거부
+    expect(r.mileageAccrual).toBe(0.1);
+  });
+  it("범위를 벗어난 값은 거부", () => {
+    const r = resolveRules({ feeMvp: -1, mileageAccrual: 2 });
+    expect(r.feeMvp).toBe(DEFAULT_RULES.feeMvp);
+    expect(r.mileageAccrual).toBe(DEFAULT_RULES.mileageAccrual);
+  });
+  it("tiers: 오름차순이 아니면 통째로 거부(등급 판정이 틀어지므로)", () => {
+    const r = resolveRules({ tiers: [{ name: "a", amt: 100 }, { name: "b", amt: 50 }] });
+    expect(r.tiers).toBe(DEFAULT_RULES.tiers);
+  });
+  it("tiers: 원소 하나라도 malformed 면 거부", () => {
+    const r = resolveRules({ tiers: [{ name: "a", amt: 100 }, { amt: 200 }] });
+    expect(r.tiers).toBe(DEFAULT_RULES.tiers);
+  });
+  it("tiers: 유효하면 교체", () => {
+    const t = [{ name: "a", amt: 100 }, { name: "b", amt: 200 }];
+    expect(resolveRules({ tiers: t }).tiers).toEqual(t);
+  });
+});
+
+describe("rules 주입", () => {
+  it("computeFeePct: 수수료율이 rules 에서 온다", () => {
+    const rules = { ...DEFAULT_RULES, feeMvp: 1, feeBase: 9 };
+    expect(computeFeePct("2", "0", rules)).toBe(1);
+    expect(computeFeePct("0", "0", rules)).toBe(9);
+    expect(computeFeePct("0", "1", rules)).toBe(1); // 프리미엄 PC방
+  });
+  it("computeFeePct: rules 미지정이면 기본값", () => {
+    expect(computeFeePct("0", "0")).toBe(DEFAULT_RULES.feeBase);
+  });
+  it("estGrade: tiers 를 주입할 수 있고, 미달이면 무등급", () => {
+    const t = [{ name: "낮음", amt: 10 }, { name: "높음", amt: 20 }];
+    expect(estGrade(5, t)).toBe("무등급");
+    expect(estGrade(15, t)).toBe("낮음");
+    expect(estGrade(25, t)).toBe("높음");
+  });
+  it("computeCalc: mileageAccrual 이 rules 에서 온다", () => {
+    const s = { ...DEFAULT_SETTINGS, tierAmt: 1200000, curAchieved: 0, months: "0", milCap: 0 };
+    const a = computeCalc(s, DEFAULT_CHARGES, [], { ...DEFAULT_RULES, mileageAccrual: 0.05 });
+    const b = computeCalc(s, DEFAULT_CHARGES, [], { ...DEFAULT_RULES, mileageAccrual: 0.10 });
+    expect(b.rawMonth).toBeCloseTo(a.rawMonth * 2, 6);
+  });
+});
+
+// computeForecast 는 오늘 날짜에 의존하므로(start13/weekStartThu) 이번 주 시작일을 계산해 fixture 를 만든다.
+describe("computeForecast — 이번 주 포함", () => {
+  const thisWeek = fmtD(weekStartThu(new Date()));
+  const led = (amount) => ({ buys: [], sells: [], cashes: [], spends: [{ id: "p", date: thisWeek, amount }] });
+  const T = TIERS[4].amt; // 레드 1,500,000
+
+  it("이번 주에 이미 쓴 과금은 계획값으로 대체되지 않고 함께 잡힌다", () => {
+    // 회귀: 예전엔 includeThis 일 때 o=0 이 x[0](=T/13)로 '대체'되어 실제 500,000원이 사라졌다.
+    const fc = computeForecast(led(500000), 0.3, 4, "weekly", true, 10000);
+    expect(fc.rows[0].sum).toBeCloseTo(500000 + T / 13, 6);
+  });
+
+  it("과금 주가 아닌 시점(month1)이어도 이번 주 실적은 보존된다", () => {
+    // 회귀: 예전엔 x[0] 이 undefined 라 achAt(0)=0 → 이번 주 실적이 통째로 사라졌다.
+    const fc = computeForecast(led(500000), 0.3, 4, "month1", true, 10000);
+    expect(fc.rows[0].sum).toBeGreaterThanOrEqual(500000);
+  });
+
+  it("이번 주 포함을 켠다고 도달이 늦어지지 않는다", () => {
+    const off = computeForecast(led(500000), 0.3, 4, "weekly", false, 10000);
+    const on = computeForecast(led(500000), 0.3, 4, "weekly", true, 10000);
+    expect(on.reached).toBeLessThanOrEqual(off.reached);
+  });
+
+  it("예측 지평은 켜든 끄든 13주, 총 과금은 목표를 넘지 않는다", () => {
+    for (const inc of [false, true]) {
+      const fc = computeForecast(led(0), 0.3, 4, "weekly", inc, 10000);
+      expect(fc.rows).toHaveLength(13);
+      expect(fc.total).toBeCloseTo(T, 6); // 예전 includeThis=true 는 14주 × T/13 = 107.7%
+    }
+  });
+
+  it("includeThis=false 는 기존 동작을 그대로 보존한다", () => {
+    const fc = computeForecast(led(500000), 0.3, 4, "weekly", false, 10000);
+    expect(fc.rows[0].sum).toBeCloseTo(500000 + T / 13, 6); // o=0 실적 + o=1 계획
+    expect(fc.startOff).toBe(1);
+  });
+});
+
+// 공용 브라우저: A 로그아웃 → B 로그인 시 A의 원장이 B 계정으로 유입되면 안 된다.
+// ledger 병합은 id 합집합이고 tombstone 이 없어 한 번 섞이면 되돌릴 수 없다.
+describe("데이터 소유자 게이트", () => {
+  const store = new Map();
+  beforeEach(() => {
+    store.clear();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+  });
+
+  it("소유자 마커 왕복", () => {
+    expect(getDataOwner()).toBe(null);
+    setDataOwner("user-a");
+    expect(getDataOwner()).toBe("user-a");
+    setDataOwner(null);
+    expect(getDataOwner()).toBe(null);
+  });
+
+  it("로그아웃은 계정 데이터·마커를 지우고 기기별 뷰 설정은 남긴다", () => {
+    store.set(KEY, "{}"); store.set(ITEMS_KEY, "[]"); store.set(LKEY, "{}");
+    store.set(SYNC_KEY, "user-a"); store.set(TOUCHED_KEY, "1"); store.set(OWNER_KEY, "user-a");
+    store.set(CALMODE_KEY, "mvp"); store.set("mvpTheme", "dark");
+
+    clearAccountData();
+
+    [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY].forEach((k) => expect(store.has(k)).toBe(false));
+    expect(store.get(CALMODE_KEY)).toBe("mvp");
+    expect(store.get("mvpTheme")).toBe("dark");
+  });
+
+  it("다른 계정 소유의 로컬을 배제하면 클라우드만 채택되고 충돌도 없다", () => {
+    // useCloudSync 가 owner !== userId 일 때 넘기는 값과 동일한 형태
+    const EMPTY = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [] } };
+    const cloudB = {
+      calc: { mesoRate: 4000 },
+      my_items: [{ name: "B아이템" }],
+      ledger: { buys: [{ id: "b-only" }], sells: [], cashes: [], spends: [] },
+    };
+    const { snapshot, conflict } = mergeSnapshots(EMPTY, cloudB, { localTouched: false });
+    expect(snapshot.ledger.buys.map((x) => x.id)).toEqual(["b-only"]); // A의 거래가 섞이지 않음
+    expect(snapshot.calc).toEqual({ mesoRate: 4000 });
+    expect(conflict).toBe(false);
+  });
+
+  it("같은 계정(또는 게스트)의 로컬은 여전히 병합된다", () => {
+    const localA = { calc: {}, my_items: [], ledger: { buys: [{ id: "a1" }], sells: [], cashes: [], spends: [] } };
+    const cloudA = { calc: {}, my_items: [], ledger: { buys: [{ id: "a2" }], sells: [], cashes: [], spends: [] } };
+    const { snapshot } = mergeSnapshots(localA, cloudA, { localTouched: false });
+    expect(snapshot.ledger.buys.map((x) => x.id).sort()).toEqual(["a1", "a2"]);
+  });
+});
+
+describe("resolveRules — Codex 재검수 반영", () => {
+  it("동일 금액의 인접 등급은 거부한다 (앞 등급이 도달 불가능한 죽은 등급이 됨)", () => {
+    const dup = [{ name: "브론즈", amt: 150000 }, { name: "실버", amt: 150000 }];
+    expect(resolveRules({ tiers: dup }).tiers).toBe(DEFAULT_RULES.tiers);
+    // 실제로 죽는지 확인: estGrade 는 마지막 통과 등급을 고르므로 브론즈는 절대 안 나온다.
+    expect(estGrade(150000, dup)).toBe("실버");
+  });
+  it("-0 은 거부한다", () => {
+    const r = resolveRules({ feeMvp: -0, mileageAccrual: -0 });
+    expect(r.feeMvp).toBe(DEFAULT_RULES.feeMvp);
+    expect(r.mileageAccrual).toBe(DEFAULT_RULES.mileageAccrual);
+  });
+  it("등급 기준액 0 은 거부한다 (무등급과 구분 불가)", () => {
+    expect(resolveRules({ tiers: [{ name: "영", amt: 0 }, { name: "일", amt: 1 }] }).tiers)
+      .toBe(DEFAULT_RULES.tiers);
+  });
+  it("엄격히 증가하는 tiers 는 통과", () => {
+    const t = [{ name: "a", amt: 1 }, { name: "b", amt: 2 }];
+    expect(resolveRules({ tiers: t }).tiers).toEqual(t);
+  });
+  it("schema.sql 시드의 rules 가 검증을 통과한다", () => {
+    // 시드가 거부되면 DB 설정이 조용히 무시되고 폴백만 쓰인다.
+    const seed = {
+      feeMvp: 3, feeBase: 5, mileageAccrual: 0.05,
+      tiers: [
+        { name: "브론즈", amt: 150000 }, { name: "실버", amt: 300000 }, { name: "골드", amt: 600000 },
+        { name: "다이아", amt: 900000 }, { name: "레드", amt: 1500000 }, { name: "블랙", amt: 3000000 },
+      ],
+    };
+    const r = resolveRules(seed);
+    expect(r.feeMvp).toBe(3);
+    expect(r.feeBase).toBe(5);
+    expect(r.mileageAccrual).toBe(0.05);
+    expect(r.tiers).toEqual(seed.tiers);
   });
 });

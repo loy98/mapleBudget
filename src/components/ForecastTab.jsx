@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { TIERS } from "../lib/constants.js";
 import { won, mmdd, estGrade } from "../lib/util.js";
 import { cumNow, computeForecast } from "../lib/ledger.js";
 import { CSelect, CostLabel } from "./ui.jsx";
 
-const tierOptions = TIERS.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
+const tierOptionsOf = (tiers) =>
+  tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
 const timingOptions = [
   { value: "weekly", label: "매주" },
   { value: "biweekly", label: "격주" },
@@ -13,18 +14,20 @@ const timingOptions = [
 ];
 const timingTxt = { weekly: "매주", biweekly: "격주", month1: "매월 1일", monthLast: "매월 말주" };
 
-export default function ForecastTab({ ledger, calc }) {
+export default function ForecastTab({ ledger, calc, tiers = TIERS }) {
   const [tier, setTier] = useState("4");
   const [timing, setTiming] = useState("weekly");
   const [includeThis, setIncludeThis] = useState(false);
 
+  const tierOptions = useMemo(() => tierOptionsOf(tiers), [tiers]);
   const C = cumNow(ledger, calc.mileageR);
-  const fc = computeForecast(ledger, calc.mileageR, +tier, timing, includeThis, calc.optPer10k);
-  const tn = TIERS[+tier].name;
+  const fc = computeForecast(ledger, calc.mileageR, +tier, timing, includeThis, calc.optPer10k, tiers);
+  // 저장된 선택값이 DB에서 줄어든 tiers 범위를 벗어날 수 있다 → 마지막 등급으로 클램프(computeForecast 와 동일 규칙).
+  const tn = (tiers[+tier] || tiers[tiers.length - 1]).name;
 
   // 등급 사다리: 현재 누적(C)이 도달한 레벨 (0=무등급, 1=브론즈, …)
-  const ladder = [{ name: "무등급", amt: 0 }, ...TIERS];
-  const curLevel = TIERS.reduce((acc, t, i) => (C >= t.amt ? i + 1 : acc), 0);
+  const ladder = [{ name: "무등급", amt: 0 }, ...tiers];
+  const curLevel = tiers.reduce((acc, t, i) => (C >= t.amt ? i + 1 : acc), 0);
 
   return (
     <div>
@@ -32,7 +35,7 @@ export default function ForecastTab({ ledger, calc }) {
         <h2><span className="n">📈</span>등급별 필요 과금</h2>
         <p className="desc">
           MVP는 최근 13주 누적 넥슨캐시 사용액 기준. 각 등급의 누적 기준과 유지에 필요한 주당 과금입니다.
-          현재 누적: <b>{won(C)} · 추정 {estGrade(C)}</b>
+          현재 누적: <b>{won(C)} · 추정 {estGrade(C, tiers)}</b>
         </p>
         <div className="ladder">
           {ladder.map((t, i) => {
@@ -50,7 +53,7 @@ export default function ForecastTab({ ledger, calc }) {
         <table>
           <thead><tr><th>등급</th><th>13주 누적 기준</th><th>주당 필요(유지)</th><th>현재 창 대비 부족</th></tr></thead>
           <tbody>
-            {TIERS.map((t) => {
+            {tiers.map((t) => {
               const need = Math.max(0, t.amt - C);
               return (
                 <tr key={t.name}>

@@ -1,5 +1,5 @@
 import { fmtD, start13, addDays, weekStartThu, estGrade } from "./util.js";
-import { TIERS } from "./constants.js";
+import { TIERS, WINDOW_WEEKS } from "./constants.js";
 
 // ===== 주간 과금 (MVP 주: 목~수) =====
 export function weeklyAch(ledger, ws, mileageR) {
@@ -25,7 +25,7 @@ export function weeklyAch(ledger, ws, mileageR) {
 export function cumNow(ledger, mileageR) {
   const s = start13();
   let c = 0;
-  for (let w = 0; w < 13; w++) c += weeklyAch(ledger, addDays(s, w * 7), mileageR);
+  for (let w = 0; w < WINDOW_WEEKS; w++) c += weeklyAch(ledger, addDays(s, w * 7), mileageR);
   return c;
 }
 
@@ -142,7 +142,7 @@ export function itemSummary(ledger, match, { fee, effD, mileageR }, rateWon) {
 export function mesoWeeks(ledger, fee) {
   const s = start13();
   const arr = [];
-  for (let w = 0; w < 13; w++) {
+  for (let w = 0; w < WINDOW_WEEKS; w++) {
     const ws = addDays(s, w * 7);
     arr.push({ ws, we: addDays(ws, 6), ...weeklyMeso(ledger, ws, fee) });
   }
@@ -210,14 +210,18 @@ export function dayInfo(ledger, mileageR) {
 }
 
 // ===== 예상 & 추천: 목표 등급 유지 스케줄 =====
-export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, optPer10k) {
+export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, optPer10k, tiers = TIERS) {
   const C = cumNow(ledger, mileageR);
-  const T = TIERS[tierIdx].amt;
+  // tierIdx 는 셀렉트 값이라 tiers 길이가 DB에서 바뀌면 범위를 벗어날 수 있다 → 마지막 등급으로 클램프.
+  const tier = tiers[tierIdx] || tiers[tiers.length - 1];
+  const T = tier.amt;
   const cur = weekStartThu(new Date());
   const weekOf = (o) => addDays(cur, o * 7);
   const achPast = (o) => weeklyAch(ledger, weekOf(o), mileageR);
   const immediate = Math.max(0, T - C);
   const startOff = includeThis ? 0 : 1;
+  // divisor = '13주 롤링 창에 최소 몇 번 과금이 들어가는가'(격주 최악 6회, 월 1회 최소 3회).
+  // SPLITS 의 '격주=7회'와 다른 이유이며 창 유지에 필요한 회당 금액으로는 이쪽이 맞다.
   const divisor = timing === "weekly" ? 13 : timing === "biweekly" ? 6 : 3;
   const perCharge = T / divisor;
 
@@ -238,8 +242,12 @@ export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, 
     return false;
   };
 
+  // 예측 지평은 startOff 부터 13주. 이전에는 `o <= 13` 이라 includeThis(startOff=0)일 때
+  // 14주에 과금이 배정되어 총액이 목표의 107.7%(14×T/13)가 됐다.
+  const lastOff = startOff + WINDOW_WEEKS - 1;
+
   const x = {};
-  for (let o = startOff; o <= 13; o++) {
+  for (let o = startOff; o <= lastOff; o++) {
     const ws = weekOf(o);
     let charge = false;
     if (timing === "weekly") charge = true;
@@ -248,20 +256,23 @@ export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, 
     else if (timing === "monthLast") charge = hasLast(ws);
     if (charge) x[o] = perCharge;
   }
-  const achAt = (o) => (o < startOff ? achPast(o) : x[o] || 0);
+  // 지나간 주와 이번 주(o<=0)의 과금은 '이미 일어난 사실'이므로 언제나 원장에서 읽는다.
+  // 계획값 x[o] 는 그 위에 더한다. 이전에는 includeThis 일 때 o=0 이 계획값으로 '대체'되어
+  // 이번 주에 이미 쓴 돈이 롤링 창에서 통째로 사라졌다(체크박스를 켤수록 도달이 늦어지는 역설).
+  const achAt = (o) => (o <= 0 ? achPast(o) : 0) + (o >= startOff ? x[o] || 0 : 0);
 
   let total = 0;
-  for (let o = startOff; o <= 13; o++) total += x[o] || 0;
+  for (let o = startOff; o <= lastOff; o++) total += x[o] || 0;
   const cost = (total / 10000) * optPer10k;
 
   const rows = [];
   let reached = null;
-  for (let i = startOff; i <= 13; i++) {
+  for (let i = startOff; i <= lastOff; i++) {
     const ws = weekOf(i),
       we = addDays(ws, 6);
     let sum = 0;
-    for (let oo = i - 12; oo <= i; oo++) sum += achAt(oo);
-    const g = estGrade(sum);
+    for (let oo = i - (WINDOW_WEEKS - 1); oo <= i; oo++) sum += achAt(oo);
+    const g = estGrade(sum, tiers);
     if (reached === null && sum >= T) reached = i;
     rows.push({ i, ws, we, charge: x[i] > 0 ? x[i] : 0, sum, grade: g });
   }
