@@ -3,6 +3,9 @@
 메이플스토리 MVP 등급작(엠작) 최적 비용 계산기. Vite + React SPA. 한국어 UI.
 탭: **계산기 · 거래 기록(통계/달력/입력) · 예상 & 추천**. 코드 구조는 [README.md](README.md) 참고.
 
+> **진행 중인 작업이 있다면 [docs/WORK-STATUS.md](docs/WORK-STATUS.md) 를 먼저 읽는다** — 브랜치 상태, 미병합 작업,
+> 다음 할 일, 배포 전 사람이 해야 할 것, 이 프로젝트 특유의 검증 방법(로컬 PostgreSQL 실측·뮤테이션 검증)이 있다.
+
 **분야별 상세 아키텍처는 [docs/architecture/](docs/architecture/README.md) 를 먼저 읽는다** — 프론트엔드·도메인로직·데이터계층·동기화백엔드·인프라운영. 해당 분야 코드를 바꾸기 전 그 문서를 참조/갱신할 것.
 
 ---
