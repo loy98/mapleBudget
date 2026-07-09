@@ -84,3 +84,102 @@ Codex + 전문 에이전트 3종(아키텍처/SOLID, 보안/RLS, 코드품질)�
 - 시크릿 유출 0(git 히스토리 포함), publishable 키만 커밋(공개 정상). `dangerouslySetInnerHTML`/`eval` 0.
 - 동기화 직렬화(단일 in-flight + do-while)·userId 원시값 키잉·순수 함수 분리·모듈 스코프 컴포넌트·포맷 함수 `isFinite` 방어 — 견고.
 - 마커를 첫 업로드 성공 후에만 기록(로그인 선택 유실 방지) 등 세심함.
+
+---
+
+# 2차 전체 검수 (2026-07-10) — 수익화·공개 서비스 전환
+
+분야별 에이전트 5종(보안/동기화/도메인/프론트엔드/인프라) + Codex 독립 감사.
+1차(2026-07-05)에서 지적된 항목은 **대체로 실제 반영 확인**. 이번 수확은 수익화 축과 데이터 정합 축.
+
+## ✅ 이번에 해결 (feature/audit-2026-07)
+
+- **약관·방침·크롤러 메타** — `public/privacy.html`·`terms.html`·`robots.txt`·`sitemap.xml`, 푸터 링크,
+  넥슨 무관 고지, canonical/og 절대 URL.
+- **feedback rate limit** — RLS는 '누가'만 통제하고 '얼마나 자주'는 통제하지 않았다.
+  BEFORE INSERT 트리거로 출처당 10분/5건(로그인=user_id, 게스트=IP 솔트 해시. IP 원문 미저장).
+- **malformed 입력 크래시** — `normalizeLedger` 등이 배열 아닌 값에 `.forEach` 로 던져 백지 화면.
+  데이터 계층 가드 + `ErrorBoundary`(백업 내보내기 제공).
+- **uid 충돌** — 4자 난수 → `crypto.getRandomValues`. ledger 병합이 id 합집합이라 충돌 = 거래 소실.
+- **dev 의존성 취약점** — vite 6.4.3 / vitest 3.2.7 등, `npm audit` 5건 → 0건.
+- **게임 규칙 하드코딩** — 경매장 수수료·마일리지 적립률·등급 기준을 `app_config.rules` 로.
+  순수 함수엔 `rules` 인자 주입(순수성 유지), `resolveRules` 가 DB 값을 항목별 검증.
+- **모달 a11y** — Esc·포커스 트랩·포커스 복귀·스크롤 잠금(`components/Modal.jsx`). `CSelect` 키보드 조작.
+- **계정 간 원장 유입(CRITICAL)** — `mvpDataOwnerUid` 마커로 병합 게이트 + 로그아웃 시 계정 데이터 삭제.
+- **예측 '이번 주 포함' 오답** — 이번 주 실제 과금이 계획값으로 대체돼 사라졌다. 지평도 14주→13주.
+- **업로드 유실·무재시도** — 플러시 부채를 payload 캡처 시점에 털고, 지수 백오프 + `online` 재시도.
+- **LogTab 분할** — 718줄 → 85줄 조립부 + `logtab/{useLedgerDerived,StatsPanel,CalendarPanel,EntryForm,ItemTables}`.
+  분할 전후 SSR 마크업 13,506B 바이트 동일 확인.
+
+## ⏳ 미해결 — 설계 필요 (착수 전 반드시 읽을 것)
+
+### B-1. 삭제 전파 부재 (tombstone) — HIGH
+`mergeSnapshots` 는 userId 있는 **모든 마운트마다** 실행되고 ledger 는 순수 id 합집합이다.
+→ 기기 A가 거래 X를 지워도, X를 아직 가진 기기 B가 앱을 열면 X가 부활하고 A에도 되돌아온다.
+단일 기기 변형: X 삭제 후 800ms 디바운스 안에 탭을 닫으면(또는 오프라인) 다음 로드에서 X 복귀.
+**즉 해당 항목을 한 번이라도 본 기기가 있으면 삭제 기능이 동작하지 않는다.**
+1차 백로그 P2-3은 이를 'lost-update 정밀도'로 서술했으나 실제로는 더 강한 결함.
+→ 항목별 `deletedAt` tombstone(보존 90일) + `mergeLedger` 에서 tombstone id 제거.
+
+### B-2. 탭 2개가 서로를 통째로 덮어씀 (full-blob LWW) — HIGH
+최초 동기화 이후 재fetch·realtime 구독·`storage` 이벤트 리스너가 없다. `updated_at` 은 select 만 하고
+비교에 안 쓴다. 업로드 경로에는 병합이 전혀 없다(초기 동기화에만 있음).
+→ 같은 계정 탭 2개에서, 탭2가 stale 스냅샷으로 행 전체를 upsert 하면 탭1의 거래가 소멸.
+→ upsert 전 `updated_at` 조건부 쓰기(`.eq('updated_at', lastSeen)`) 후 충돌 시 재병합.
+   `BroadcastChannel`/`storage` 리스너로 탭 간 케이스만 막아도 비용 대비 효과가 크다.
+
+### B-3. localStorage 파싱 실패 시 원본 파괴 — HIGH
+`readJSON` 이 파싱 에러를 삼키고 `null` → 빈 상태로 로드 → `App.jsx` 의 자동저장 이펙트가
+**복구 가능했을 원본 문자열 위에 빈 값을 덮어쓴다.** 쓰기 중단(쿼터·크래시) 한 번이 게스트에겐 영구 손실.
+→ 파싱 실패 시 원본을 `<key>.corrupt` 로 백업한 뒤에만 쓰기. 실패로 로드된 상태의 첫 자동저장은 건너뛴다.
+
+### B-4. 주차 경계가 브라우저 로컬 타임존 기준 — MEDIUM
+MVP 주는 넥슨 서버(KST) 목요일 경계인데 `weekStartThu` 는 로컬 `getDay()` 를 쓴다.
+UTC-8 사용자가 수요일 오후에 열면 KST로는 이미 새 주. 앱 내부는 일관되나 게임과 최대 하루 어긋난다.
+→ `weekStartThu(dt, tz = "Asia/Seoul")`.
+(DST·윤년·연말연시는 실측 확인 결과 이상 없음 — `setDate` 정규화 + `fmtD` 가 Y/M/D만 읽음.)
+
+### B-5. 과거 거래에 현재 설정을 소급 적용 — MEDIUM
+`ledgerStats`/`weeklyAch` 등이 `fee`/`effD`/`mileageR` 를 **현재 계산기 설정**에서 받는다.
+등급을 올리면(수수료 5%→3%) 3개월 전 판매 실수령 메소가 바뀌고, 마일리지 비율을 바꾸면
+13주 누적 실적(`cum` — 등급 판정의 핵심 숫자)이 변한다.
+→ 거래 생성 시 당시 요율 스냅샷(`_fee`, `_mileageR`). 당장 어려우면 최소한 UI에 소급 사실 명시.
+
+### B-6. `importAll` 이 백업 파일을 검증하지 않음 — MEDIUM
+`data.app === "mvp-calculator"` 문자열 하나만 보고 그대로 localStorage 에 쓴 뒤 리로드.
+날짜 포맷도 검증 안 해 `"2026-7-2"` 같은 값은 사전식 비교에서 **모든 주에 조용히 누락**된다.
+(데이터 계층 가드로 크래시는 막혔으나, 조용한 데이터 소실 경로는 남아 있다.)
+
+### B-7. 구버전 원장 행의 id 재발급 → 동기화 후 중복 — MEDIUM
+`normalizeLedger` 의 `if (!x.id) x.id = uid()` 가 **로드 시점에 랜덤** id 부여.
+같은 pre-id 원장을 가진 두 기기(단일 HTML 시절 데이터, 같은 백업을 양쪽에서 import)는
+같은 거래에 다른 id를 만들고, 합집합 병합이 둘 다 보존 → 통계·13주 누적이 2배.
+→ 레거시 행은 결정적 id(버킷+날짜+아이템+금액 해시)로 유도.
+
+### B-8. 그 외 (LOW~MEDIUM)
+- `visibilitychange` 플러시가 평범한 `fetch` — 탭 종료 시 취소된다. `sendBeacon`/`keepalive` 필요.
+- `writeJSON` 이 `QuotaExceededError` 를 조용히 삼킴 → 게스트는 저장이 no-op 인 줄 모른다.
+- `normalizeMyItems`: `[]` 와 '데이터 없음'을 구분 못해 **자주 쓰는 아이템 전체 삭제가 불가능**(매 로드 부활).
+  충전 행도 비우면 `정가 (할인 없음)` 으로 되돌아온다.
+- `normalizeLedger` 가 입력 객체를 제자리 변형(mutate) — 호출자 객체 오염.
+- `app_config` 검증이 `name` 만 확인(`chargeMethods` 의 rate/limit, `defaultItems` 의 cash 타입·범위 미검증).
+  운영자 실수로 전체 유저 계산이 오염될 수 있다. `rules` 는 이번에 `resolveRules` 로 검증됨.
+- `IconView` 가 http(s) 이면 임의 호스트 이미지를 로드(트래킹 픽셀 표면). allowlist 미완(1차 P2-2 부분 해결).
+- 에러 트래킹 부재 — 프로덕션 오류를 알 방법이 없다(`ErrorBoundary.componentDidCatch` 에 전송 지점만 마련).
+- `mileageRate` 상한 미검증 → 100 입력 시 `buildPlan` 에 `NaN`/`Infinity` 유입.
+- `manW` 만 `isFinite` 가드 없음(`manW(Infinity)` → `"Infinity억"`). `manW(99999999)` → `"10000만"`.
+- `won(-0.4)` → `"-0원"`.
+- `computeFeePct` 의 조건이 `CalcTab.jsx` 에 재구현(`feeBenefit`) — 한쪽만 고치면 표시와 계산이 갈라진다.
+- `MVP_GRADES[0] = "무등급 (15만 미만)"` 이 `TIERS[0].amt` 를 문자열로 복제. `"무등급"` 리터럴이 4곳.
+- `ui.jsx`(576줄) 분할 권장: inputs / pickers / Sparkline / labels + `usePopover` 추출(5곳 복붙 ~50줄).
+- 커스텀 위젯(`ItemCombo`·`DateInput`·`WeekPicker`·`YMPicker`·달력 셀)이 키보드로 조작 불가.
+- CSP `script-src 'self'` 는 애드센스를 차단한다. 광고 종류 확정 시 해당 도메인만 허용할 것.
+- `PRIVACY_CONTACT_EMAIL` 플레이스홀더를 실제 연락처로 치환해야 배포 가능.
+
+## 오탐으로 판단해 고치지 않은 것
+
+- **`allocateCharge` 의 `C=0` 폴백이 불연속이라는 지적** — 아니다. `C→0+` 이면 전액이 최고 할인 방식
+  한도 안에 들어가 `dRate → topRate` 로 **연속 수렴**하며, 폴백값 `sorted[0].rate/100` 이 바로 그 극한이다.
+- **`divisor = weekly 13 / biweekly 6 / 월간 3` 이 `SPLITS` 와 불일치라는 지적** — 아니다.
+  이 값은 '13주 롤링 창에 최소 몇 번의 과금이 들어가는가'(격주 최악 6회, 월 1회 최소 3회)이므로
+  창 유지에 필요한 회당 금액의 분모로는 올바르다.

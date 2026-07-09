@@ -139,7 +139,7 @@ export default function App() {
         />
       )}
       {tab === "log" && (
-        <LogTab ledger={ledger} setLedger={setLedger} myItems={myItems} calc={calc} />
+        <LogTab ledger={ledger} setLedger={setLedger} myItems={myItems} calc={calc} tiers={rules.tiers} />
       )}
       {tab === "fore" && <ForecastTab ledger={ledger} calc={calc} tiers={rules.tiers} />}
 
