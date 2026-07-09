@@ -12,6 +12,7 @@ import ForecastTab from "./components/ForecastTab.jsx";
 import AuthBar from "./components/AuthBar.jsx";
 import HelpModal from "./components/HelpModal.jsx";
 import FeedbackModal from "./components/FeedbackModal.jsx";
+import Modal from "./components/Modal.jsx";
 
 const TABS = [
   { id: "calc", label: "계산기" },
@@ -20,10 +21,12 @@ const TABS = [
 ];
 
 // 최초 로그인 병합 충돌 선택 모달(네이티브 confirm 대체 — 앱 테마·테스트 가능). 모듈 스코프(리마운트 방지).
+// onClose 를 주지 않는다 = Esc·배경 클릭으로 닫히지 않음. 어느 쪽 데이터를 쓸지 반드시 골라야 하므로
+// '그냥 닫기'라는 선택지가 존재하면 안 된다(닫으면 무엇을 적용할지 정의되지 않는다).
 function ConflictModal({ onChoose }) {
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="modal-card">
+    <Modal label="클라우드 설정 병합 선택">
+      <>
         <div className="modal-title">클라우드에 저장된 설정이 있어요</div>
         <p className="modal-body">
           이 기기의 설정/자주 쓰는 아이템과 클라우드에 저장된 것이 서로 달라요. 어느 쪽을 쓸까요?
@@ -33,8 +36,8 @@ function ConflictModal({ onChoose }) {
           <button className="btn" onClick={() => onChoose(true)}>클라우드 설정 사용</button>
           <button className="btn ghost" onClick={() => onChoose(false)}>이 기기 설정 사용</button>
         </div>
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }
 

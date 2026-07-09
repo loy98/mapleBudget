@@ -208,7 +208,10 @@
   .csel.open .csel-pop{display:block}
   .csel-opt{padding:8px 12px;border-radius:7px;font-size:13.5px;cursor:pointer;color:var(--txt);white-space:nowrap}
   .csel-opt:hover{background:var(--panel2)}
+  /* 키보드 하이라이트 — 마우스 hover 와 같은 표현이라 두 입력수단이 같은 위치를 가리킨다 */
+  .csel-opt.active{background:var(--panel2)}
   .csel-opt.sel{background:var(--accent);color:var(--on-accent);font-weight:700}
+  .csel-opt.sel.active{filter:brightness(1.08)}
   /* 아이템 콤보 (자유 입력 + 항상 열리는 목록) */
   .icombo{position:relative;display:inline-block;width:100%;vertical-align:middle}
   .icombo-inp{width:100%;padding-right:26px}

@@ -1,10 +1,12 @@
 // 도움말 모달 — 앱 사용법·용어 안내(정적 콘텐츠, 백엔드 없음).
 // 모듈 스코프 컴포넌트(리마운트로 포커스 유실 방지 규칙 준수).
+// Esc 닫기·포커스 트랩은 Modal 껍데기가 담당.
+import Modal from "./Modal.jsx";
 
 export default function HelpModal({ onClose }) {
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="도움말" onClick={onClose}>
-      <div className="modal-card help" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} label="도움말" cardClass="help">
+      <>
         <div className="modal-head">
           <div className="modal-title">❓ 도움말</div>
           <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
@@ -73,7 +75,7 @@ export default function HelpModal({ onClose }) {
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>닫기</button>
         </div>
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

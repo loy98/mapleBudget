@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { submitFeedback, cloudEnabled } from "../lib/cloud.js";
 import { CSelect } from "./ui.jsx";
+import Modal from "./Modal.jsx";
 
 const CATEGORIES = [
   { value: "suggestion", label: "💡 건의 · 개선" },
@@ -41,8 +42,8 @@ export default function FeedbackModal({ onClose, session }) {
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="피드백 보내기" onClick={onClose}>
-      <div className="modal-card feedback" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} label="피드백 보내기" cardClass="feedback">
+      <>
         <div className="modal-head">
           <div className="modal-title">💬 피드백 보내기</div>
           <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
@@ -101,7 +102,7 @@ export default function FeedbackModal({ onClose, session }) {
             </div>
           </>
         )}
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }
