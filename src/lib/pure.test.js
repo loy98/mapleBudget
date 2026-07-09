@@ -1014,3 +1014,59 @@ describe("B-5 · 거래 행 요율 스냅샷", () => {
     expect(st.spend).toBeCloseTo(10000, 6); // 0 이 폴백으로 새지 않는다
   });
 });
+
+// 자체 검수: 요율 스냅샷은 '그때 그랬다'는 불변의 사실 → 병합에서 잃으면 안 된다.
+describe("B-5 · 스냅샷은 병합에서 소실되지 않는다", () => {
+  it("스냅샷 없는 클라우드 행이 스냅샷 있는 로컬 행을 덮어써도 요율은 살아남는다", () => {
+    // 구버전 클라이언트(또는 오래된 탭)가 스냅샷 없이 같은 거래를 올린 상황
+    const local = { buys: [{ id: "x", qty: 1, price: 10000, _effD: 0.1 }], sells: [], cashes: [], spends: [] };
+    const cloud = { buys: [{ id: "x", qty: 2, price: 10000 }], sells: [], cashes: [], spends: [] };
+    const merged = mergeLedger(local, cloud, null);
+    expect(merged.buys[0].qty).toBe(2);      // 내용은 클라우드 우선(기존 규칙 유지)
+    expect(merged.buys[0]._effD).toBe(0.1);  // 스냅샷은 살아남는다
+  });
+
+  it("판매 수수료 스냅샷도 마찬가지", () => {
+    const local = { buys: [], sells: [{ id: "s", meso: 1, _fee: 0.05 }], cashes: [], spends: [] };
+    const cloud = { buys: [], sells: [{ id: "s", meso: 2 }], cashes: [], spends: [] };
+    const merged = mergeLedger(local, cloud, null);
+    expect(merged.sells[0].meso).toBe(2);
+    expect(merged.sells[0]._fee).toBe(0.05);
+  });
+
+  it("클라우드 쪽 스냅샷이 최신이면 그쪽을 쓴다", () => {
+    const local = { buys: [{ id: "x", _effD: 0.1 }], sells: [], cashes: [], spends: [] };
+    const cloud = { buys: [{ id: "x", _effD: 0.2 }], sells: [], cashes: [], spends: [] };
+    expect(mergeLedger(local, cloud, null).buys[0]._effD).toBe(0.2);
+  });
+
+  it("삭제된 거래는 스냅샷과 무관하게 제거된다", () => {
+    const local = { ...deleteLedgerEntry({ buys: [{ id: "x", _effD: 0.1 }], sells: [], cashes: [], spends: [] }, "buys", "x", T0) };
+    const cloud = { buys: [{ id: "x" }], sells: [], cashes: [], spends: [] };
+    expect(mergeLedger(local, cloud, null).buys).toEqual([]);
+  });
+});
+
+describe("B-5 · rulesAt 의 날짜 처리", () => {
+  const H = resolveRuleHistory([
+    { effectiveFrom: "2025-01-01", mileageRate: 40 },
+    { effectiveFrom: "2026-01-01", mileageRate: 30 },
+  ]);
+
+  it("발효일이 미래인 규칙은 지금 적용되지 않는다", () => {
+    expect(rulesAt(H, "2025-12-31").mileageRate).toBe(40);
+  });
+
+  it("날짜가 없거나 형식이 깨진 행은 가장 이른 규칙을 쓴다 (조용히 최신을 쓰지 않는다)", () => {
+    // "2026-7-2" 는 zero-pad 가 없어 사전식 비교가 깨진다 → 규칙 선택도 신뢰할 수 없다.
+    // 앱이 생성하는 날짜는 항상 fmtD(zero-pad)이고, 가져오기 파일 검증은 백로그 B-6.
+    expect(rulesAt(H, "2026-7-2").mileageRate).toBe(40);
+    expect(rulesAt(H, undefined).mileageRate).toBe(40);
+    expect(rulesAt(H, null).mileageRate).toBe(40);
+  });
+
+  it("history 가 비었거나 배열이 아니면 기본 규칙", () => {
+    expect(rulesAt([], "2026-01-01")).toBe(DEFAULT_RULES);
+    expect(rulesAt(null, "2026-01-01")).toBe(DEFAULT_RULES);
+  });
+});
