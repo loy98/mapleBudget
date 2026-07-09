@@ -31,6 +31,8 @@ export default function FeedbackModal({ onClose, session }) {
       setErrMsg(
         error.message === "cloud-disabled"
           ? "지금은 피드백 전송을 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+          : error.message === "rate-limited"
+          ? "짧은 시간에 너무 많이 보내셨어요. 10분 뒤에 다시 시도해 주세요."
           : "전송에 실패했어요. 잠시 후 다시 시도해 주세요."
       );
       return;

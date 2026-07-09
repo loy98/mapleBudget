@@ -59,7 +59,19 @@ export function addDays(dt, n) {
   return d;
 }
 
-export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+// 거래 항목 id. ledger 병합이 id 기준 합집합이라 충돌하면 거래 1건이 조용히 사라진다.
+// 기기 A·B가 오프라인에서 같은 밀리초에 항목을 만들면 난수 부분만이 유일성을 보장하므로
+// 엔트로피를 넉넉히 준다(구 4자 base36 ≈ 1.7M → 충돌 가능). 기존 id는 그대로 유효.
+export function uid() {
+  const t = Date.now().toString(36);
+  const c = globalThis.crypto;
+  if (c && typeof c.getRandomValues === "function") {
+    const a = new Uint32Array(2);
+    c.getRandomValues(a);
+    return t + "-" + a[0].toString(36) + a[1].toString(36);
+  }
+  return t + "-" + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+}
 
 export function estGrade(total) {
   let g = "무등급";

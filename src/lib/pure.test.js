@@ -4,6 +4,7 @@ import {
 } from "./storage.js";
 import { mergeSnapshots } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
+import { uid } from "./util.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -291,5 +292,59 @@ describe("mergeSnapshots", () => {
     const cloud = mk({ calc: {}, my_items: [] });
     const { conflict } = mergeSnapshots(local, cloud, { localTouched: true });
     expect(conflict).toBe(false);
+  });
+});
+
+describe("uid", () => {
+  it("같은 밀리초에 대량 생성해도 충돌하지 않는다 (ledger 병합이 id 합집합이라 충돌=거래 소실)", () => {
+    const N = 20000;
+    const ids = new Set();
+    for (let i = 0; i < N; i++) ids.add(uid());
+    expect(ids.size).toBe(N);
+  });
+  it("문자열이고 비어 있지 않다", () => {
+    const v = uid();
+    expect(typeof v).toBe("string");
+    expect(v.length).toBeGreaterThan(8);
+  });
+});
+
+// malformed 데이터(손상된 localStorage · 클라우드 행 · 가져오기 파일)가 렌더 중 예외를 던지면
+// React 18은 트리 전체를 언마운트한다 → 백지 화면. 데이터 계층에서 반드시 흡수해야 한다.
+describe("malformed 입력 방어", () => {
+  it("normalizeLedger: 버킷이 배열이 아니면 빈 배열로 강등", () => {
+    const out = normalizeLedger({ buys: {}, sells: "x", cashes: null, spends: 42 });
+    expect(out.buys).toEqual([]);
+    expect(out.sells).toEqual([]);
+    expect(out.cashes).toEqual([]);
+    expect(out.spends).toEqual([]);
+  });
+  it("normalizeLedger: 객체가 아닌 원소는 걸러낸다", () => {
+    const out = normalizeLedger({ buys: [null, "a", 3, { qty: 1 }] });
+    expect(out.buys).toHaveLength(1);
+    expect(out.buys[0].id).toBeTruthy();
+  });
+  it("normalizeLedger: d 자체가 배열/문자열이어도 던지지 않는다", () => {
+    expect(() => normalizeLedger([])).not.toThrow();
+    expect(() => normalizeLedger("nope")).not.toThrow();
+  });
+  it("normalizeMyItems: 배열이 아니면 기본 목록으로 폴백", () => {
+    expect(normalizeMyItems({}).length).toBeGreaterThan(0);
+    expect(normalizeMyItems("x").length).toBeGreaterThan(0);
+  });
+  it("parseCalcState: charge/items가 배열이 아니어도 던지지 않는다", () => {
+    expect(() => parseCalcState({ charge: {}, items: "x" })).not.toThrow();
+    expect(() => parseCalcState([])).not.toThrow();
+  });
+  it("withRowKeys: 배열이 아니면 빈 배열", () => {
+    expect(withRowKeys({})).toEqual([]);
+    expect(withRowKeys(null)).toEqual([]);
+  });
+  it("mergeSnapshots: 클라우드 ledger 버킷이 malformed여도 병합이 던지지 않는다", () => {
+    const local = { calc: {}, my_items: [], ledger: { buys: [{ id: "a" }], sells: [], cashes: [], spends: [] } };
+    const cloud = { calc: {}, my_items: [], ledger: { buys: {}, sells: null } };
+    let res;
+    expect(() => { res = mergeSnapshots(local, cloud); }).not.toThrow();
+    expect(res.snapshot.ledger.buys).toHaveLength(1); // 로컬 거래는 보존
   });
 });

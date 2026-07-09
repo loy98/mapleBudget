@@ -24,9 +24,11 @@ create policy "own_data" on public.user_data
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
--- updated_at 자동 갱신
+-- updated_at 자동 갱신. search_path 를 고정해 스키마 하이재킹 여지를 없앤다(Supabase linter 권장).
 create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql
+set search_path = pg_catalog, pg_temp
+as $$
 begin
   new.updated_at = now();
   return new;
@@ -131,3 +133,85 @@ create policy "feedback_insert_anyone" on public.feedback
     or
     (auth.role() = 'authenticated' and user_id = auth.uid())
   );
+
+-- ============================================================
+-- feedback 남용 방지 (rate limit)
+-- RLS는 "누가 쓸 수 있나"만 통제하고 "얼마나 자주"는 통제하지 않는다. anon INSERT가 열려 있으므로
+-- 스크립트로 4KB 행을 무제한 밀어넣어 DB를 채우고 요금을 유발할 수 있다 → BEFORE INSERT 트리거로 제한.
+--
+-- 버킷 키: 로그인=user_id, 게스트=클라이언트 IP의 솔트 해시.
+--   IP 원문은 저장하지 않는다(개인정보 최소 수집). 해시만 짧게 보관하고 1시간 뒤 청소한다.
+--   IP는 PostgREST가 노출하는 request.headers 에서 읽는다(커넥션 풀러 뒤라 inet_client_addr() 는 무의미).
+--   헤더가 없으면(직접 호출 등) 식별 불가 → 공용 버킷으로 묶어 보수적으로 제한한다.
+-- ============================================================
+
+create table if not exists public.feedback_throttle (
+  bucket       text primary key,
+  window_start timestamptz not null default now(),
+  cnt          int         not null default 0
+);
+
+-- 클라이언트는 이 테이블을 읽지도 쓰지도 못한다. 트리거(security definer)만 접근.
+revoke all on public.feedback_throttle from anon, authenticated;
+alter table public.feedback_throttle enable row level security;
+-- 정책을 두지 않음 → 어떤 클라이언트 역할로도 접근 불가.
+
+create or replace function public.feedback_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_catalog, pg_temp
+as $$
+declare
+  -- 10분 창에서 출처당 허용 건수. 사람이 연달아 보낼 만한 양보다는 넉넉하고, 스크립트에는 좁다.
+  c_limit  constant int      := 5;
+  c_window constant interval := interval '10 minutes';
+  v_hdrs json;
+  v_ip   text;
+  v_key  text;
+  v_cnt  int;
+begin
+  if auth.uid() is not null then
+    v_key := 'u:' || auth.uid()::text;
+  else
+    begin
+      v_hdrs := current_setting('request.headers', true)::json;
+    exception when others then
+      v_hdrs := null;
+    end;
+    -- Cloudflare 경유가 아니면 cf-connecting-ip 가 없다. x-forwarded-for 는 목록이므로 첫 항목만.
+    v_ip := nullif(btrim(coalesce(
+      v_hdrs ->> 'cf-connecting-ip',
+      split_part(coalesce(v_hdrs ->> 'x-forwarded-for', ''), ',', 1)
+    )), '');
+    if v_ip is null then
+      v_key := 'anon:unknown';
+    else
+      -- 솔트 해시만 저장 → 테이블이 유출돼도 IP 원문이 드러나지 않는다.
+      v_key := 'ip:' || md5(v_ip || ':mvp-feedback-throttle-v1');
+    end if;
+  end if;
+
+  delete from public.feedback_throttle where window_start < now() - interval '1 hour';
+
+  insert into public.feedback_throttle as t (bucket, window_start, cnt)
+  values (v_key, now(), 1)
+  on conflict (bucket) do update set
+    cnt          = case when t.window_start < now() - c_window then 1   else t.cnt + 1 end,
+    window_start = case when t.window_start < now() - c_window then now() else t.window_start end
+  returning t.cnt into v_cnt;
+
+  if v_cnt > c_limit then
+    -- 클라이언트(cloud.js submitFeedback)가 이 토큰으로 안내 문구를 고른다. 문구를 바꾸면 거기도 함께 고칠 것.
+    raise exception 'feedback_rate_limited' using errcode = 'P0001';
+  end if;
+
+  return new;
+end $$;
+
+revoke all on function public.feedback_rate_limit() from public, anon, authenticated;
+
+drop trigger if exists feedback_rate_limit_trg on public.feedback;
+create trigger feedback_rate_limit_trg
+  before insert on public.feedback
+  for each row execute function public.feedback_rate_limit();

@@ -32,18 +32,21 @@ export function serializeCalcState(settings, charges, items) {
 // 리스트 행에 안정적인 React key(_k)를 부여. index key는 중간 행 삭제 시
 // NumInput/ItemCombo 내부 상태(draft/focus)가 다른 행에 얹히므로, 행마다 고정 키가 필요.
 export function withRowKeys(arr) {
-  return (arr || []).map((x) => (x && x._k ? x : { ...x, _k: uid() }));
+  // 배열이 아닌 값(클라우드/가져오기 파일의 malformed 데이터)이 오면 map에서 던져 앱이 백지가 된다.
+  return (Array.isArray(arr) ? arr : []).map((x) => (x && x._k ? x : { ...x, _k: uid() }));
 }
+// 원장 4개 버킷은 반드시 배열이어야 한다. 아니면 빈 배열로 강등(데이터 없음 < 앱 크래시).
+const asArray = (v) => (Array.isArray(v) ? v : []);
 export function parseCalcState(d) {
-  if (!d) {
+  if (!d || typeof d !== "object" || Array.isArray(d)) {
     return { settings: { ...DEFAULT_SETTINGS }, charges: withRowKeys(DEFAULT_CHARGES), items: withRowKeys(DEFAULT_CALC_ITEMS) };
   }
   const settings = { ...DEFAULT_SETTINGS };
   Object.keys(DEFAULT_SETTINGS).forEach((k) => {
     if (d[k] != null && d[k] !== "") settings[k] = d[k];
   });
-  const charges = withRowKeys(d.charge && d.charge.length ? d.charge : [{ name: "정가 (할인 없음)", rate: 0, limit: 0 }]);
-  const items = withRowKeys(d.items && d.items.length ? d.items : []);
+  const charges = withRowKeys(Array.isArray(d.charge) && d.charge.length ? d.charge : [{ name: "정가 (할인 없음)", rate: 0, limit: 0 }]);
+  const items = withRowKeys(Array.isArray(d.items) && d.items.length ? d.items : []);
   return { settings, charges, items };
 }
 export function loadCalcState() {
@@ -64,7 +67,7 @@ export function saveCalcState(settings, charges, items) {
 
 // ===== 자주 쓰는 아이템 =====
 export function normalizeMyItems(d) {
-  return withRowKeys(d && d.length ? d : DEFAULT_ITEMS);
+  return withRowKeys(Array.isArray(d) && d.length ? d : DEFAULT_ITEMS);
 }
 export function loadMyItems() {
   return normalizeMyItems(readJSON(ITEMS_KEY));
@@ -73,9 +76,13 @@ export const saveMyItems = (items) => writeJSON(ITEMS_KEY, items);
 
 // ===== 거래 원장 =====
 export function normalizeLedger(d) {
-  const src = d || {};
-  const led = { buys: src.buys || [], sells: src.sells || [], cashes: src.cashes || [], spends: src.spends || [] };
-  ["buys", "sells", "cashes", "spends"].forEach((k) => led[k].forEach((x) => { if (!x.id) x.id = uid(); }));
+  const src = d && typeof d === "object" ? d : {};
+  const led = { buys: asArray(src.buys), sells: asArray(src.sells), cashes: asArray(src.cashes), spends: asArray(src.spends) };
+  // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
+  ["buys", "sells", "cashes", "spends"].forEach((k) => {
+    led[k] = led[k].filter((x) => x && typeof x === "object");
+    led[k].forEach((x) => { if (!x.id) x.id = uid(); });
+  });
   // 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
   // meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.
   led.cashes.forEach((c) => {
