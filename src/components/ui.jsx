@@ -504,12 +504,9 @@ export function Sparkline({ data = [], labels = [], height = 88, pad = 6, mode =
       )}
       {ticks.length > 0 && (
         <div className="spark-x" aria-hidden="true">
+          {/* 모든 눈금을 데이터 포인트 중앙에 정렬. 양끝은 살짝 넘칠 수 있어 .spark-x가 여백을 갖는다. */}
           {ticks.map((i) => (
-            <span
-              key={i}
-              className={"sx" + (i === hi ? " on" : "")}
-              style={{ left: xAt(i), transform: i === 0 ? "none" : i === n - 1 ? "translateX(-100%)" : "translateX(-50%)" }}
-            >
+            <span key={i} className={"sx" + (i === hi ? " on" : "")} style={{ left: xAt(i) }}>
               {(labels[i] && labels[i].short) || ""}
             </span>
           ))}
@@ -559,7 +556,9 @@ export const PlLabel = ({ p }) =>
 export const MilUse = ({ n }) =>
   n > 0 ? <span className="mil"><span className="num">{mlN(n)}</span><span className="u"> 마일리지 소모</span></span> : <>–</>;
 export const IconView = ({ icon }) => {
-  if (!icon) return null;
+  // 문자열만 렌더. app_config(DB)에서 온 malformed 아이콘(객체/배열/숫자)이 오면
+  // {icon} 을 그대로 렌더할 때 "Objects are not valid as a React child" 크래시가 나므로 여기서 차단.
+  if (typeof icon !== "string" || !icon) return null;
   // http(s) URL만 이미지로. referrerPolicy=no-referrer 로 트래킹 리퍼러 유출 차단, lazy 로딩.
   // (data:/javascript: 는 여기서 자동 제외 → 이모지 span 으로 폴백, img 스크립트 벡터 없음.)
   return /^https?:\/\//.test(icon) ? (

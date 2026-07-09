@@ -35,18 +35,107 @@ export function cashWonOf(c) {
   return +c.won || 0;
 }
 
-// 한 주(목~수)의 메소 현황: 판매 실수령 / 현금화 / 현금화 필요(판매−현금화)
+// 한 주(목~수)의 거래 현황
+// buyQty/sellQty = 그 주에 구매·판매한 아이템 '개수'(수량 합, 미입력은 1개로 보지 않고 0)
+// sold = 판매 실수령 메소 / cashed = 현금화 메소 / need = 판매−현금화
 export function weeklyMeso(ledger, ws, fee) {
   const we = addDays(ws, 6);
   const ss = fmtD(ws), es = fmtD(we);
-  let sold = 0, cashed = 0;
+  let sold = 0, cashed = 0, buyQty = 0, sellQty = 0;
+  ledger.buys.forEach((b) => {
+    if (b.date >= ss && b.date <= es) buyQty += +b.qty || 0;
+  });
   ledger.sells.forEach((sl) => {
-    if (sl.date >= ss && sl.date <= es) sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+    if (sl.date >= ss && sl.date <= es) {
+      sellQty += +sl.qty || 0;
+      sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+    }
   });
   ledger.cashes.forEach((c) => {
     if (c.date >= ss && c.date <= es) cashed += +c.meso || 0;
   });
-  return { sold, cashed, need: sold - cashed };
+  return { buyQty, sellQty, sold, cashed, need: sold - cashed };
+}
+
+// ===== 품목별 집계 =====
+// 품목명이 비어 있는 항목도 버려선 안 된다. weeklyMeso 의 buyQty/sellQty 는 품목 유무와 무관하게
+// 수량을 더하므로, 품목별 행의 합이 주차 합계와 어긋나지 않도록 단일 버킷으로 묶는다.
+export const NO_ITEM = "(품목 미입력)";
+const itemKey = (v) => (v == null ? "" : String(v)).trim() || NO_ITEM;
+
+// 거래량 많은 순 → 동률이면 이름순
+const byVolume = (a, b) =>
+  b.buyQty + b.sellQty - (a.buyQty + a.sellQty) || a.name.localeCompare(b.name, "ko");
+
+// 한 주(목~수)의 품목별 구매/판매 내역
+// buyQty/sellQty 의 합은 weeklyMeso 의 buyQty/sellQty 와 정확히 일치한다.
+// avg  = 개당 평균 판매가(억) — 거래 입력 화면에 적은 값 그대로(수수료 차감 전)
+// sold = 판매 실수령 메소(억) — 수수료 반영
+export function weeklyItems(ledger, ws, fee) {
+  const we = addDays(ws, 6);
+  const ss = fmtD(ws), es = fmtD(we);
+  const map = new Map();
+  const row = (n) => {
+    if (!map.has(n)) map.set(n, { name: n, buyQty: 0, sellQty: 0, gross: 0, sold: 0 });
+    return map.get(n);
+  };
+  ledger.buys.forEach((b) => {
+    if (b.date >= ss && b.date <= es) row(itemKey(b.item)).buyQty += +b.qty || 0;
+  });
+  ledger.sells.forEach((sl) => {
+    if (sl.date >= ss && sl.date <= es) {
+      const q = +sl.qty || 0, m = +sl.meso || 0, r = row(itemKey(sl.item));
+      r.sellQty += q;
+      r.gross += q * m;
+      r.sold += q * m * (1 - fee);
+    }
+  });
+  return [...map.values()]
+    .filter((r) => r.buyQty || r.sellQty)
+    .map((r) => ({ ...r, avg: r.sellQty > 0 ? r.gross / r.sellQty : 0 }))
+    .sort(byVolume);
+}
+
+// 품목별 누적 요약
+// buyQty/sellQty/spend/sold/avg = 선택 기간(match) 기준.
+// stock(재고) = 전체 원장 누적 구매−판매. 산 주와 판 주가 다를 수 있어 기간으로 자르면 음수가 되므로
+//   기간과 무관하게 계산한다. 표시 행은 '기간 내 거래가 있었던 품목'으로만 추린다.
+// profit(추정 손익, 원) = 판매 실수령 메소 × rateWon − 구매 실지출.
+//   현금화(cashes)는 메소를 뭉텅이로 파는 것이라 품목에 귀속되지 않는다. 그래서 억당 환산율을
+//   호출측에서 주입받아 '추정'으로만 낸다. rateWon 이 없으면(≤0) profit 은 null.
+export function itemSummary(ledger, match, { fee, effD, mileageR }, rateWon) {
+  const r = isFinite(rateWon) && rateWon > 0 ? rateWon : 0;
+  const map = new Map();
+  const row = (n) => {
+    if (!map.has(n)) map.set(n, { name: n, buyQty: 0, sellQty: 0, gross: 0, sold: 0, spend: 0, stock: 0 });
+    return map.get(n);
+  };
+  // 재고는 전체 기간 누적
+  ledger.buys.forEach((b) => { row(itemKey(b.item)).stock += +b.qty || 0; });
+  ledger.sells.forEach((sl) => { row(itemKey(sl.item)).stock -= +sl.qty || 0; });
+
+  ledger.buys.forEach((b) => {
+    if (!match(b.date)) return;
+    const q = +b.qty || 0, p = +b.price || 0, mf = b.mil ? mileageR : 0;
+    const t = row(itemKey(b.item));
+    t.buyQty += q;
+    t.spend += q * p * (1 - mf) * (1 - effD);
+  });
+  ledger.sells.forEach((sl) => {
+    if (!match(sl.date)) return;
+    const q = +sl.qty || 0, m = +sl.meso || 0, t = row(itemKey(sl.item));
+    t.sellQty += q;
+    t.gross += q * m;
+    t.sold += q * m * (1 - fee);
+  });
+  return [...map.values()]
+    .filter((x) => x.buyQty || x.sellQty)
+    .map((x) => ({
+      ...x,
+      avg: x.sellQty > 0 ? x.gross / x.sellQty : 0,
+      profit: r > 0 ? x.sold * r - x.spend : null,
+    }))
+    .sort(byVolume);
 }
 
 // 최근 13주 주차별 메소 현황
