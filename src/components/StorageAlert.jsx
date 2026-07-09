@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getStorageIssues, onStorageIssue, exportAll, CORRUPT_SUFFIX } from "../lib/storage.js";
+import { getStorageIssues, onStorageIssue, exportAll, corruptSlots } from "../lib/storage.js";
 
 // 저장소 문제를 사용자에게 알린다. 이전에는 손상·쿼터 초과가 조용히 삼켜져서,
 // 화면에는 데이터가 보이는데 새로고침하면 사라지는 상황을 사용자가 알 방법이 없었다.
@@ -28,7 +28,7 @@ export default function StorageAlert() {
               </>
             ) : (
               <>
-                원본은 <code>{issues.corruptKeys[0] + CORRUPT_SUFFIX}</code> 에 그대로 보관했습니다.
+                원본은 <code>{corruptSlots(issues.corruptKeys[0])[0]}</code> 에 그대로 보관했습니다.
                 아래에서 백업을 받아두시면 나중에 복구할 수 있습니다.
               </>
             )}
