@@ -9,6 +9,14 @@ export default function AuthBar({ session, syncState }) {
 
   if (!cloudEnabled) return null;
 
+  // 로그아웃은 이 기기에서 계정 데이터를 지운다(공용 브라우저 대비). 지운 뒤 리로드해야
+  // 메모리에 남은 React 상태가 자동저장 이펙트로 localStorage 에 되살아나지 않는다.
+  const logout = async () => {
+    const { error } = await signOut();
+    if (error) { alert("로그아웃 실패: " + error.message); return; }
+    location.reload();
+  };
+
   if (session) {
     const label = session.user?.email || "로그인됨";
     const sync =
@@ -19,7 +27,7 @@ export default function AuthBar({ session, syncState }) {
       <div className="authbar">
         <span className={"sync " + cls}>☁ {sync}</span>
         <span className="muted" style={{ fontSize: 12 }}>{label}</span>
-        <button className="btn ghost sm" onClick={() => signOut()}>로그아웃</button>
+        <button className="btn ghost sm" onClick={logout}>로그아웃</button>
       </div>
     );
   }

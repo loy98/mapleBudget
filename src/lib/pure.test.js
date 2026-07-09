@@ -1,12 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
+  getDataOwner, setDataOwner, clearAccountData,
+  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
 import { mergeSnapshots } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
-import { uid, estGrade } from "./util.js";
+import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
+import { computeForecast } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
-import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES } from "./constants.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -404,5 +407,99 @@ describe("rules 주입", () => {
     const a = computeCalc(s, DEFAULT_CHARGES, [], { ...DEFAULT_RULES, mileageAccrual: 0.05 });
     const b = computeCalc(s, DEFAULT_CHARGES, [], { ...DEFAULT_RULES, mileageAccrual: 0.10 });
     expect(b.rawMonth).toBeCloseTo(a.rawMonth * 2, 6);
+  });
+});
+
+// computeForecast 는 오늘 날짜에 의존하므로(start13/weekStartThu) 이번 주 시작일을 계산해 fixture 를 만든다.
+describe("computeForecast — 이번 주 포함", () => {
+  const thisWeek = fmtD(weekStartThu(new Date()));
+  const led = (amount) => ({ buys: [], sells: [], cashes: [], spends: [{ id: "p", date: thisWeek, amount }] });
+  const T = TIERS[4].amt; // 레드 1,500,000
+
+  it("이번 주에 이미 쓴 과금은 계획값으로 대체되지 않고 함께 잡힌다", () => {
+    // 회귀: 예전엔 includeThis 일 때 o=0 이 x[0](=T/13)로 '대체'되어 실제 500,000원이 사라졌다.
+    const fc = computeForecast(led(500000), 0.3, 4, "weekly", true, 10000);
+    expect(fc.rows[0].sum).toBeCloseTo(500000 + T / 13, 6);
+  });
+
+  it("과금 주가 아닌 시점(month1)이어도 이번 주 실적은 보존된다", () => {
+    // 회귀: 예전엔 x[0] 이 undefined 라 achAt(0)=0 → 이번 주 실적이 통째로 사라졌다.
+    const fc = computeForecast(led(500000), 0.3, 4, "month1", true, 10000);
+    expect(fc.rows[0].sum).toBeGreaterThanOrEqual(500000);
+  });
+
+  it("이번 주 포함을 켠다고 도달이 늦어지지 않는다", () => {
+    const off = computeForecast(led(500000), 0.3, 4, "weekly", false, 10000);
+    const on = computeForecast(led(500000), 0.3, 4, "weekly", true, 10000);
+    expect(on.reached).toBeLessThanOrEqual(off.reached);
+  });
+
+  it("예측 지평은 켜든 끄든 13주, 총 과금은 목표를 넘지 않는다", () => {
+    for (const inc of [false, true]) {
+      const fc = computeForecast(led(0), 0.3, 4, "weekly", inc, 10000);
+      expect(fc.rows).toHaveLength(13);
+      expect(fc.total).toBeCloseTo(T, 6); // 예전 includeThis=true 는 14주 × T/13 = 107.7%
+    }
+  });
+
+  it("includeThis=false 는 기존 동작을 그대로 보존한다", () => {
+    const fc = computeForecast(led(500000), 0.3, 4, "weekly", false, 10000);
+    expect(fc.rows[0].sum).toBeCloseTo(500000 + T / 13, 6); // o=0 실적 + o=1 계획
+    expect(fc.startOff).toBe(1);
+  });
+});
+
+// 공용 브라우저: A 로그아웃 → B 로그인 시 A의 원장이 B 계정으로 유입되면 안 된다.
+// ledger 병합은 id 합집합이고 tombstone 이 없어 한 번 섞이면 되돌릴 수 없다.
+describe("데이터 소유자 게이트", () => {
+  const store = new Map();
+  beforeEach(() => {
+    store.clear();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+  });
+
+  it("소유자 마커 왕복", () => {
+    expect(getDataOwner()).toBe(null);
+    setDataOwner("user-a");
+    expect(getDataOwner()).toBe("user-a");
+    setDataOwner(null);
+    expect(getDataOwner()).toBe(null);
+  });
+
+  it("로그아웃은 계정 데이터·마커를 지우고 기기별 뷰 설정은 남긴다", () => {
+    store.set(KEY, "{}"); store.set(ITEMS_KEY, "[]"); store.set(LKEY, "{}");
+    store.set(SYNC_KEY, "user-a"); store.set(TOUCHED_KEY, "1"); store.set(OWNER_KEY, "user-a");
+    store.set(CALMODE_KEY, "mvp"); store.set("mvpTheme", "dark");
+
+    clearAccountData();
+
+    [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY].forEach((k) => expect(store.has(k)).toBe(false));
+    expect(store.get(CALMODE_KEY)).toBe("mvp");
+    expect(store.get("mvpTheme")).toBe("dark");
+  });
+
+  it("다른 계정 소유의 로컬을 배제하면 클라우드만 채택되고 충돌도 없다", () => {
+    // useCloudSync 가 owner !== userId 일 때 넘기는 값과 동일한 형태
+    const EMPTY = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [] } };
+    const cloudB = {
+      calc: { mesoRate: 4000 },
+      my_items: [{ name: "B아이템" }],
+      ledger: { buys: [{ id: "b-only" }], sells: [], cashes: [], spends: [] },
+    };
+    const { snapshot, conflict } = mergeSnapshots(EMPTY, cloudB, { localTouched: false });
+    expect(snapshot.ledger.buys.map((x) => x.id)).toEqual(["b-only"]); // A의 거래가 섞이지 않음
+    expect(snapshot.calc).toEqual({ mesoRate: 4000 });
+    expect(conflict).toBe(false);
+  });
+
+  it("같은 계정(또는 게스트)의 로컬은 여전히 병합된다", () => {
+    const localA = { calc: {}, my_items: [], ledger: { buys: [{ id: "a1" }], sells: [], cashes: [], spends: [] } };
+    const cloudA = { calc: {}, my_items: [], ledger: { buys: [{ id: "a2" }], sells: [], cashes: [], spends: [] } };
+    const { snapshot } = mergeSnapshots(localA, cloudA, { localTouched: false });
+    expect(snapshot.ledger.buys.map((x) => x.id).sort()).toEqual(["a1", "a2"]);
   });
 });

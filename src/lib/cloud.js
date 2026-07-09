@@ -1,5 +1,5 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearCloudSynced } from "./storage.js";
+import { clearAccountData } from "./storage.js";
 
 export { cloudEnabled };
 
@@ -22,9 +22,14 @@ export function signInWithEmail(email) {
     options: { emailRedirectTo: window.location.origin },
   });
 }
-export function signOut() {
-  clearCloudSynced(); // 재로그인 시 게스트↔클라우드 선택을 다시 판별하도록 마커 제거
-  return supabase.auth.signOut();
+// 로그아웃은 '이 기기에서 계정 데이터를 떼어내는' 동작이다.
+// 지우기 전에 signOut 성공을 확인한다 — 실패했는데 로컬만 비우면 세션은 살아 있는 채로
+// 다음 새로고침에서 빈 로컬이 클라우드와 병합돼 혼란을 준다(구현은 마커만 지워 이 문제가 있었다).
+// 데이터는 클라우드에 있으므로 재로그인하면 복원된다. 호출측이 성공 시 페이지를 리로드해 상태를 초기화한다.
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (!error) clearAccountData();
+  return { error };
 }
 
 // ===== 앱 공용 설정 (app_config 1행, 누구나 읽기) =====

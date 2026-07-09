@@ -10,6 +10,11 @@ export const CALMODE_KEY = "mvpCalMode";
 // 있으면 = 새로고침(세션 복원) → 병합 충돌을 조용히 클라우드 우선 처리.
 // 없거나 다른 uid = 이 기기에서 그 계정 첫 로그인 → 게스트/클라우드 설정 선택을 1회 물음.
 export const SYNC_KEY = "mvpCloudSyncedUid";
+// 이 브라우저에 저장된 데이터가 '누구 것'인지. 없으면 게스트 소유.
+// 병합 게이트: 로컬 데이터의 소유자가 다른 계정이면 절대 병합하지 않는다.
+// (없으면 공용 브라우저에서 A가 로그아웃 후 B가 로그인할 때 A의 거래 원장이 B 계정으로 영구 유입된다.
+//  ledger 병합은 id 합집합이라 충돌 모달 선택과 무관하게 항상 합쳐지고, tombstone이 없어 되돌릴 수도 없다.)
+export const OWNER_KEY = "mvpDataOwnerUid";
 
 function readJSON(key) {
   try {
@@ -127,6 +132,25 @@ export function markCloudSynced(userId) {
 export function clearCloudSynced() {
   try {
     localStorage.removeItem(SYNC_KEY);
+  } catch { /* ignore */ }
+}
+
+// ===== 데이터 소유자 =====
+export function getDataOwner() {
+  try { return localStorage.getItem(OWNER_KEY); } catch { return null; }
+}
+export function setDataOwner(userId) {
+  try {
+    if (userId) localStorage.setItem(OWNER_KEY, userId);
+    else localStorage.removeItem(OWNER_KEY);
+  } catch { /* ignore */ }
+}
+// 로그아웃 시 이 기기에서 계정 데이터를 지운다.
+// 두 가지 목적: ① 다음 계정으로의 유입 차단 ② 남의 브라우저에 금전 원장을 남기지 않음.
+// 데이터는 클라우드에 있으므로 재로그인하면 복원된다. calMode/theme 같은 기기별 뷰 설정은 남긴다.
+export function clearAccountData() {
+  try {
+    [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY].forEach((k) => localStorage.removeItem(k));
   } catch { /* ignore */ }
 }
 

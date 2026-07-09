@@ -31,6 +31,10 @@ export const DEFAULT_ITEMS = [
 
 export const MILEAGE_ACCRUAL = 0.05;
 
+// MVP 등급은 '최근 13주 누적 넥슨캐시 사용액' 기준. 롤링 창의 길이(주).
+// 창 합계는 [i-(N-1) … i] 로 정확히 N개 항이어야 한다.
+export const WINDOW_WEEKS = 13;
+
 // ===== 게임 규칙(rules) =====
 // 시세가 아니라 넥슨이 정하는 '규칙'이라 사용자가 편집하지 않는다. 따라서 settings(사용자 소유)가 아니라
 // 순수 함수의 인자로 흘려보낸다 — 전역 상태를 읽지 않으므로 computeCalc/estGrade 는 순수하게 남는다.

@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment } from "react";
-import { WD_MVP, WD_SUN } from "../lib/constants.js";
+import { WD_MVP, WD_SUN, WINDOW_WEEKS } from "../lib/constants.js";
 import { won, pct, eok, mlN, mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, weekStartSun, uid, manW, estGrade } from "../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, cashWonOf, mesoWeeks, weeklyItems, itemSummary } from "../lib/ledger.js";
 import { DateInput, YMPicker, WeekPicker, ItemCombo, NumInput, StatGroup, CostLabel, PlLabel, Sparkline, IconView } from "./ui.jsx";
@@ -115,8 +115,11 @@ export default function LogTab({ ledger, setLedger, myItems, calc }) {
       const we = fmtD(addDays(new Date(statWeek + "T00:00:00"), 6));
       return (dt) => (dt || "") >= ws && (dt || "") <= we;
     }
+    // 상한도 둔다. cumNow 는 13주(마지막 수요일)까지만 더하므로, 상한이 없으면 미래 날짜 거래가
+    // '총 과금(st.ach)'에는 잡히고 '13주 누적(cum)'에는 안 잡혀 같은 화면의 두 숫자가 어긋난다.
     const s = fmtD(start13());
-    return (dt) => (dt || "") >= s;
+    const e = fmtD(addDays(start13(), WINDOW_WEEKS * 7 - 1));
+    return (dt) => (dt || "") >= s && (dt || "") <= e;
   }, [periodMode, statMonth, statWeek]);
   const st = useMemo(() => ledgerStats(ledger, match, env), [ledger, match, calc]);
   const cum = useMemo(() => cumNow(ledger, calc.mileageR), [ledger, calc.mileageR]);
