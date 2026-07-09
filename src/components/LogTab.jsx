@@ -12,7 +12,7 @@ export { ItemSubRow, ItemSummary } from "./logtab/ItemTables.jsx";
 
 // 거래 기록 탭 — 뷰 상태를 소유하고 세 패널(통계·달력·입력)에 나눠준다.
 // 파생값 계산은 useLedgerDerived, 그리기는 각 패널이 맡는다.
-export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS }) {
+export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS, ruleHistory }) {
   const [sub, setSub] = useState("view");
   const [periodMode, setPeriodMode] = useState("w13");
   const [chartMode, setChartMode] = useState("line"); // 추세 차트: line | bars
@@ -34,12 +34,16 @@ export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS
     setLedger({ ...ledger, [kind]: ledger[kind].map((x) => (x.id === id ? { ...x, ...patch } : x)) });
   // 삭제 표식을 남겨야 다른 기기로 전파된다. 배열에서 빼기만 하면 그 항목을 아직 가진 기기가 되살린다.
   const delEntry = (kind, id) => setLedger(deleteLedgerEntry(ledger, kind, id));
+  // 지금 이 순간의 요율. 거래 행에 함께 저장해야 나중에 설정을 바꿔도 과거 기록이 변하지 않는다.
+  const snap = { fee: calc.f, effD: calc.effD };
+  const snapFor = (kind) => (kind === "buys" ? { _effD: snap.effD } : kind === "sells" ? { _fee: snap.fee } : null);
+
   const addEntryOn = (kind, base) => {
     const d = selectedDate || todayStr();
-    setLedger({ ...ledger, [kind]: [...ledger[kind], { id: uid(), date: d, ...base }] });
+    setLedger({ ...ledger, [kind]: [...ledger[kind], { id: uid(), date: d, ...snapFor(kind), ...base }] });
   };
 
-  const d = useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth, statWeek });
+  const d = useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth, statWeek, ruleHistory });
 
   return (
     <div>
@@ -79,6 +83,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS
             alert(date + "에 " + n + "건 저장되었습니다.");
           }}
           ledger={ledger} setLedger={setLedger}
+          snap={snap}
         />
       )}
     </div>

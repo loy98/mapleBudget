@@ -6,7 +6,10 @@ export const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
 
 // ===== 거래 입력 (드래프트) =====
 // 원장 커밋까지 자기 안에서 끝내는 독립 유닛이라 ledger/setLedger 를 직접 받는다.
-export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldNames, onCommit, ledger, setLedger }) {
+// snap = 지금 이 순간의 요율(_fee: 경매장 수수료, _effD: 평균 충전 할인).
+// 거래 행에 함께 저장해 두면, 나중에 사용자가 등급이나 충전 방식을 바꿔도 과거 기록이 변하지 않는다.
+// (마일리지 결제 비율은 넥슨 규칙이라 스냅샷이 필요 없다 — 거래일의 규칙을 조회하면 된다.)
+export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, myItems, soldNames, onCommit, ledger, setLedger, snap }) {
   const upd = (kind, i, patch) =>
     setDraft({ ...draft, [kind]: draft[kind].map((x, j) => (j === i ? { ...x, ...patch } : x)) });
   const del = (kind, i) => setDraft({ ...draft, [kind]: draft[kind].filter((_, j) => j !== i) });
@@ -22,8 +25,8 @@ export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, my
     const spends = draft.spends.filter((x) => x.amount);
     n = buys.length + sells.length + cashes.length + spends.length;
     if (n === 0) { alert("입력된 항목이 없습니다."); return; }
-    next.buys = [...ledger.buys, ...buys.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, price: x.price, mil: x.mil }))];
-    next.sells = [...ledger.sells, ...sells.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, meso: x.meso }))];
+    next.buys = [...ledger.buys, ...buys.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, price: x.price, mil: x.mil, _effD: snap?.effD }))];
+    next.sells = [...ledger.sells, ...sells.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, meso: x.meso, _fee: snap?.fee }))];
     next.cashes = [...ledger.cashes, ...cashes.map((x) => ({ id: uid(), date, meso: x.meso, rate: x.rate }))];
     next.spends = [...ledger.spends, ...spends.map((x) => ({ id: uid(), date, amount: x.amount, memo: x.memo }))];
     setLedger(next);

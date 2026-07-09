@@ -72,23 +72,68 @@ export const DEFAULT_RULES = {
 // (하나라도 malformed 면 그 키만 버리고 나머지는 적용 — 전체를 버리면 DB 수정의 의미가 없다)
 // -0 도 거부한다(`-0 >= 0` 은 true). 수수료·등급 금액에 음의 0이 들어가면 표시·계산이 이상해진다.
 const posNum = (v, max) => typeof v === "number" && isFinite(v) && !Object.is(v, -0) && v >= 0 && v <= max;
-export function resolveRules(cfgRules) {
+
+// 한 벌의 규칙을 기본값 위에 얹는다(발효일은 여기서 다루지 않는다).
+function resolveOne(cfg) {
   const r = { ...DEFAULT_RULES };
-  if (!cfgRules || typeof cfgRules !== "object" || Array.isArray(cfgRules)) return r;
-  if (posNum(cfgRules.feeMvp, 100)) r.feeMvp = cfgRules.feeMvp;
-  if (posNum(cfgRules.feeBase, 100)) r.feeBase = cfgRules.feeBase;
-  if (posNum(cfgRules.mileageAccrual, 1)) r.mileageAccrual = cfgRules.mileageAccrual;
+  if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return r;
+  if (posNum(cfg.feeMvp, 100)) r.feeMvp = cfg.feeMvp;
+  if (posNum(cfg.feeBase, 100)) r.feeBase = cfg.feeBase;
+  if (posNum(cfg.mileageAccrual, 1)) r.mileageAccrual = cfg.mileageAccrual;
   // 100% 는 buildPlan 의 achM = cash*(1-mileageR) 를 0으로 만들어 NaN/Infinity 를 유발한다 → 배제.
-  if (posNum(cfgRules.mileageRate, 100) && cfgRules.mileageRate < 100) r.mileageRate = cfgRules.mileageRate;
-  if (Array.isArray(cfgRules.tiers) && cfgRules.tiers.length) {
+  if (posNum(cfg.mileageRate, 100) && cfg.mileageRate < 100) r.mileageRate = cfg.mileageRate;
+  if (Array.isArray(cfg.tiers) && cfg.tiers.length) {
     // 등급 기준액은 0보다 커야 한다(0이면 무등급과 구분되지 않는다).
-    const t = cfgRules.tiers.filter((x) => x && typeof x.name === "string" && posNum(x.amt, 1e12) && x.amt > 0);
+    const t = cfg.tiers.filter((x) => x && typeof x.name === "string" && posNum(x.amt, 1e12) && x.amt > 0);
     // estGrade 는 오름차순 순회로 '마지막 통과 등급'을 고른다.
     // 인접 등급 금액이 같으면 앞 등급은 어떤 값으로도 도달할 수 없는 죽은 등급이 되므로 엄격한 증가를 요구한다.
     const ascending = t.every((x, i) => i === 0 || t[i - 1].amt < x.amt);
-    if (t.length === cfgRules.tiers.length && ascending) r.tiers = t;
+    if (t.length === cfg.tiers.length && ascending) r.tiers = t;
   }
   return r;
+}
+
+// ===== 발효일 있는 규칙 이력 =====
+// 넥슨이 수수료율·마일리지 비율을 바꾸면 그 시점 이후 거래만 새 규칙으로 계산해야 한다.
+// 단일 규칙만 두면 규칙이 바뀌는 순간 **과거 기록까지 소급해서** 값이 변한다(B-5).
+//
+// app_config.config.rules 는 두 형태를 모두 받는다:
+//   · 객체            → 항상 유효한 단일 규칙(하위 호환)
+//   · 배열 [{effectiveFrom:"YYYY-MM-DD", ...}]  → 발효일 오름차순 이력
+// 날짜 문자열은 fmtD 와 같은 zero-padded 형식이라 사전식 비교가 곧 시간순 비교다.
+const EPOCH = "0000-01-01";
+const isDateStr = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+export function resolveRuleHistory(cfgRules) {
+  if (!Array.isArray(cfgRules)) return [{ effectiveFrom: EPOCH, ...resolveOne(cfgRules) }];
+  const entries = cfgRules
+    .filter((e) => e && typeof e === "object" && !Array.isArray(e))
+    .map((e) => ({ effectiveFrom: isDateStr(e.effectiveFrom) ? e.effectiveFrom : EPOCH, ...resolveOne(e) }))
+    .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
+  if (!entries.length) return [{ effectiveFrom: EPOCH, ...DEFAULT_RULES }];
+  // 가장 이른 항목은 EPOCH 로 내려 '그 이전 거래'도 규칙을 갖게 한다(빈 구간 방지).
+  entries[0] = { ...entries[0], effectiveFrom: EPOCH };
+  return entries;
+}
+
+// 그 날짜에 유효한 규칙. history 는 발효일 오름차순.
+export function rulesAt(history, date) {
+  if (!Array.isArray(history) || !history.length) return DEFAULT_RULES;
+  const d = isDateStr(date) ? date : EPOCH;
+  let found = history[0];
+  for (const e of history) { if (e.effectiveFrom <= d) found = e; else break; }
+  return found;
+}
+
+// 계산기('지금')가 쓰는 규칙.
+// today 를 생략하면 오늘. 생략 시 EPOCH 로 떨어지면 이력의 '가장 이른' 규칙을 고르게 되어 위험하다.
+// (util.js 의 todayStr 을 쓰지 않는 이유: util.js 가 constants.js 를 import 해 순환이 된다.)
+const nowStr = () => {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
+export function resolveRules(cfgRules, today = nowStr()) {
+  return rulesAt(resolveRuleHistory(cfgRules), today);
 }
 
 export const SPLITS = [

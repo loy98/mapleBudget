@@ -1,13 +1,29 @@
 import { useMemo } from "react";
-import { WINDOW_WEEKS } from "../../lib/constants.js";
+import { WINDOW_WEEKS, rulesAt } from "../../lib/constants.js";
 import { mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu } from "../../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, mesoWeeks, weeklyItems, itemSummary } from "../../lib/ledger.js";
 
 // LogTab 의 파생값 전부를 한 곳에 모은다. 원장·계산기 값에서 나오는 순수 파생이라
 // 렌더 로직과 섞여 있을 이유가 없고, 섞여 있으면 useMemo 의존성 실수가 눈에 띄지 않는다.
 // 반환값은 LogTab 이 각 패널에 나눠 넘긴다.
-export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth, statWeek }) {
-  const env = { fee: calc.f, effD: calc.effD, mileageR: calc.mileageR };
+export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth, statWeek, ruleHistory }) {
+  // ===== 거래별 요율 (B-5) =====
+  // 과거 거래를 '현재 설정'으로 계산하면 사용자가 설정을 바꿀 때 과거 기록이 조용히 변한다.
+  //  · mileageR : 거래일에 유효한 넥슨 규칙. 사용자가 못 바꾸므로 스냅샷이 필요 없다.
+  //  · fee/effD : 사용자 상태(등급·충전 방식)에서 나오므로 거래 행에 스냅샷을 남긴다.
+  //               스냅샷이 없는 구 데이터는 현재 설정으로 폴백한다(과거 값을 복원할 방법이 없다).
+  //               cashes.rate 가 없으면 won 으로 폴백하는 것과 같은 패턴.
+  const env = useMemo(() => ({
+    mileageR: (b) => (rulesAt(ruleHistory, b && b.date).mileageRate || 0) / 100,
+    fee: (sl) => (sl && sl._fee != null ? +sl._fee || 0 : calc.f),
+    effD: (b) => (b && b._effD != null ? +b._effD || 0 : calc.effD),
+  }), [ruleHistory, calc.f, calc.effD]);
+
+  // 구 데이터가 하나라도 있으면 '현재 설정 기준 추정'임을 UI에 알린다.
+  const hasLegacyRows = useMemo(
+    () => ledger.buys.some((b) => b._effD == null) || ledger.sells.some((s) => s._fee == null),
+    [ledger.buys, ledger.sells]
+  );
 
   const match = useMemo(() => {
     if (periodMode === "all") return () => true;
@@ -24,13 +40,13 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
     return (dt) => (dt || "") >= s && (dt || "") <= e;
   }, [periodMode, statMonth, statWeek]);
 
-  const st = useMemo(() => ledgerStats(ledger, match, env), [ledger, match, calc]);
-  const cum = useMemo(() => cumNow(ledger, calc.mileageR), [ledger, calc.mileageR]);
-  const days = useMemo(() => dayInfo(ledger, calc.mileageR), [ledger, calc.mileageR]);
+  const st = useMemo(() => ledgerStats(ledger, match, env), [ledger, match, env]);
+  const cum = useMemo(() => cumNow(ledger, env.mileageR), [ledger, env]);
+  const days = useMemo(() => dayInfo(ledger, env.mileageR), [ledger, env]);
 
   // today를 deps에 포함해 날짜(주 경계 포함)가 바뀌면 최근 13주/주차 목록이 갱신되게 한다.
   const today = todayStr();
-  const mWeeks = useMemo(() => mesoWeeks(ledger, calc.f), [ledger, calc.f, today]);
+  const mWeeks = useMemo(() => mesoWeeks(ledger, env.fee), [ledger, env, today]);
 
   // 주차별 표 하단 합계 (13주 창 기준)
   const wkTot = useMemo(
@@ -43,12 +59,12 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
   const uncashed = st.meso - st.cashMeso;
 
   // 주차별 품목 내역 — 합계는 mWeeks 의 buyQty/sellQty 와 일치한다.
-  const mWeekItems = useMemo(() => mWeeks.map((w) => weeklyItems(ledger, w.ws, calc.f)), [mWeeks, ledger, calc.f]);
+  const mWeekItems = useMemo(() => mWeeks.map((w) => weeklyItems(ledger, w.ws, env.fee)), [mWeeks, ledger, env]);
 
   // 품목별 손익 환산율(억당 원): 기간 내 실제 현금화가 있으면 실측, 없으면 계산기 시세(mesoRate).
   const measuredRate = st.cashMeso > 0 && st.cashWon > 0;
   const rateWon = measuredRate ? st.cashWon / st.cashMeso : (+calc.s || 0) * 1e8;
-  const itemRows = useMemo(() => itemSummary(ledger, match, env, rateWon), [ledger, match, calc, rateWon]);
+  const itemRows = useMemo(() => itemSummary(ledger, match, env, rateWon), [ledger, match, env, rateWon]);
 
   // 품목 아이콘 조회 — myItems 는 DB(app_config)에서 올 수 있어 malformed 원소를 걸러낸다.
   // icon 은 반드시 문자열만 통과시킨다(객체/배열이면 IconView 가 React child 크래시).
@@ -62,8 +78,8 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
 
   // 최근 13주 주간 과금(실적) 시리즈 — 스파크라인용
   const weekly13 = useMemo(
-    () => Array.from({ length: 13 }, (_, w) => weeklyAch(ledger, addDays(start13(), w * 7), calc.mileageR)),
-    [ledger, calc.mileageR, today]
+    () => Array.from({ length: WINDOW_WEEKS }, (_, w) => weeklyAch(ledger, addDays(start13(), w * 7), env.mileageR)),
+    [ledger, env, today]
   );
   // 스파크라인 x축 눈금(주 시작일) + 툴팁 제목(목~수 구간). weekly13와 같은 순서·기준.
   const weekly13Labels = useMemo(
@@ -106,6 +122,6 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
     env, match, st, cum, days, mWeeks, wkTot, uncashed, mWeekItems,
     measuredRate, rateWon, itemRows, iconOf,
     weekly13, weekly13Labels, weekOptions, soldNames,
-    periodRange, mvLabel,
+    periodRange, mvLabel, hasLegacyRows,
   };
 }

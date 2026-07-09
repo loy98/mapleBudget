@@ -5,11 +5,11 @@ import {
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
-import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
+import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu } from "./util.js";
 import { computeForecast, cumNow } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
-import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX } from "./constants.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -357,9 +357,10 @@ describe("malformed 입력 방어", () => {
 // app_config.rules 는 DB에서 오므로 신뢰하지 않는다. 항목별 검증 후 통과한 것만 기본값 위에 얹는다.
 describe("resolveRules", () => {
   it("null/malformed 이면 기본값 그대로", () => {
-    expect(resolveRules(null)).toEqual(DEFAULT_RULES);
-    expect(resolveRules("x")).toEqual(DEFAULT_RULES);
-    expect(resolveRules([])).toEqual(DEFAULT_RULES);
+    // 반환값에는 어느 규칙이 적용됐는지 알 수 있게 effectiveFrom 이 붙는다.
+    expect(resolveRules(null)).toMatchObject(DEFAULT_RULES);
+    expect(resolveRules("x")).toMatchObject(DEFAULT_RULES);
+    expect(resolveRules([])).toMatchObject(DEFAULT_RULES);
   });
   it("유효한 스칼라만 덮어쓴다", () => {
     const r = resolveRules({ feeMvp: 2, feeBase: "5", mileageAccrual: 0.1 });
@@ -903,5 +904,113 @@ describe("B-5 · 마일리지 결제 비율은 규칙이지 설정이 아니다"
   it("mileageRate = 100 은 거부한다 (buildPlan 에 NaN/Infinity 유입)", () => {
     expect(resolveRules({ mileageRate: 100 }).mileageRate).toBe(DEFAULT_RULES.mileageRate);
     expect(resolveRules({ mileageRate: 99 }).mileageRate).toBe(99);
+  });
+});
+
+// B-5 (2단계): 발효일 있는 규칙 이력 + 거래별 요율
+describe("B-5 · 발효일 있는 규칙 이력", () => {
+  const HIST = [
+    { effectiveFrom: "2025-01-01", feeMvp: 5, feeBase: 8, mileageRate: 40 },
+    { effectiveFrom: "2026-01-01", feeMvp: 3, feeBase: 5, mileageRate: 30 },
+  ];
+
+  it("객체(단일 규칙)도 그대로 받는다 — 하위 호환", () => {
+    const h = resolveRuleHistory({ feeMvp: 2 });
+    expect(h).toHaveLength(1);
+    expect(h[0].feeMvp).toBe(2);
+    expect(rulesAt(h, "1999-01-01").feeMvp).toBe(2); // 언제든 유효
+  });
+
+  it("거래 날짜에 맞는 규칙을 고른다", () => {
+    const h = resolveRuleHistory(HIST);
+    expect(rulesAt(h, "2025-06-30").mileageRate).toBe(40);
+    expect(rulesAt(h, "2026-06-30").mileageRate).toBe(30);
+    expect(rulesAt(h, "2025-12-31").feeMvp).toBe(5);
+    expect(rulesAt(h, "2026-01-01").feeMvp).toBe(3); // 발효일 당일부터
+  });
+
+  it("가장 이른 규칙 이전 날짜도 규칙을 갖는다 (빈 구간 없음)", () => {
+    const h = resolveRuleHistory(HIST);
+    expect(rulesAt(h, "2000-01-01").mileageRate).toBe(40);
+    expect(rulesAt(h, undefined).mileageRate).toBe(40); // 날짜 없는 행
+  });
+
+  it("순서가 뒤섞여 있어도 발효일 오름차순으로 정렬한다", () => {
+    const h = resolveRuleHistory([HIST[1], HIST[0]]);
+    expect(h.map((e) => e.mileageRate)).toEqual([40, 30]);
+  });
+
+  it("malformed 원소는 버리고, 전부 malformed 면 기본값", () => {
+    expect(resolveRuleHistory([null, "x", 3])[0]).toMatchObject(DEFAULT_RULES);
+    const h = resolveRuleHistory([{ effectiveFrom: "not-a-date", feeMvp: 2 }]);
+    expect(h[0].feeMvp).toBe(2); // 규칙은 살리되 발효일만 EPOCH 로
+  });
+
+  it("규칙이 바뀌어도 과거 거래는 그때의 규칙으로 계산된다", () => {
+    const h = resolveRuleHistory(HIST);
+    const mileageROf = (b) => rulesAt(h, b.date).mileageRate / 100;
+    const led = {
+      buys: [
+        { id: "old", date: "2025-06-01", qty: 1, price: 10000, mil: true }, // 당시 40%
+        { id: "new", date: "2026-06-01", qty: 1, price: 10000, mil: true }, // 지금 30%
+      ],
+      sells: [], cashes: [], spends: [],
+    };
+    const all = () => true;
+    const st = ledgerStats(led, all, { fee: 0, effD: 0, mileageR: mileageROf });
+    // 실적 = 가격 × (1 - 마일리지 비율).  10000×0.6 + 10000×0.7 = 13000
+    expect(st.ach).toBeCloseTo(13000, 6);
+    // 단일 규칙(30%)만 있었다면 7000+7000 = 14000 이었을 것 — 과거가 소급 변경됐을 것이다
+    const stWrong = ledgerStats(led, all, { fee: 0, effD: 0, mileageR: 0.3 });
+    expect(stWrong.ach).toBeCloseTo(14000, 6);
+  });
+});
+
+// B-5 (2단계): 행 스냅샷 — 사용자 상태(등급·충전 방식)는 규칙으로 못 옮기므로 거래에 남긴다
+describe("B-5 · 거래 행 요율 스냅샷", () => {
+  const all = () => true;
+  const led = {
+    buys: [
+      { id: "snap", date: "2026-06-01", qty: 1, price: 10000, _effD: 0.10 }, // 그때 충전 할인 10%
+      { id: "legacy", date: "2026-06-01", qty: 1, price: 10000 },            // 구 데이터
+    ],
+    sells: [
+      { id: "snap", date: "2026-06-01", qty: 1, meso: 10, _fee: 0.05 },      // 그때 수수료 5%
+      { id: "legacy", date: "2026-06-01", qty: 1, meso: 10 },                // 구 데이터
+    ],
+    cashes: [], spends: [],
+  };
+  // 현재 설정: 충전 할인 0%, 수수료 3%
+  const env = (curEffD, curFee) => ({
+    mileageR: () => 0,
+    effD: (b) => (b._effD != null ? +b._effD : curEffD),
+    fee: (s) => (s._fee != null ? +s._fee : curFee),
+  });
+
+  it("스냅샷 있는 행은 현재 설정을 바꿔도 값이 변하지 않는다", () => {
+    const a = ledgerStats(led, all, env(0, 0.03));
+    const b = ledgerStats(led, all, env(0.5, 0.20)); // 사용자가 설정을 크게 바꿈
+
+    // 스냅샷 행의 기여분: spend = 10000×(1-0.10) = 9000, sold = 10×(1-0.05) = 9.5
+    // 구 데이터 행만 현재 설정을 따라 변한다.
+    const snapSpend = 10000 * (1 - 0.10);
+    expect(a.spend - 10000 * (1 - 0.0)).toBeCloseTo(snapSpend, 6);
+    expect(b.spend - 10000 * (1 - 0.5)).toBeCloseTo(snapSpend, 6);
+
+    const snapSold = 10 * (1 - 0.05);
+    expect(a.meso - 10 * (1 - 0.03)).toBeCloseTo(snapSold, 6);
+    expect(b.meso - 10 * (1 - 0.20)).toBeCloseTo(snapSold, 6);
+  });
+
+  it("구 데이터(스냅샷 없음)는 현재 설정으로 폴백한다 — 복원할 방법이 없다", () => {
+    const st = ledgerStats(led, all, env(0.25, 0.07));
+    expect(st.spend).toBeCloseTo(10000 * 0.90 + 10000 * 0.75, 6);
+    expect(st.meso).toBeCloseTo(10 * 0.95 + 10 * 0.93, 6);
+  });
+
+  it("스냅샷 0(할인 없음)과 '스냅샷 없음'을 구분한다", () => {
+    const zero = { buys: [{ id: "z", date: "2026-06-01", qty: 1, price: 10000, _effD: 0 }], sells: [], cashes: [], spends: [] };
+    const st = ledgerStats(zero, all, env(0.5, 0));
+    expect(st.spend).toBeCloseTo(10000, 6); // 0 이 폴백으로 새지 않는다
   });
 });
