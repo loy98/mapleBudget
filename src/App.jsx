@@ -13,6 +13,7 @@ import AuthBar from "./components/AuthBar.jsx";
 import HelpModal from "./components/HelpModal.jsx";
 import FeedbackModal from "./components/FeedbackModal.jsx";
 import Modal from "./components/Modal.jsx";
+import StorageAlert from "./components/StorageAlert.jsx";
 
 const TABS = [
   { id: "calc", label: "계산기" },
@@ -74,9 +75,11 @@ export default function App() {
   const calc = useMemo(() => computeCalc(settings, charges, items, rules), [settings, charges, items, rules]);
 
   // 로컬 자동 저장 (게스트/로그인 공통 캐시)
-  useEffect(() => saveCalcState(settings, charges, items), [settings, charges, items]);
-  useEffect(() => saveMyItems(myItems), [myItems]);
-  useEffect(() => saveLedger(ledger), [ledger]);
+  // 반드시 블록 본문으로 둔다 — save* 는 성공 여부(boolean)를 반환하므로, 화살표 축약형이면
+  // 그 값이 useEffect 의 cleanup 으로 해석되어 React 가 던진다.
+  useEffect(() => { saveCalcState(settings, charges, items); }, [settings, charges, items]);
+  useEffect(() => { saveMyItems(myItems); }, [myItems]);
+  useEffect(() => { saveLedger(ledger); }, [ledger]);
 
   // 사용자 직접 편집용 setter. withRowKeys로 안정 key를 부여하고, markUserTouched로 '사용자가 손댔음'을 기록
   // → 최초 로그인 병합에서 거래 없이 설정/아이템만 바꾼 게스트의 데이터도 보호(P1-4). config/sync 프로그램적
@@ -118,6 +121,8 @@ export default function App() {
           <AuthBar session={session} syncState={syncState} />
         </div>
       </header>
+
+      <StorageAlert />
 
       <div className="tabs">
         {TABS.map((t) => (

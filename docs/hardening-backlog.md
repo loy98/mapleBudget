@@ -151,10 +151,15 @@ TTL 정리는 신뢰 가능한 서버 시각이 있을 때만 하므로 게스�
 틀어진 시계에 영향받지 않는다. 넘치면 오래된 표식부터 버린다(오래된 것일수록 아직 그 항목을
 든 기기가 있을 확률이 낮다). `normalizeDeleted`/`mergeDeleted` 양쪽에 적용.
 
-### B-3. localStorage 파싱 실패 시 원본 파괴 — HIGH
-`readJSON` 이 파싱 에러를 삼키고 `null` → 빈 상태로 로드 → `App.jsx` 의 자동저장 이펙트가
-**복구 가능했을 원본 문자열 위에 빈 값을 덮어쓴다.** 쓰기 중단(쿼터·크래시) 한 번이 게스트에겐 영구 손실.
-→ 파싱 실패 시 원본을 `<key>.corrupt` 로 백업한 뒤에만 쓰기. 실패로 로드된 상태의 첫 자동저장은 건너뛴다.
+### ~~B-3. localStorage 파싱 실패 시 원본 파괴~~ — ✅ 해결 (feature/storage-corruption-guard)
+`readJSON` 이 파싱 에러를 삼키고 null 을 반환 → 앱이 빈 상태로 로드 → `App.jsx` 의 자동저장 이펙트가
+마운트 시 실행되어 **복구 가능했을 원본 문자열 위에 빈 값을 덮어썼다.** 실측 재현 확인.
+· 파싱 실패 시 원본을 `<key>.corrupt` 에 백업한 뒤에만 null 반환. 최초 손상본을 보존(재손상 시 덮어쓰지 않음).
+· 백업에 실패하면(공간 부족) 그 키에는 **아예 쓰지 않는다** — 덮어쓰면 원본이 사라진다.
+· `exportAll` 이 손상된 원본을 `corruptRaw` 로 함께 내보낸다(백업 파일이 유일한 복구 수단).
+· `importAll` 은 사용자가 명시적으로 덮어쓰기를 택한 것이므로 차단을 해제하고, 쓰기 실패 시 조용히
+  반쪽 복원하지 않고 오류를 돌려준다.
+· `StorageAlert` 배너로 사용자에게 알린다(이전에는 아무 표시도 없었다).
 
 ### B-4. 주차 경계가 브라우저 로컬 타임존 기준 — MEDIUM
 MVP 주는 넥슨 서버(KST) 목요일 경계인데 `weekStartThu` 는 로컬 `getDay()` 를 쓴다.
@@ -192,7 +197,9 @@ XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 
 
 ### B-8. 그 외 (LOW~MEDIUM)
 - `visibilitychange` 플러시가 평범한 `fetch` — 탭 종료 시 취소된다. `sendBeacon`/`keepalive` 필요.
-- `writeJSON` 이 `QuotaExceededError` 를 조용히 삼킴 → 게스트는 저장이 no-op 인 줄 모른다.
+- ~~`writeJSON` 이 `QuotaExceededError` 를 조용히 삼킴~~ — ✅ 해결(B-3 과 함께). `writeJSON` 이 성공 여부를
+  반환하고, 쿼터 초과를 `StorageAlert` 로 노출한다. `save*` 도 boolean 을 반환하므로 `useEffect` 축약형
+  금지(반환값이 cleanup 으로 해석된다 — App.jsx 주석 참고).
 - `normalizeMyItems`: `[]` 와 '데이터 없음'을 구분 못해 **자주 쓰는 아이템 전체 삭제가 불가능**(매 로드 부활).
   충전 행도 비우면 `정가 (할인 없음)` 으로 되돌아온다.
 - `normalizeLedger` 가 입력 객체를 제자리 변형(mutate) — 호출자 객체 오염.

@@ -3,6 +3,7 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
+  loadLedger, saveLedger, getStorageIssues, __resetStorageIssues, CORRUPT_SUFFIX,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
@@ -857,5 +858,103 @@ describe("tombstone 개수 상한", () => {
     const b = LED([], many(100, T0 + 10_000_000)); // 더 최신인 별개 id 들
     const merged = mergeLedger(a, b, null);
     expect(Object.keys(merged.deleted).length).toBeLessThanOrEqual(TOMBSTONE_MAX);
+  });
+});
+
+// B-3: 파싱 실패를 조용히 null 로 바꾸면, 앱은 빈 상태로 로드되고 자동저장이 원본을 덮어쓴다.
+// 쓰기 중단(쿼터·크래시) 한 번이 게스트에겐 영구·불가역 손실이 된다.
+describe("저장소 손상 방어 (B-3)", () => {
+  const CORRUPT = '{"buys":[{"id":"a1","date":"2026-07-01","qty":3,"pri';
+  let store, failWrites;
+
+  const mountStore = () => {
+    store = new Map();
+    failWrites = new Set(); // 이 키에 대한 setItem 이 쿼터 오류를 던진다
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (failWrites.has(k) || failWrites.has("*")) {
+          const e = new Error("quota"); e.name = "QuotaExceededError"; throw e;
+        }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+  };
+
+  beforeEach(() => { mountStore(); __resetStorageIssues(); });
+
+  it("손상된 원본을 <key>.corrupt 로 백업한 뒤에만 null 을 반환한다", () => {
+    store.set(LKEY, CORRUPT);
+    const led = loadLedger();
+    expect(led.buys).toEqual([]);                       // 빈 상태로 로드되지만
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT); // 원본은 보존
+    expect(getStorageIssues().corruptKeys).toContain(LKEY);
+  });
+
+  it("자동저장이 원본을 덮어써도 백업이 남아 복구 가능하다", () => {
+    store.set(LKEY, CORRUPT);
+    saveLedger(loadLedger()); // App 의 useEffect(() => saveLedger(ledger), [ledger])
+    expect(store.get(LKEY)).not.toBe(CORRUPT);              // 자리는 덮였지만
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT); // 원본은 살아 있다
+  });
+
+  it("백업조차 못하면(공간 부족) 그 키에는 쓰지 않는다 — 원본 보존이 최우선", () => {
+    store.set(LKEY, CORRUPT);
+    failWrites.add(LKEY + CORRUPT_SUFFIX); // 백업 쓰기 실패
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+
+    expect(saveLedger({ buys: [] })).toBe(false); // 쓰기 거부
+    expect(store.get(LKEY)).toBe(CORRUPT);        // 원본 그대로
+  });
+
+  it("최초 손상본을 보존한다 (두 번째 로드가 백업을 덮어쓰지 않는다)", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    store.set(LKEY, '{"another":"corrupt');
+    __resetStorageIssues();
+    loadLedger();
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT);
+  });
+
+  it("쿼터 초과 쓰기는 조용히 삼켜지지 않는다", () => {
+    expect(getStorageIssues().quotaHit).toBe(false);
+    failWrites.add("*");
+    expect(saveLedger({ buys: [] })).toBe(false);
+    expect(getStorageIssues().quotaHit).toBe(true);
+  });
+
+  it("정상 데이터는 아무 표시도 남기지 않는다", () => {
+    store.set(LKEY, JSON.stringify({ buys: [{ id: "x" }], sells: [], cashes: [], spends: [] }));
+    expect(loadLedger().buys).toHaveLength(1);
+    expect(getStorageIssues().corruptKeys).toEqual([]);
+    expect(store.has(LKEY + CORRUPT_SUFFIX)).toBe(false);
+  });
+
+  it("내보내기에 손상된 원본이 함께 담긴다 (백업 파일이 유일한 복구 수단)", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    // exportAll 은 Blob/DOM 을 쓰므로 여기서는 collectCorruptRaw 경로만 간접 확인:
+    // importAll → export 왕복 대신, 백업 키가 존재하고 원본과 같음을 확인한다.
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT);
+  });
+
+  it("가져오기는 손상 차단을 해제해 복원이 조용히 실패하지 않는다", () => {
+    store.set(LKEY, CORRUPT);
+    failWrites.add(LKEY + CORRUPT_SUFFIX);
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY); // 쓰기 차단 상태
+
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [{ id: "new" }] } }));
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(store.get(LKEY)).buys[0].id).toBe("new");
+  });
+
+  it("가져오기 중 공간이 부족하면 조용히 반쪽 복원하지 않고 알린다", () => {
+    failWrites.add(LKEY);
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [] } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/저장 공간/);
   });
 });

@@ -19,17 +19,86 @@ export const SYNC_KEY = "mvpCloudSyncedUid";
 //  ledger 병합은 id 합집합이라 충돌 모달 선택과 무관하게 항상 합쳐지고, tombstone이 없어 되돌릴 수도 없다.)
 export const OWNER_KEY = "mvpDataOwnerUid";
 
+// ===== 저장소 무결성 =====
+// 파싱 실패한 값을 조용히 null 로 바꾸면, 앱은 '빈 상태'로 로드되고 곧바로 자동저장 이펙트가
+// **복구 가능했을 원본 위에 빈 값을 덮어쓴다.** 쓰기 중단(쿼터·브라우저 크래시) 한 번이
+// 게스트에겐 영구·불가역 데이터 손실이 된다.
+//
+// 규칙:
+//  ① 파싱 실패 시 원본 문자열을 `<key>.corrupt` 에 백업한 뒤에만 null 을 반환한다.
+//  ② 백업에 실패했으면(공간 부족) 그 키에는 **쓰지 않는다** — 덮어쓰면 원본이 사라진다.
+//  ③ 쓰기 실패(QuotaExceededError 등)를 조용히 삼키지 않고 호출측/사용자에게 알린다.
+export const CORRUPT_SUFFIX = ".corrupt";
+
+const corrupted = new Map(); // key -> { backedUp: boolean }
+let quotaHit = false;
+let listeners = [];
+
+export function getStorageIssues() {
+  return {
+    corruptKeys: [...corrupted.keys()],
+    // 백업조차 못한 키가 있으면 그 키는 쓰기가 막혀 있다(더 위험).
+    unbackedKeys: [...corrupted.entries()].filter(([, v]) => !v.backedUp).map(([k]) => k),
+    quotaHit,
+  };
+}
+export function onStorageIssue(cb) {
+  listeners.push(cb);
+  return () => { listeners = listeners.filter((f) => f !== cb); };
+}
+function emitIssue() {
+  const s = getStorageIssues();
+  listeners.forEach((f) => { try { f(s); } catch { /* 구독자 오류가 저장을 막지 않게 */ } });
+}
+// 테스트/가져오기용: 손상 표시를 해제한다(사용자가 명시적으로 덮어쓰기를 택한 경우).
+export function clearCorruptFlag(key) {
+  if (corrupted.delete(key)) emitIssue();
+}
+export function __resetStorageIssues() {
+  corrupted.clear();
+  quotaHit = false;
+  listeners = [];
+}
+
+const isQuotaError = (e) =>
+  !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22 || e.code === 1014);
+
 function readJSON(key) {
+  let raw;
   try {
-    return JSON.parse(localStorage.getItem(key));
+    raw = localStorage.getItem(key);
   } catch {
+    return null; // 저장소 자체를 못 읽는 환경(사파리 프라이빗 등)
+  }
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    let backedUp = false;
+    try {
+      const bk = key + CORRUPT_SUFFIX;
+      // 이미 백업이 있으면 덮어쓰지 않는다(최초 손상본이 가장 온전하다).
+      if (localStorage.getItem(bk) == null) localStorage.setItem(bk, raw);
+      backedUp = localStorage.getItem(bk) != null;
+    } catch {
+      backedUp = false;
+    }
+    corrupted.set(key, { backedUp });
+    emitIssue();
     return null;
   }
 }
+
 function writeJSON(key, val) {
+  const c = corrupted.get(key);
+  if (c && !c.backedUp) return false; // 원본을 지키지 못했다 → 덮어쓰지 않는다
   try {
     localStorage.setItem(key, JSON.stringify(val));
-  } catch { /* 저장 불가 환경 무시 */ }
+    return true;
+  } catch (e) {
+    if (isQuotaError(e) && !quotaHit) { quotaHit = true; emitIssue(); }
+    return false; // 조용히 삼키지 않는다 — 호출측이 알 수 있다
+  }
 }
 
 // ===== 계산기 설정 + 충전 방식 + 계산기 아이템 =====
@@ -69,8 +138,10 @@ export function hasStoredCalc() {
 export function hasStoredItems() {
   try { return localStorage.getItem(ITEMS_KEY) != null; } catch { return false; }
 }
+// save* 는 성공 여부(boolean)를 반환한다. 호출측이 useEffect 축약형으로 쓰면 그 값이
+// cleanup 으로 해석되므로 반드시 블록 본문으로 감쌀 것(App.jsx 참고).
 export function saveCalcState(settings, charges, items) {
-  writeJSON(KEY, serializeCalcState(settings, charges, items));
+  return writeJSON(KEY, serializeCalcState(settings, charges, items));
 }
 
 // ===== 자주 쓰는 아이템 =====
@@ -270,12 +341,26 @@ export function saveCalMode(m) {
   } catch { /* ignore */ }
 }
 
+// 손상되어 파싱하지 못한 원본을 그대로 담는다. 백업 파일이 유일한 복구 수단이므로
+// 읽지 못한 데이터도 함께 나가야 한다(나중에 손으로 고칠 수 있다).
+function collectCorruptRaw() {
+  const out = {};
+  [...corrupted.keys()].forEach((k) => {
+    try {
+      const raw = localStorage.getItem(k + CORRUPT_SUFFIX);
+      if (raw != null) out[k] = raw;
+    } catch { /* ignore */ }
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
 // ===== 내보내기 / 가져오기 =====
 export function exportAll() {
   const data = {
     app: "mvp-calculator",
     version: 1,
     exportedAt: new Date().toISOString(),
+    corruptRaw: collectCorruptRaw(),
     calc: readJSON(KEY),
     myItems: readJSON(ITEMS_KEY),
     ledger: readJSON(LKEY),
@@ -300,13 +385,22 @@ export function importAll(text) {
   if (!data || data.app !== "mvp-calculator") {
     return { ok: false, error: "이 앱의 백업 파일이 아닙니다." };
   }
-  if (data.calc) writeJSON(KEY, data.calc);
-  if (data.myItems) writeJSON(ITEMS_KEY, data.myItems);
+  // 사용자가 명시적으로 덮어쓰기를 택한 경우다 → 손상으로 인한 쓰기 차단을 해제한다.
+  // (해제하지 않으면 writeJSON 이 거부해서 복원이 조용히 실패한다.)
+  [KEY, ITEMS_KEY, LKEY].forEach(clearCorruptFlag);
+
+  const wrote = [];
+  if (data.calc) wrote.push(writeJSON(KEY, data.calc));
+  if (data.myItems) wrote.push(writeJSON(ITEMS_KEY, data.myItems));
   // 원장은 검증·정규화해서 쓴다. 파일의 tombstone 은 그대로 클라우드로 전파되어 거래를 지우므로
   // (그게 삭제 전파의 정상 동작이다) 최소한 malformed·미래 시각·만료 표식은 걸러내야 한다.
   // now 를 넘겨 미래 시각을 clamp: 조작된 백업이 '영원히 만료되지 않는' 표식으로 남의 거래를 계속 지우는 것을 막는다.
   // 가져오기는 서버와 무관하므로 만료 기준·clamp 상한이 모두 '지금'이다.
-  if (data.ledger) { const t = Date.now(); writeJSON(LKEY, normalizeLedger(data.ledger, t, t)); }
+  if (data.ledger) { const t = Date.now(); wrote.push(writeJSON(LKEY, normalizeLedger(data.ledger, t, t))); }
   if (data.calMode) saveCalMode(data.calMode);
+  // 쓰기가 하나라도 실패했으면(공간 부족 등) 복원이 조용히 반쪽 나지 않게 알린다.
+  if (wrote.some((ok) => ok === false)) {
+    return { ok: false, error: "저장 공간이 부족해 복원하지 못했습니다. 브라우저 저장소를 비운 뒤 다시 시도해 주세요." };
+  }
   return { ok: true };
 }
