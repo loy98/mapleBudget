@@ -433,7 +433,7 @@ function collectCorruptRaw() {
 export function exportAll() {
   const data = {
     app: "mvp-calculator",
-    version: 1,
+    version: BACKUP_VERSION,
     // 순간(instant)은 UTC ISO 로 남긴다. 아래 파일명의 날짜와 달리 이건 시각이지 민간 날짜가 아니다.
     exportedAt: new Date().toISOString(),
     corruptRaw: collectCorruptRaw(),
@@ -452,6 +452,79 @@ export function exportAll() {
 }
 
 // 성공 시 true 반환. 적용 후 페이지 리로드 권장(모든 상태 재초기화).
+// ===== 백업 파일 검증 (B-6) =====
+// 예전에는 `data.app` 문자열 하나만 보고 파일 내용을 그대로 localStorage 에 썼다.
+// 형태가 깨진 값은 크래시하진 않았지만(데이터 계층 가드) 다음 로드에서 조용히 기본값으로 떨어졌다 —
+// 사용자는 "복원 완료"를 보고 데이터가 사라진 것을 나중에야 안다.
+//
+// 두 종류를 구분한다:
+//  · **거절(error)** — 파일이 이 앱의 것이 아니거나 형태가 근본적으로 틀렸다. 아무것도 쓰지 않는다.
+//  · **경고(warnings)** — 복원은 하되 조용히 넘어가면 안 되는 사실(버려진 행, 집계에서 빠질 날짜).
+const BACKUP_VERSION = 1;
+const CAL_MODES = ["month", "mvp"];
+const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+// 주차 집계·규칙 선택이 전부 사전식 문자열 비교다 → 이 형태가 아니면 어느 주에도 잡히지 않는다.
+const isValidDate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+export function validateBackup(data) {
+  if (!isPlainObject(data) || data.app !== "mvp-calculator") {
+    return { ok: false, error: "이 앱의 백업 파일이 아닙니다." };
+  }
+  // version 이 없는 파일은 초기 내보내기(v1)로 본다. 미래 버전은 형태를 알 수 없으므로 거절한다 —
+  // 모르는 형태를 '최선을 다해' 쓰면 조용히 데이터를 잃는다.
+  const version = data.version == null ? 1 : data.version;
+  if (!Number.isInteger(version) || version < 1) {
+    return { ok: false, error: "백업 파일의 버전 정보가 올바르지 않습니다." };
+  }
+  if (version > BACKUP_VERSION) {
+    return { ok: false, error: `더 최신 버전(v${version})의 백업 파일입니다. 앱을 새로고침한 뒤 다시 시도해 주세요.` };
+  }
+  if (data.calc == null && data.myItems == null && data.ledger == null) {
+    return { ok: false, error: "복원할 데이터가 없는 파일입니다." };
+  }
+  if (data.calc != null && !isPlainObject(data.calc)) {
+    return { ok: false, error: "백업 파일의 계산기 설정 형태가 올바르지 않습니다." };
+  }
+  if (data.myItems != null && !Array.isArray(data.myItems)) {
+    return { ok: false, error: "백업 파일의 아이템 목록 형태가 올바르지 않습니다." };
+  }
+  if (data.ledger != null) {
+    if (!isPlainObject(data.ledger)) {
+      return { ok: false, error: "백업 파일의 거래 기록 형태가 올바르지 않습니다." };
+    }
+    // 버킷이 배열이 아니면 조용히 []로 강등하지 않고 거절한다 — 거래 전체가 소리 없이 사라진다.
+    const bad = LEDGER_BUCKETS.filter((k) => data.ledger[k] != null && !Array.isArray(data.ledger[k]));
+    if (bad.length) {
+      return { ok: false, error: `백업 파일의 거래 기록이 손상되었습니다(${bad.join(", ")}).` };
+    }
+    if (data.ledger.deleted != null && !isPlainObject(data.ledger.deleted)) {
+      return { ok: false, error: "백업 파일의 삭제 기록 형태가 올바르지 않습니다." };
+    }
+  }
+
+  // 여기부터는 복원을 진행하되 사용자에게 알린다.
+  const warnings = [];
+  if (data.ledger) {
+    let dropped = 0, badDates = 0;
+    LEDGER_BUCKETS.forEach((k) => {
+      (data.ledger[k] || []).forEach((row) => {
+        if (!isPlainObject(row)) { dropped++; return; }
+        if (!isValidDate(padDate(row.date))) badDates++;
+      });
+    });
+    if (dropped) warnings.push(`거래 ${dropped}건은 형태가 깨져 있어 제외했습니다.`);
+    if (badDates) warnings.push(`거래 ${badDates}건의 날짜를 읽을 수 없어 주차·월별 집계에서 빠집니다.`);
+  }
+  if (data.myItems) {
+    const bad = data.myItems.filter((x) => !isPlainObject(x) || typeof x.name !== "string").length;
+    if (bad) warnings.push(`아이템 ${bad}개는 형태가 깨져 있어 제외했습니다.`);
+  }
+  if (data.calMode != null && !CAL_MODES.includes(data.calMode)) {
+    warnings.push("달력 보기 설정을 읽을 수 없어 기본값을 씁니다.");
+  }
+  return { ok: true, warnings };
+}
+
 export function importAll(text) {
   let data;
   try {
@@ -459,9 +532,9 @@ export function importAll(text) {
   } catch {
     return { ok: false, error: "JSON 파일을 읽을 수 없습니다." };
   }
-  if (!data || data.app !== "mvp-calculator") {
-    return { ok: false, error: "이 앱의 백업 파일이 아닙니다." };
-  }
+  const v = validateBackup(data);
+  if (!v.ok) return v;
+
   // 이 파일이 실제로 덮어쓸 키만 대상으로 한다(없는 키의 가드를 풀면 안 된다).
   const targets = [];
   if (data.calc) targets.push(KEY);
@@ -476,15 +549,22 @@ export function importAll(text) {
     return { ok: false, error: "손상된 원본을 백업할 공간이 없어 복원하지 못했습니다. 브라우저 저장소를 정리한 뒤 다시 시도해 주세요." };
   }
 
+  // 파일 내용을 그대로 쓰지 않고 **정규 형태로 바꿔서** 쓴다.
+  // 그대로 쓰면 형태가 어긋난 값이 저장소에 남고, 다음 로드에서 조용히 기본값으로 떨어진다.
   const wrote = [];
-  if (data.calc) wrote.push(writeJSON(KEY, data.calc));
-  if (data.myItems) wrote.push(writeJSON(ITEMS_KEY, data.myItems));
+  if (data.calc) {
+    const { settings, charges, items } = parseCalcState(data.calc);
+    wrote.push(writeJSON(KEY, serializeCalcState(settings, charges, items)));
+  }
+  // malformed 원소는 걸러 낸다(위에서 개수를 경고로 알렸다). IconView 가 문자열 아닌 icon 에 크래시한다.
+  if (data.myItems) wrote.push(writeJSON(ITEMS_KEY, data.myItems.filter((x) => isPlainObject(x) && typeof x.name === "string")));
   // 원장은 검증·정규화해서 쓴다. 파일의 tombstone 은 그대로 클라우드로 전파되어 거래를 지우므로
   // (그게 삭제 전파의 정상 동작이다) 최소한 malformed·미래 시각·만료 표식은 걸러내야 한다.
   // now 를 넘겨 미래 시각을 clamp: 조작된 백업이 '영원히 만료되지 않는' 표식으로 남의 거래를 계속 지우는 것을 막는다.
   // 가져오기는 서버와 무관하므로 만료 기준·clamp 상한이 모두 '지금'이다.
   if (data.ledger) { const t = Date.now(); wrote.push(writeJSON(LKEY, normalizeLedger(data.ledger, t, t))); }
-  if (data.calMode) saveCalMode(data.calMode);
+  // 아는 값만 쓴다. 임의 문자열을 넣으면 달력이 어느 모드도 아닌 상태로 렌더된다.
+  if (CAL_MODES.includes(data.calMode)) saveCalMode(data.calMode);
   // 쓰기가 하나라도 실패했으면(공간 부족 등) 복원이 조용히 반쪽 나지 않게 알린다.
   // 이 경우 손상 표시는 그대로 둔다 — 원본은 여전히 백업본에만 있다.
   if (wrote.some((ok) => ok === false)) {
@@ -495,5 +575,5 @@ export function importAll(text) {
   // 사용자가 내보내기를 하지 않았다면 이게 복원 이전 원본의 유일한 사본이다. 지우는 쪽이 더 파괴적이다.
   // (로그아웃·저장소 정리 시에는 clearAccountData 가 함께 지운다 — 공용 브라우저 프라이버시.)
   targets.forEach(clearCorruptFlag);
-  return { ok: true };
+  return { ok: true, warnings: v.warnings };
 }

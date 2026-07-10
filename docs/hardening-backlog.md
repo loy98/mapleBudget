@@ -207,13 +207,21 @@ UTC-8 사용자가 수요일 오후에 열면 KST 로는 이미 목요일(새 �
 등급은 원장에서 재구성할 수 있으나(그 주 기준 13주 누적 → estGrade) 원장 시작 직후 13주는 과소 추정되어
 오히려 헛갈릴 수 있어 채택하지 않았다.
 
-### B-6. `importAll` 이 백업 파일을 검증하지 않음 — MEDIUM (부분 해소)
-날짜 포맷 문제는 해소됐다: `normalizeLedger` 가 `padDate` 로 행 날짜를 정규화한다
-(`"2026-7-2"` 가 모든 주차 집계에서 조용히 누락되던 문제). 패딩만으로 고칠 수 없는 값은 그대로 둔다.
-아래는 나머지.
-`data.app === "mvp-calculator"` 문자열 하나만 보고 그대로 localStorage 에 쓴 뒤 리로드.
-날짜 포맷도 검증 안 해 `"2026-7-2"` 같은 값은 사전식 비교에서 **모든 주에 조용히 누락**된다.
-(데이터 계층 가드로 크래시는 막혔으나, 조용한 데이터 소실 경로는 남아 있다.)
+### ~~B-6. `importAll` 이 백업 파일을 검증하지 않음~~ — ✅ 해결 (feature/import-validation)
+`data.app === "mvp-calculator"` 문자열 하나만 보고 파일 내용을 그대로 localStorage 에 썼다.
+데이터 계층 가드 덕에 크래시는 없었지만, 형태가 깨진 값은 다음 로드에서 **조용히 기본값으로 떨어졌다** —
+사용자는 "복원 완료"를 보고 데이터가 사라진 것을 나중에야 안다.
+
+`validateBackup(data)` 순수 함수로 분리하고 두 종류를 구분한다:
+- **거절(error)** — 아무것도 쓰지 않는다. 앱 파일이 아님 / 모르는 미래 `version` /
+  복원할 데이터 없음 / `calc`·`myItems`·`ledger` 의 최상위 형태 오류 /
+  **원장 버킷이 배열이 아님**(예전에는 조용히 `[]` 로 강등 → 판매 기록 전체 소실).
+- **경고(warnings)** — 복원은 하되 알린다. 버려진 행 수, **읽을 수 없는 날짜**(주차·월별 집계에서 빠진다),
+  malformed 아이템 수, 알 수 없는 `calMode`. `App.jsx` 가 복원 완료 알림에 함께 띄운다.
+
+쓰기도 **정규 형태로** 한다: `calc` 는 `parseCalcState`→`serializeCalcState` 왕복,
+`myItems` 는 malformed 원소 제거, `calMode` 는 아는 값만, `ledger` 는 기존대로 `normalizeLedger`.
+`version` 은 `BACKUP_VERSION` 상수로 `exportAll` 과 묶었다.
 
 ### ~~B-7. 구버전 원장 행의 id 재발급 → 동기화 후 중복~~ — ✅ 해결 (feature/legacy-row-ids)
 `normalizeLedger` 의 `if (!x.id) x.id = uid()` 가 **로드 시점에 랜덤** id 를 붙였다.

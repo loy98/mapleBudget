@@ -96,7 +96,9 @@ export default function App() {
     reader.onload = () => {
       const r = importAll(reader.result);
       if (r.ok) {
-        alert("복원 완료! 페이지를 새로고침합니다.");
+        // 경고를 삼키면 "복원 완료"만 보고 데이터가 빠진 것을 나중에야 안다(B-6).
+        const notes = (r.warnings || []).length ? "\n\n" + r.warnings.map((w) => "· " + w).join("\n") : "";
+        alert("복원 완료! 페이지를 새로고침합니다." + notes);
         location.reload();
       } else {
         alert(r.error);
