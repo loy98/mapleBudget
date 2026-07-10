@@ -561,7 +561,7 @@ export function importAll(text) {
   // 대신 여기서 백업을 재시도해, 백업할 수 있으면 쓰기를 허용한다.
   const blocked = targets.filter((k) => !ensureWritable(k));
   if (blocked.length) {
-    return { ok: false, error: "손상된 원본을 백업할 공간이 없어 복원하지 못했습니다. 브라우저 저장소를 정리한 뒤 다시 시도해 주세요." };
+    return { ok: false, error: "손상된 원본을 백업하지 못해 복원하지 않았습니다. 브라우저 저장소를 정리한 뒤 다시 시도해 주세요." };
   }
 
   // 파일 내용을 그대로 쓰지 않고 **정규 형태로 바꿔서** 쓴다.
@@ -604,7 +604,9 @@ export function importAll(text) {
   for (const [k, val] of writes) {
     if (writeJSON(k, val)) { done.push(k); continue; }
     // 이 경우 손상 표시는 그대로 둔다 — 원본은 여전히 백업본에만 있다.
-    const rolledBack = done.every(restore);
+    // `.every(restore)` 는 첫 실패에서 단락되어 나머지 키를 되돌리지 않는다.
+    // 하나를 못 되돌린다고 나머지까지 새 값으로 남길 이유가 없다 → 전부 시도한 뒤 판정한다.
+    const rolledBack = done.map(restore).every(Boolean);
     return {
       ok: false,
       error: rolledBack

@@ -1062,7 +1062,7 @@ describe("저장소 손상 방어 (B-3)", () => {
 
     const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [{ id: "new" }] } }));
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/백업할 공간/);
+    expect(r.error).toMatch(/백업하지 못해/);
     expect(store.get(LKEY)).toBe(CORRUPT); // 원본 보존
   });
 
@@ -2112,5 +2112,32 @@ describe("B-6 · 롤백 안전성과 날짜 검사 (Codex 2차)", () => {
     expect(w("2026-13-01")).toContain("집계에서 빠집니다"); // 13월은 없다
     expect(w("2026-00-10")).toContain("집계에서 빠집니다"); // 0월도 없다
     expect(w("2026-01-00")).toContain("집계에서 빠집니다"); // 0일도 없다
+  });
+});
+
+describe("B-6 · 롤백은 되돌릴 수 있는 키를 모두 되돌린다 (Codex 3차 LOW)", () => {
+  it("한 키의 복원이 실패해도 나머지 키는 되돌린다", () => {
+    const store = new Map([[KEY, '{"mesoRate":1111}'], [ITEMS_KEY, '[{"name":"원본"}]']]);
+    const unrestorable = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (k === LKEY) { unrestorable.add(KEY); const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        if (unrestorable.has(k)) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+    const r = importAll(JSON.stringify({
+      app: "mvp-calculator",
+      calc: { mesoRate: 2222 },
+      myItems: [{ name: "새것" }],
+      ledger: { buys: [] },
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("되돌리지 못했");
+    // KEY 는 되돌리지 못했지만(그래서 문구가 맞다), ITEMS_KEY 는 단락 없이 되돌아왔다.
+    expect(JSON.parse(store.get(ITEMS_KEY))).toEqual([{ name: "원본" }]);
   });
 });
