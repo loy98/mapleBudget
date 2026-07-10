@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { computeCalc } from "./lib/calc.js";
 import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
-  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched,
+  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched, normalizeMyItems, deleteMyItem, restoreDefaultMyItems, addMyItems,
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
 import { useCloudSync } from "./lib/useCloudSync.js";
@@ -87,7 +87,20 @@ export default function App() {
   const setSettings = (patch) => { markUserTouched(); setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } })); };
   const setCharges = (charges) => { markUserTouched(); setCalcState((s) => ({ ...s, charges: withRowKeys(charges) })); };
   const setItems = (items) => { markUserTouched(); setCalcState((s) => ({ ...s, items: withRowKeys(items) })); };
-  const applyMyItems = (arr) => { markUserTouched(); setMyItems(withRowKeys(arr)); };
+  const applyMyItems = (arr) => { markUserTouched(); setMyItems(normalizeMyItems(arr)); };
+  // 아이템 삭제는 목록에서 빼는 것만으로 부족하다 — 그 아이템을 아직 가진 기기가 다음 접속 때 되살린다.
+  // `ledger.deleted` 에 `item:<id>` 표식을 남겨야 전파된다(B-2b). ledger 도 함께 갱신되므로 App 이 소유한다.
+  const removeMyItem = (id) => {
+    markUserTouched();
+    const next = deleteMyItem(myItems, ledger, id);
+    setMyItems(next.myItems);
+    setLedger(next.ledger);
+  };
+  // '기본 목록 복원'. 지운 기본 아이템의 삭제 표식은 합집합이라 로컬에서 지워도 클라우드에서 되살아난다.
+  // 그래서 남아 있는 표식보다 뒤인 시각을 아이템에 찍어 표식을 이기게 한다.
+  const restoreDefaultItems = () => { markUserTouched(); setMyItems(restoreDefaultMyItems(ledger.deleted)); };
+  // 새 아이템 추가도 같은 이유로 App 을 거친다 — 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.
+  const addItemsToMyList = (rows) => { markUserTouched(); setMyItems(addMyItems(myItems, ledger.deleted, rows)); };
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
@@ -139,7 +152,7 @@ export default function App() {
           settings={settings} setSettings={setSettings}
           charges={charges} setCharges={setCharges}
           items={items} setItems={setItems}
-          myItems={myItems} setMyItems={applyMyItems}
+          myItems={myItems} setMyItems={applyMyItems} onRemoveMyItem={removeMyItem} onRestoreDefaultItems={restoreDefaultItems} onAddMyItems={addItemsToMyList}
           chargeMethods={chargeOptions}
           calc={calc}
           tiers={rules.tiers}

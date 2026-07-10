@@ -3,9 +3,11 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows, validateBackup,
+  canonicalizeMyItems, deleteMyItem, restoreDefaultMyItems, itemTombstoneKey, isItemDeleted, nextItemAt, addMyItems,
   loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
 } from "./storage.js";
-import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
+import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock, mergeMyItems } from "./cloud.js";
+import { applyMergedSnapshot } from "./useCloudSync.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth, legacyRowId } from "./util.js";
 import { tzDateStr, dateOf, nowD, APP_TZ } from "./tz.js";
@@ -218,10 +220,16 @@ describe("normalizeLedger", () => {
 });
 
 describe("normalizeMyItems", () => {
-  it("빈 입력이면 기본 목록(+_k)", () => {
-    const out = normalizeMyItems([]);
+  // B-2b: `[]`(사용자가 목록을 비웠다)와 '데이터 없음'은 다르다.
+  // 예전에는 구분하지 못해 전부 지워도 다음 로드에서 기본 목록이 되살아났다.
+  it("데이터가 없으면(null·비배열) 기본 목록(+_k)", () => {
+    const out = normalizeMyItems(null);
     expect(out.length).toBeGreaterThan(0);
     expect(out.every((x) => x._k)).toBe(true);
+    expect(normalizeMyItems("쓰레기").length).toBeGreaterThan(0);
+  });
+  it("빈 배열은 '의도적으로 비운 목록'이다 — 기본값이 되살아나지 않는다", () => {
+    expect(normalizeMyItems([])).toEqual([]);
   });
   it("제공 목록은 유지(+_k)", () => {
     const out = normalizeMyItems([{ name: "커스텀" }]);
@@ -770,7 +778,9 @@ describe("업로드 충돌 병합 (mergeForUpload)", () => {
     const localB = { calc: { a: 1 }, my_items: [{ name: "i" }], ledger: LED([{ id: "x" }]) };
     const merged = mergeForUpload(localB, null);
     expect(merged.ledger.buys.map((b) => b.id)).toEqual(["x"]);
-    expect(merged.my_items).toEqual([{ name: "i" }]);
+    // 아이템에도 결정적 id 가 붙는다(B-2b) → 내용만 비교한다.
+    expect(merged.my_items.map((x) => x.name)).toEqual(["i"]);
+    expect(merged.my_items[0].id).toBeTruthy();
   });
 
   it("TTL 정리는 서버 updated_at 기준으로 한다", () => {
@@ -2139,5 +2149,251 @@ describe("B-6 · 롤백은 되돌릴 수 있는 키를 모두 되돌린다 (Code
     expect(r.error).toContain("되돌리지 못했");
     // KEY 는 되돌리지 못했지만(그래서 문구가 맞다), ITEMS_KEY 는 단락 없이 되돌아왔다.
     expect(JSON.parse(store.get(ITEMS_KEY))).toEqual([{ name: "원본" }]);
+  });
+});
+
+// ===== B-2b: 자주 쓰는 아이템도 진짜 병합 =====
+// 예전에는 이 탭의 배열이 통째로 이겼다(LWW). 오래된 스냅샷을 든 탭이 업로드하면
+// 다른 탭에서 추가한 아이템이 사라졌다.
+describe("B-2b · 아이템 결정적 id", () => {
+  it("같은 목록을 두 기기에서 로드하면 같은 id 를 만든다", () => {
+    const raw = [{ name: "원더베리", cash: 3900 }, { name: "펫", cash: 22000 }];
+    expect(canonicalizeMyItems(raw).map((x) => x.id)).toEqual(canonicalizeMyItems(raw).map((x) => x.id));
+  });
+
+  it("이름이 같은 아이템이 둘이어도 서로 다른 id 를 갖는다", () => {
+    const out = canonicalizeMyItems([{ name: "펫" }, { name: "펫" }]);
+    expect(out[0].id).not.toBe(out[1].id);
+  });
+
+  it("_k(React key)는 id 와 같다 — 병합 후 리마운트되지 않는다", () => {
+    const out = canonicalizeMyItems([{ name: "펫" }]);
+    expect(out[0]._k).toBe(out[0].id);
+  });
+
+  it("이미 id 가 있으면 유지한다 (이름을 고쳐도 같은 아이템)", () => {
+    const out = canonicalizeMyItems([{ id: "keep", name: "새 이름" }]);
+    expect(out[0].id).toBe("keep");
+  });
+
+  it("숫자가 아닌 at 은 없는 것으로 본다", () => {
+    expect(canonicalizeMyItems([{ name: "펫", at: "언제" }])[0].at).toBeUndefined();
+    expect(canonicalizeMyItems([{ name: "펫", at: 123 }])[0].at).toBe(123);
+  });
+});
+
+describe("B-2b · 아이템 병합 (합집합 + 삭제 표식)", () => {
+  const item = (name, extra) => ({ name, ...extra });
+
+  it("stale 탭이 업로드해도 다른 탭이 추가한 아이템이 사라지지 않는다", () => {
+    const cloud = { my_items: canonicalizeMyItems([item("원더베리"), item("새 아이템")]), ledger: {}, updated_at: new Date(1000).toISOString() };
+    const local = { calc: {}, my_items: canonicalizeMyItems([item("원더베리")]), ledger: {} };
+    const merged = mergeForUpload(local, cloud, 2000);
+    expect(merged.my_items.map((x) => x.name).sort()).toEqual(["새 아이템", "원더베리"]);
+  });
+
+  it("업로드 충돌에서 같은 id 는 이 탭이 이긴다 (방금 고친 값을 잃지 않는다)", () => {
+    const cloud = { my_items: canonicalizeMyItems([item("펫", { cash: 100 })]), ledger: {}, updated_at: new Date(1000).toISOString() };
+    const local = { calc: {}, my_items: canonicalizeMyItems([item("펫", { cash: 999 })]), ledger: {} };
+    expect(mergeForUpload(local, cloud, 2000).my_items[0].cash).toBe(999);
+  });
+
+  it("최초 로그인에서 같은 id 는 클라우드가 이긴다 (calc 와 같은 기준)", () => {
+    const local = { calc: {}, my_items: canonicalizeMyItems([item("펫", { cash: 999 })]), ledger: {} };
+    const cloud = { calc: { a: 1 }, my_items: canonicalizeMyItems([item("펫", { cash: 100 })]), ledger: {} };
+    expect(mergeSnapshots(local, cloud).snapshot.my_items[0].cash).toBe(100);
+  });
+
+  it("삭제 표식이 있으면 다른 기기에 남은 아이템도 제거된다", () => {
+    const items = canonicalizeMyItems([item("원더베리"), item("펫")]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    expect(del.myItems.map((x) => x.name)).toEqual(["펫"]);
+    // 다른 기기는 아직 원더베리를 갖고 있다 → 병합에서 빠져야 한다.
+    expect(mergeMyItems(items, del.myItems, del.ledger.deleted).map((x) => x.name)).toEqual(["펫"]);
+  });
+
+  it("표식은 ledger.deleted 에 item: 네임스페이스로 산다 (거래 id 와 섞이지 않는다)", () => {
+    const items = canonicalizeMyItems([item("펫")]);
+    const del = deleteMyItem(items, { deleted: { "거래id": 1 } }, items[0].id, 5000);
+    expect(del.ledger.deleted[itemTombstoneKey(items[0].id)]).toBe(5000);
+    expect(del.ledger.deleted["거래id"]).toBe(1); // 거래 표식은 그대로
+  });
+
+  it("표식이 있어도 거래 행은 지워지지 않는다 (네임스페이스 분리)", () => {
+    const items = canonicalizeMyItems([item("펫")]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    const led = normalizeLedger({ buys: [{ id: items[0].id, date: "2026-07-01" }], deleted: del.ledger.deleted });
+    expect(led.buys).toHaveLength(1); // 같은 문자열 id 를 가진 거래가 있어도 무사하다
+  });
+
+  // 가공된 백업으로 거래 행의 id 를 "item:..." 로 만들면, 아이템 하나를 지울 때 그 거래도 함께 사라진다.
+  it("거래 행이 item: 로 시작하는 id 를 가지면 새 id 를 받는다 (네임스페이스 충돌 차단)", () => {
+    const led = normalizeLedger({ buys: [{ id: "item:펫", date: "2026-07-01", qty: 1, price: 100 }] });
+    expect(led.buys[0].id).not.toBe("item:펫");
+    expect(led.buys[0].id.startsWith("item:")).toBe(false);
+    // 그 이름의 아이템을 지워도 거래는 살아남는다.
+    const led2 = normalizeLedger({ buys: [{ id: "item:펫", date: "2026-07-01", qty: 1, price: 100 }], deleted: { "item:펫": 5000 } });
+    expect(led2.buys).toHaveLength(1);
+  });
+
+  it("아이템 id 도 item: 로 시작할 수 없다 (표식 키가 중첩되지 않는다)", () => {
+    expect(canonicalizeMyItems([{ id: "item:x", name: "펫" }])[0].id.startsWith("item:")).toBe(false);
+  });
+});
+
+// ★ id 를 이름에서 유도하기 때문에, 표식이 있으면 같은 이름을 다시 추가해도 곧바로 다시 지워진다.
+describe("B-2b · 지웠다가 다시 추가할 수 있다 (at vs 표식 시각)", () => {
+  it("표식보다 나중에 추가된 아이템은 살아남는다", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    // 사용자가 같은 이름을 다시 추가 → 같은 id, 하지만 at 이 표식보다 나중
+    const readded = canonicalizeMyItems([{ name: "원더베리", at: 9000 }]);
+    expect(mergeMyItems([], readded, del.ledger.deleted).map((x) => x.name)).toEqual(["원더베리"]);
+  });
+
+  it("at 이 없는 구 데이터는 표식이 이긴다 (삭제 유지)", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    expect(mergeMyItems([], items, del.ledger.deleted)).toEqual([]);
+  });
+
+  it("다시 추가한 것을 또 지우면 삭제가 이긴다 (표식이 at 보다 뒤로 찍힌다)", () => {
+    const readded = canonicalizeMyItems([{ name: "원더베리", at: 9000 }]);
+    const del = deleteMyItem(readded, { deleted: {} }, readded[0].id, 5000); // 시계가 뒤처져 있어도
+    expect(del.ledger.deleted[itemTombstoneKey(readded[0].id)]).toBeGreaterThan(9000);
+    expect(mergeMyItems([], readded, del.ledger.deleted)).toEqual([]);
+  });
+
+  it("기본 목록 복원은 옛 표식을 이긴다", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    const restored = restoreDefaultMyItems(del.ledger.deleted, 9000);
+    const alive = mergeMyItems([], restored, del.ledger.deleted).map((x) => x.name);
+    expect(alive).toContain("원더베리");
+  });
+
+  it("isItemDeleted 계약", () => {
+    const it0 = { id: "a" };
+    expect(isItemDeleted({}, it0)).toBe(false);
+    expect(isItemDeleted({ "item:a": 100 }, it0)).toBe(true);         // at 없음 → 삭제 유지
+    expect(isItemDeleted({ "item:a": 100 }, { id: "a", at: 50 })).toBe(true);
+    expect(isItemDeleted({ "item:a": 100 }, { id: "a", at: 100 })).toBe(true);  // 동시각 → 삭제 우선
+    expect(isItemDeleted({ "item:a": 100 }, { id: "a", at: 101 })).toBe(false); // 나중에 추가됨
+    expect(isItemDeleted(null, it0)).toBe(false);
+  });
+});
+
+describe("B-2b · 빈 목록은 '비운 것'이다", () => {
+  it("클라우드가 [] 면 이 기기 목록을 덮지 않고 합친다(표식이 없으면 남는다)", () => {
+    const local = { calc: {}, my_items: canonicalizeMyItems([{ name: "펫" }]), ledger: {} };
+    const cloud = { calc: { a: 1 }, my_items: [], ledger: {} };
+    expect(mergeSnapshots(local, cloud).snapshot.my_items.map((x) => x.name)).toEqual(["펫"]);
+  });
+
+  it("클라우드가 [] + 표식이면 이 기기 아이템도 지워진다", () => {
+    const items = canonicalizeMyItems([{ name: "펫" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    const local = { calc: {}, my_items: items, ledger: {} };
+    const cloud = { calc: { a: 1 }, my_items: [], ledger: { deleted: del.ledger.deleted } };
+    expect(mergeSnapshots(local, cloud).snapshot.my_items).toEqual([]);
+  });
+});
+
+// ===== Codex 재검수 반영 (B-2b 2차) =====
+describe("B-2b · 미래 at 이 clamp 된 표식을 이기지 못한다 (Codex F2)", () => {
+  it("시계가 미래로 틀어진 기기의 at 은 ceiling 으로 눌린다", () => {
+    const FUTURE = 1_000_000, CEILING = 5000;
+    const item = { id: "p", name: "펫", at: FUTURE };
+    // 표식도 미래였다가 mergeDeleted 가 ceiling 으로 내린다.
+    const deleted = { [itemTombstoneKey("p")]: CEILING };
+    expect(isItemDeleted(deleted, item)).toBe(false);            // clamp 없으면 부활한다(옛 결함)
+    expect(isItemDeleted(deleted, item, CEILING)).toBe(true);    // clamp 하면 삭제가 유지된다
+  });
+
+  it("mergeSnapshots·mergeForUpload 가 ceiling 을 넘겨준다", () => {
+    const items = canonicalizeMyItems([{ name: "펫", at: 1_000_000 }]);
+    const deleted = { [itemTombstoneKey(items[0].id)]: 9_999_999 };
+    const cloud = { calc: { a: 1 }, my_items: [], ledger: { deleted }, updated_at: new Date(5000).toISOString() };
+    // 표식은 ceiling(=max(서버, 로컬시계))로 clamp 되고, at 도 같은 상한으로 눌린다 → 삭제 유지.
+    expect(mergeSnapshots({ calc: {}, my_items: items, ledger: {} }, cloud, { now: 5000, ceiling: 5000 }).snapshot.my_items).toEqual([]);
+    expect(mergeForUpload({ calc: {}, my_items: items, ledger: {} }, cloud, 5000).my_items).toEqual([]);
+  });
+});
+
+describe("B-2b · 같은 밀리초의 복원/추가가 삭제에 지지 않는다 (Codex F4)", () => {
+  it("nextItemAt 은 남아 있는 아이템 표식보다 뒤를 고른다", () => {
+    expect(nextItemAt({ "item:a": 5000 }, 5000)).toBe(5001);
+    expect(nextItemAt({ "item:a": 5000 }, 9000)).toBe(9000);
+    expect(nextItemAt({ "거래id": 999999 }, 5000)).toBe(5000); // 거래 표식은 세지 않는다
+    expect(nextItemAt(null, 5000)).toBe(5000);
+  });
+
+  it("같은 시각에 지우고 기본 목록을 복원해도 아이템이 살아남는다", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    const restored = restoreDefaultMyItems(del.ledger.deleted, 5000); // 같은 밀리초
+    expect(mergeMyItems([], restored, del.ledger.deleted).map((x) => x.name)).toContain("원더베리");
+  });
+
+  it("같은 시각에 지우고 다시 추가해도 아이템이 살아남는다", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    const added = addMyItems([], del.ledger.deleted, [{ name: "원더베리" }], 5000);
+    expect(mergeMyItems([], added, del.ledger.deleted).map((x) => x.name)).toEqual(["원더베리"]);
+  });
+
+  it("그래도 그 뒤에 다시 지우면 삭제가 이긴다 (진동하지 않는다)", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del1 = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    const added = addMyItems([], del1.ledger.deleted, [{ name: "원더베리" }], 5000);
+    const del2 = deleteMyItem(added, del1.ledger, added[0].id, 5000);
+    expect(mergeMyItems([], added, del2.ledger.deleted)).toEqual([]);
+  });
+});
+
+// ===== Codex F1 (CRITICAL): 충돌 병합 결과를 상태에 반영하지 않으면 다음 업로드가 서버를 덮는다 =====
+describe("B-2b · 충돌 병합 결과는 모든 병합 대상 키를 상태에 반영한다 (Codex F1)", () => {
+  it("원장과 아이템을 함께 적용한다", () => {
+    const items = canonicalizeMyItems([{ name: "펫" }, { name: "원더베리" }]);
+    const merged = {
+      calc: { mesoRate: 1 },
+      my_items: items,
+      ledger: { buys: [{ id: "b1", date: "2026-07-01" }], sells: [], cashes: [], spends: [], deleted: {} },
+    };
+    let gotLedger = null, gotItems = null;
+    applyMergedSnapshot(merged, { setLedger: (v) => { gotLedger = v; }, setMyItems: (v) => { gotItems = v; } });
+
+    expect(gotLedger).not.toBeNull();
+    expect(gotLedger.buys.map((b) => b.id)).toEqual(["b1"]);
+    // my_items 를 빠뜨리면 stale 배열이 남아 다음 업로드가 다른 기기의 아이템을 지운다.
+    expect(gotItems).not.toBeNull();
+    expect(gotItems.map((x) => x.name)).toEqual(["펫", "원더베리"]);
+  });
+
+  it("빈 아이템 목록도 그대로 반영한다 (사용자가 비운 상태)", () => {
+    let gotItems = null;
+    applyMergedSnapshot({ my_items: [], ledger: {} }, { setLedger: () => {}, setMyItems: (v) => { gotItems = v; } });
+    expect(gotItems).toEqual([]); // 기본 목록으로 되살아나면 안 된다
+  });
+});
+
+// ===== 구버전 탭 호환 (Codex B-2b 2차 지적 — 알려진 한계로 확정) =====
+describe("B-2b · 구버전 탭과의 상호작용", () => {
+  it("구버전 탭이 만든 삭제(표식 없이 배열만 줄임)는 전파되지 않는다 — 표식 방식의 내재적 한계", () => {
+    const items = canonicalizeMyItems([{ name: "펫" }]);
+    // 구버전 탭은 표식을 만들지 못하고 my_items 만 비워 올린다.
+    const cloud = { calc: { a: 1 }, my_items: [], ledger: { deleted: {} } };
+    const local = { calc: {}, my_items: items, ledger: {} };
+    // 합집합이라 로컬의 '펫'이 살아남는다. B-2b 이전(LWW)에도 결과는 같았다 → 회귀가 아니다.
+    expect(mergeSnapshots(local, cloud).snapshot.my_items.map((x) => x.name)).toEqual(["펫"]);
+  });
+
+  it("신버전이 만든 표식은 구버전 탭을 거쳐도 살아남는다 (모르는 키를 보존해 올리므로)", () => {
+    const items = canonicalizeMyItems([{ name: "펫" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    // 구버전 탭이 원장을 받아 그대로 다시 올린 상태를 흉내낸다(표식 키를 이해하지 못하지만 보존한다).
+    const cloudFromOldTab = { calc: { a: 1 }, my_items: canonicalizeMyItems([{ name: "펫" }]), ledger: { deleted: { ...del.ledger.deleted } } };
+    const local = { calc: {}, my_items: [], ledger: del.ledger };
+    expect(mergeSnapshots(local, cloudFromOldTab).snapshot.my_items).toEqual([]);
   });
 });

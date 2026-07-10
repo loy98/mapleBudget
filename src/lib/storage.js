@@ -1,6 +1,6 @@
 import {
   DEFAULT_SETTINGS, DEFAULT_CHARGES, DEFAULT_CALC_ITEMS, DEFAULT_ITEMS,
-  LEDGER_BUCKETS, LEDGER_ID_FIELDS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX,
+  LEDGER_BUCKETS, LEDGER_ID_FIELDS, MY_ITEM_ID_FIELDS, ITEM_TOMBSTONE_PREFIX, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX,
 } from "./constants.js";
 import { uid, padDate, todayStr, legacyRowId, rowContentKey, occurrenceCounter } from "./util.js";
 
@@ -191,13 +191,103 @@ export function saveCalcState(settings, charges, items) {
 }
 
 // ===== 자주 쓰는 아이템 =====
+// 아이템에도 **결정적 id** 를 준다(B-2b). 랜덤 id 면 두 기기가 같은 아이템을 다른 것으로 보고
+// 병합에서 중복시킨다. id 는 이름에서 유도한다 — 이름이 아이템의 정체성이다.
+// 같은 이름이 여럿이면 등장 순번으로 가른다(원장과 같은 규칙).
+// `_k` 는 React key 다. id 와 같은 값으로 두면 병합 후에도 같은 행이 리마운트되지 않는다.
+export function canonicalizeMyItems(rows) {
+  const nth = occurrenceCounter();
+  return asArray(rows)
+    .filter(isPlainObject)
+    .map((x) => {
+      const row = { ...x };
+      if (!safeRowId(row.id)) row.id = legacyRowId(MY_ITEM_ID_FIELDS, row, nth(rowContentKey(MY_ITEM_ID_FIELDS, row)));
+      // `at` = 이 아이템이 목록에 들어온 시각. 삭제 표식과 시각을 비교해 '다시 추가'를 표현한다(아래 참고).
+      // 숫자가 아니면 없는 것으로 본다 — 그러면 어떤 표식이든 이긴다(삭제가 유지된다).
+      if (!Number.isFinite(+row.at)) delete row.at;
+      row._k = row.id;
+      return row;
+    });
+}
+
+// 이 아이템이 삭제 표식에 의해 지워진 상태인가.
+//
+// id 를 이름에서 유도하기 때문에, 표식이 있으면 **같은 이름을 다시 추가해도 곧바로 다시 지워진다.**
+// 그래서 시각을 비교한다: 표식보다 나중에 추가된 아이템은 살아남는다("지웠다가 다시 넣었다").
+// `at` 이 없는 구 데이터는 표식보다 이전으로 취급한다 — 삭제가 유지되는 쪽이 안전하다.
+// 동시각(at === ts)도 삭제가 이긴다. 삭제는 언제나 표식을 `at` 보다 **뒤로** 찍기 때문에(deleteMyItem),
+// 같은 값이 나오는 것은 아래 clamp 로 끌어내려졌을 때뿐이다.
+//
+// `ceiling` = '정상적인 지금'의 상한. 표식 시각은 `normalizeDeleted` 가 여기로 clamp 한다.
+// **`at` 도 같은 상한으로 clamp 해야 한다.** 안 그러면 시계가 틀어진 기기(또는 가공된 백업)의
+// 미래 `at` 이 clamp 된 표식을 이겨, 지운 아이템이 되살아난다.
+export function isItemDeleted(deleted, item, ceiling = null) {
+  if (!deleted || !item) return false;
+  const key = itemTombstoneKey(item.id);
+  if (!hasOwn(deleted, key)) return false;
+  const ts = +deleted[key];
+  let at = +item.at;
+  if (Number.isFinite(at) && Number.isFinite(ceiling) && at > ceiling) at = ceiling;
+  return !(Number.isFinite(at) && Number.isFinite(ts) && at > ts);
+}
+
+// 아이템을 목록에 넣을 때 찍을 `at`. 남아 있는 아이템 삭제 표식보다 반드시 뒤여야 한다 —
+// 같은 밀리초에 지우고 복원하면(테스트·빠른 클릭) `at === ts` 가 되어 복원이 삭제에 진다.
+export function nextItemAt(deleted, now = Date.now()) {
+  let max = -Infinity;
+  const d = deleted && typeof deleted === "object" && !Array.isArray(deleted) ? deleted : {};
+  Object.keys(d).forEach((k) => {
+    if (!isItemTombstone(k) || !hasOwn(d, k)) return;
+    const t = Number(d[k]);
+    if (Number.isFinite(t) && t > max) max = t;
+  });
+  return Number.isFinite(max) ? Math.max(now, max + 1) : now;
+}
+
+// `[]` 는 '사용자가 목록을 비웠다'는 뜻이고, `null`/배열 아님은 '저장된 데이터가 없다'는 뜻이다.
+// 예전에는 둘을 구분하지 못해(`d.length` 검사) 아이템을 전부 지워도 다음 로드에서 기본 목록이 되살아났다.
 export function normalizeMyItems(d) {
-  return withRowKeys(Array.isArray(d) && d.length ? d : DEFAULT_ITEMS);
+  return canonicalizeMyItems(Array.isArray(d) ? d : DEFAULT_ITEMS);
 }
 export function loadMyItems() {
   return normalizeMyItems(readJSON(ITEMS_KEY));
 }
 export const saveMyItems = (items) => writeJSON(ITEMS_KEY, items);
+
+// 아이템 id → 삭제 표식 키. 거래 id 와 섞이지 않게 네임스페이스를 붙인다.
+export const itemTombstoneKey = (id) => ITEM_TOMBSTONE_PREFIX + id;
+export const isItemTombstone = (key) => typeof key === "string" && key.startsWith(ITEM_TOMBSTONE_PREFIX);
+
+// 아이템 삭제 = 목록에서 제거 + 표식 기록. 배열에서 빼기만 하면 그 아이템을 아직 가진 기기가 되살린다.
+// 표식은 `ledger.deleted` 에 함께 산다(구버전 탭도 모르는 키를 보존하므로 표식이 살아남는다).
+export function deleteMyItem(myItems, ledger, id, now = Date.now()) {
+  if (!safeRowId(id)) return { myItems, ledger }; // 표식을 남길 수 없는 id → 삭제도 하지 않는다
+  const rows = asArray(myItems);
+  const target = rows.find((x) => x && x.id === id);
+  const deleted = { ...normalizeDeleted(ledger && ledger.deleted, null) };
+  // 표식은 그 아이템의 `at` 보다 반드시 나중이어야 한다. 시계가 틀어져 at 이 미래면
+  // `at > ts` 가 되어 삭제가 먹히지 않는다(지워도 그대로 남는 아이템).
+  const at = target && Number.isFinite(+target.at) ? +target.at : -Infinity;
+  deleted[itemTombstoneKey(id)] = Math.max(now, at + 1);
+  return {
+    myItems: rows.filter((x) => x && x.id !== id),
+    ledger: { ...ledger, deleted },
+  };
+}
+
+// '기본 목록 복원' — 지금 목록을 기본값으로 바꾼다.
+// 지운 기본 아이템의 표식이 클라우드에 남아 있으면(표식은 합집합이라 로컬에서 지워도 되살아난다)
+// 복원해도 병합에서 다시 빠진다. 그래서 남아 있는 표식보다 **뒤인** 시각을 `at` 으로 찍는다.
+export function restoreDefaultMyItems(deleted, now = Date.now()) {
+  const at = nextItemAt(deleted, now);
+  return canonicalizeMyItems(DEFAULT_ITEMS.map((x) => ({ ...x, at })));
+}
+
+// 사용자가 목록에 새 아이템을 넣을 때 쓴다. 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.
+export function addMyItems(myItems, deleted, rows, now = Date.now()) {
+  const at = nextItemAt(deleted, now);
+  return canonicalizeMyItems([...asArray(myItems), ...asArray(rows).map((r) => ({ ...r, at }))]);
+}
 
 // ===== 거래 원장 · 삭제 표식(tombstone) =====
 // 삭제는 '항목이 없다'는 사실이라, id 합집합 병합으로는 표현할 수 없다.
@@ -270,7 +360,11 @@ export const isDeleted = (deleted, id) => !!id && hasOwn(deleted, id);
 
 // id 는 tombstone 의 키가 되므로 문자열이어야 하고, 상속 키여선 안 된다.
 // id 가 "__proto__" 인 행은 삭제해도 표식이 기록되지 않아(UNSAFE_KEYS 차단) 다른 기기에서 부활한다.
-const safeRowId = (id) => typeof id === "string" && !!id && !UNSAFE_KEYS.has(id);
+// 삭제 표식 맵의 키로 안전하게 쓸 수 있는 id 인가.
+// `item:` 으로 시작하는 id 는 거부한다 — 아이템 삭제 표식의 네임스페이스와 충돌하면
+// 아이템 하나를 지웠을 때 같은 이름의 거래 행이 함께 사라진다(가공된 백업으로 유도 가능).
+const safeRowId = (id) =>
+  typeof id === "string" && !!id && !UNSAFE_KEYS.has(id) && !id.startsWith(ITEM_TOMBSTONE_PREFIX);
 
 // 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
 // meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.

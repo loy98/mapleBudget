@@ -42,6 +42,18 @@ function useToday() {
   return today;
 }
 
+
+// 충돌 병합 결과를 화면(상태)에 반영한다.
+//
+// 반드시 **한 곳**에서 모든 병합 대상 키를 적용한다. 하나라도 빠뜨리면, 로컬 상태가 서버에 쓴
+// merged 와 어긋난 채 남고 다음 자동 업로드가 그 어긋난 값을 '올바른 버전'으로 덮어써
+// 다른 기기의 데이터를 지운다(원장은 거래 소실, my_items 는 아이템 소실).
+// calc 는 이 탭이 이기므로(local wins) 반영할 것이 없다.
+export function applyMergedSnapshot(merged, { setLedger, setMyItems }) {
+  setLedger(normalizeLedger(merged.ledger));
+  setMyItems(normalizeMyItems(merged.my_items));
+}
+
 // ============================================================
 // useCloudSync — 세션·app_config·클라우드 동기화·업로드를 한 곳에 응집(App.jsx의 SRP 회복).
 // 계산기 상태(state/setter)는 App이 소유하고, 이 훅이 클라우드와의 연동만 담당한다.
@@ -56,7 +68,8 @@ function useToday() {
 //  - force 정착 판정은 syncedUserRef(실제 데이터 로드) — cloudReady state의 stale read 회피.
 // ============================================================
 // setCalcState/setMyItems/setLedger는 React useState 세터(안정 identity)만 받는다 → stale closure 없음.
-// 내부에서 setMyItems(withRowKeys(...))로 안정 key를 부여(App의 applyMyItems 래퍼에 의존하지 않음).
+// 내부에서 setMyItems(normalizeMyItems(...))로 결정적 id·안정 key를 부여(App의 applyMyItems 래퍼에 의존하지 않음).
+// id 없이 넣으면 삭제 표식을 남길 수 없어 아이템 삭제가 조용히 실패한다(B-2b).
 export function useCloudSync({ settings, charges, items, myItems, ledger, setCalcState, setMyItems, setLedger }) {
   const [session, setSession] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
@@ -133,7 +146,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     }
     if (freshRef.current.items) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) setMyItems(withRowKeys(its));
+      if (its.length) setMyItems(normalizeMyItems(its));
     }
   }, [appConfig, authResolved, userId]);
 
@@ -152,7 +165,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     if (force.includes("defaultItems")) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) setMyItems(withRowKeys(its));
+      if (its.length) setMyItems(normalizeMyItems(its));
     }
   }, [appConfig, authResolved, userId, cloudReady]);
 
@@ -273,11 +286,9 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
           if (liveUserIdRef.current !== uid) { aborted = true; break; }
           lastSeenRef.current = cloud?.updated_at ?? null;
           const merged = mergeForUpload(dataRef.current, cloud);
-          // 병합 결과를 반드시 화면(상태)에도 반영한다. 우리는 merged 를 서버에 쓰므로,
-          // 로컬 상태가 merged 와 어긋난 채 남으면 다음 업로드가 그 어긋난 값을 올바른 버전으로
-          // 덮어써 다른 기기의 거래를 지우고 삭제된 거래를 되살린다.
-          // (항목 '개수'만 비교해 건너뛰면 안 된다 — 한 건이 지워지고 한 건이 추가된 경우 개수가 같다.)
-          setLedger(normalizeLedger(merged.ledger));
+          // 병합 결과를 반드시 화면(상태)에도 반영한다(applyMergedSnapshot 주석 참고).
+          // 항목 '개수'만 비교해 건너뛰면 안 된다 — 한 건이 지워지고 한 건이 추가된 경우 개수가 같다.
+          applyMergedSnapshot(merged, { setLedger, setMyItems });
           res = await writeUserData(uid, merged, lastSeenRef.current);
         }
         if (aborted) break;
