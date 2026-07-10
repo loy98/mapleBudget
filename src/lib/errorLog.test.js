@@ -71,6 +71,26 @@ describe("errorLog — 로컬 오류 기록", () => {
     expect(out).toContain("펑");
     expect(out).toContain("최근 오류 1건");
   });
+
+  // Codex: 손상된 기록을 그대로 쓰면 new Date("bad").toISOString() 이 RangeError 를 던져
+  // **피드백 전송 자체가 실패한다** — 오류를 보고하려다 오류에 막힌다.
+  it("손상된 기록이 있어도 첨부 요약이 던지지 않는다", () => {
+    const bad = [
+      { t: "bad", msg: "x" },
+      { t: NaN, msg: null, where: 3, stack: 7 },
+      null,
+      "문자열",
+    ];
+    expect(() => formatErrorsForFeedback(bad)).not.toThrow();
+    const out = formatErrorsForFeedback(bad);
+    expect(out).toContain("(시각 불명)");
+    expect(out).toContain("최근 오류");
+  });
+
+  it("errors 가 배열이 아니어도 던지지 않는다", () => {
+    expect(formatErrorsForFeedback(null)).toBe("");
+    expect(formatErrorsForFeedback("쓰레기")).toBe("");
+  });
 });
 
 // 아이콘 URL 은 클라우드로 동기화되는 사용자 입력이다. 임의 호스트를 허용하면 트래킹 픽셀 표면이 된다.

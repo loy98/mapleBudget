@@ -54,13 +54,22 @@ export function clearErrors() {
 }
 
 // 피드백에 붙일 사람이 읽을 수 있는 요약. 사용자가 명시적으로 첨부를 택했을 때만 쓴다.
+//
+// **저장된 기록을 믿지 않는다.** 손상된 `mvpErrors`(예: `t` 가 문자열)를 그대로 쓰면
+// `new Date("bad").toISOString()` 이 RangeError 를 던져 **피드백 전송 자체가 실패한다** —
+// 오류를 보고하려다 오류에 막히는 셈이다.
+const isoOf = (t) => {
+  const n = Number(t);
+  return Number.isFinite(n) ? new Date(n).toISOString() : "(시각 불명)";
+};
+const safeStr = (v) => { try { return typeof v === "string" ? v : String(v ?? ""); } catch { return ""; } };
+
 export function formatErrorsForFeedback(errors = getRecentErrors(), limit = 3) {
-  const list = errors.slice(0, limit);
+  const list = (Array.isArray(errors) ? errors : []).filter((e) => e && typeof e === "object").slice(0, limit);
   if (!list.length) return "";
   const lines = list.map((e) => {
-    const when = new Date(e.t).toISOString();
-    const first = (e.stack || "").split("\n")[1] || "";
-    return `- ${when} [${e.where || "unknown"}] ${e.msg}${first ? "\n  " + first.trim() : ""}`;
+    const first = safeStr(e.stack).split("\n")[1] || "";
+    return `- ${isoOf(e.t)} [${safeStr(e.where) || "unknown"}] ${safeStr(e.msg)}${first ? "\n  " + first.trim() : ""}`;
   });
   return "\n\n--- 최근 오류 " + list.length + "건 (사용자 첨부) ---\n" + lines.join("\n");
 }

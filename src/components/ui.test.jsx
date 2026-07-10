@@ -22,6 +22,14 @@ describe("IconView — 아이콘 호스트 allowlist", () => {
     expect(renderToString(<IconView icon="data:image/svg+xml,<svg/>" />)).toBe("");
   });
 
+  // Codex: 공백 하나만 붙여도 스킴 판정을 빠져나가 URL 문자열이 화면에 그대로 찍혔다.
+  it("앞뒤 공백·개행이 붙은 URL 도 URL 로 본다", () => {
+    expect(renderToString(<IconView icon=" https://evil.com/pixel.gif" />)).toBe("");
+    expect(renderToString(<IconView icon={"\njavascript:alert(1)"} />)).toBe("");
+    expect(renderToString(<IconView icon="  https://maplestory.io/a.png  " />)).toContain("<img");
+    expect(renderToString(<IconView icon="   " />)).toBe("");
+  });
+
   it("이모지는 그대로 보여준다", () => {
     expect(renderToString(<IconView icon="🫐" />)).toContain("🫐");
   });
