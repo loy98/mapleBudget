@@ -19,17 +19,129 @@ export const SYNC_KEY = "mvpCloudSyncedUid";
 //  ledger 병합은 id 합집합이라 충돌 모달 선택과 무관하게 항상 합쳐지고, tombstone이 없어 되돌릴 수도 없다.)
 export const OWNER_KEY = "mvpDataOwnerUid";
 
-function readJSON(key) {
+// ===== 저장소 무결성 =====
+// 파싱 실패한 값을 조용히 null 로 바꾸면, 앱은 '빈 상태'로 로드되고 곧바로 자동저장 이펙트가
+// **복구 가능했을 원본 위에 빈 값을 덮어쓴다.** 쓰기 중단(쿼터·브라우저 크래시) 한 번이
+// 게스트에겐 영구·불가역 데이터 손실이 된다.
+//
+// 규칙:
+//  ① 파싱 실패 시 원본 문자열을 `<key>.corrupt` 에 백업한 뒤에만 null 을 반환한다.
+//  ② 백업에 실패했으면(공간 부족) 그 키에는 **쓰지 않는다** — 덮어쓰면 원본이 사라진다.
+//  ③ 쓰기 실패(QuotaExceededError 등)를 조용히 삼키지 않고 호출측/사용자에게 알린다.
+export const CORRUPT_SUFFIX = ".corrupt";
+
+const corrupted = new Map(); // key -> { backedUp: boolean }
+let quotaHit = false;
+let listeners = [];
+
+export function getStorageIssues() {
+  return {
+    corruptKeys: [...corrupted.keys()],
+    // 백업조차 못한 키가 있으면 그 키는 쓰기가 막혀 있다(더 위험).
+    unbackedKeys: [...corrupted.entries()].filter(([, v]) => !v.backedUp).map(([k]) => k),
+    quotaHit,
+  };
+}
+export function onStorageIssue(cb) {
+  listeners.push(cb);
+  return () => { listeners = listeners.filter((f) => f !== cb); };
+}
+function emitIssue() {
+  const s = getStorageIssues();
+  listeners.forEach((f) => { try { f(s); } catch { /* 구독자 오류가 저장을 막지 않게 */ } });
+}
+// 테스트/가져오기용: 손상 표시를 해제한다(사용자가 명시적으로 덮어쓰기를 택한 경우).
+export function clearCorruptFlag(key) {
+  if (corrupted.delete(key)) emitIssue();
+}
+export function __resetStorageIssues() {
+  corrupted.clear();
+  quotaHit = false;
+  listeners = [];
+}
+
+const isQuotaError = (e) =>
+  !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22 || e.code === 1014);
+
+// 백업 슬롯. 한 슬롯만 두고 '이미 있으면 성공'으로 치면, **다른 내용**으로 다시 손상됐을 때
+// 지금 살려야 할 원본이 백업되지 않은 채 자동저장에 덮인다.
+//
+// 지켜야 할 불변식은 하나다: **지금 덮어쓸 원본이 어딘가에 백업돼 있을 것.**
+// 그래서 슬롯 2개를 '최초 손상본'과 '가장 최근 손상본'으로 쓴다. 둘 다 차 있고 새 손상본이
+// 들어오면 최근 슬롯을 밀어낸다 — 잃는 것은 이미 대체된 옛 손상본이고, 지키는 것은 지금 사라질 원본이다.
+// (슬롯이 차면 쓰기를 영구 차단하는 대안은 불변식은 지키지만 앱이 그 키를 저장하지 못하고 얼어붙는다.)
+export const corruptSlots = (key) => [key + CORRUPT_SUFFIX, key + CORRUPT_SUFFIX + ".2"];
+
+function backupCorrupt(key, raw) {
+  const [first, latest] = corruptSlots(key);
+  const holds = (slot) => { try { return localStorage.getItem(slot) === raw; } catch { return false; } };
+
+  // 쓰기를 시도하기 '전에' 두 슬롯을 모두 확인한다. 첫 슬롯 setItem 이 쿼터로 던진다는 이유로
+  // 두 번째 슬롯에 이미 안전하게 보관된 원본을 못 보고 '백업 실패'로 판정하면, 쓰기가 불필요하게 막힌다.
+  if (holds(first) || holds(latest)) return true;
+
   try {
-    return JSON.parse(localStorage.getItem(key));
+    if (localStorage.getItem(first) == null) {
+      localStorage.setItem(first, raw);
+      return localStorage.getItem(first) === raw;
+    }
+    localStorage.setItem(latest, raw); // 두 슬롯이 다른 내용으로 차 있다 → 최근 슬롯을 밀어낸다
+    return localStorage.getItem(latest) === raw;
   } catch {
+    return false; // 저장소에 아예 쓸 수 없다 → 백업 실패. 이 경우에만 쓰기가 막힌다.
+  }
+}
+
+function readJSON(key) {
+  let raw;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    return null; // 저장소 자체를 못 읽는 환경(사파리 프라이빗 등)
+  }
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    corrupted.set(key, { backedUp: backupCorrupt(key, raw) });
+    emitIssue();
     return null;
   }
 }
+
+const isParsable = (raw) => { try { JSON.parse(raw); return true; } catch { return false; } };
+
+// 이 키를 지금 덮어써도 되는지 판정한다. **매번 실제 상태를 다시 확인한다** —
+// backedUp:true 는 과거의 기록일 뿐이고, 그 사이 다른 탭이나 브라우저의 저장소 정리로
+// 슬롯이 사라졌다면 그 기록은 거짓이다.
+// 백업을 재시도하므로, 공간이 생겼다면 막혔던 키가 다시 쓰기 가능해진다.
+function ensureWritable(key) {
+  if (!corrupted.has(key)) return true;
+  let raw;
+  try { raw = localStorage.getItem(key); } catch { return false; } // 저장소를 못 읽으면 보장할 수 없다
+  if (raw == null) return true;       // 지킬 원본이 없다
+  // 이미 덮였거나 복원되어 더 이상 손상본이 아니다 → 다시 백업하면 정상 값이 손상 백업을 밀어낸다.
+  if (isParsable(raw)) return true;
+  const ok = backupCorrupt(key, raw);
+  corrupted.set(key, { backedUp: ok });
+  return ok;
+}
+
 function writeJSON(key, val) {
+  // 손상된 키에 쓸 때는 '지금 이 순간' 원본이 백업돼 있는지 다시 확인한다.
+  // backedUp:true 는 과거 시점의 기록일 뿐이다 — 그 뒤 다른 탭이나 브라우저의 저장소 정리로
+  // 슬롯이 사라졌다면 그 기록은 거짓이 되고, 우리는 백업 없는 원본을 덮어쓰게 된다.
+  // (정상 키는 corrupted 에 없으므로 이 경로를 타지 않는다 — 일반 저장 성능에 영향 없음.)
+  if (corrupted.has(key) && !ensureWritable(key)) { emitIssue(); return false; }
   try {
     localStorage.setItem(key, JSON.stringify(val));
-  } catch { /* 저장 불가 환경 무시 */ }
+    // 쓰기가 다시 성공했다 = 공간이 생겼다. 경고를 걷는다(그러지 않으면 배너가 새로고침까지 남는다).
+    if (quotaHit) { quotaHit = false; emitIssue(); }
+    return true;
+  } catch (e) {
+    if (isQuotaError(e) && !quotaHit) { quotaHit = true; emitIssue(); }
+    return false; // 조용히 삼키지 않는다 — 호출측이 알 수 있다
+  }
 }
 
 // ===== 계산기 설정 + 충전 방식 + 계산기 아이템 =====
@@ -69,8 +181,10 @@ export function hasStoredCalc() {
 export function hasStoredItems() {
   try { return localStorage.getItem(ITEMS_KEY) != null; } catch { return false; }
 }
+// save* 는 성공 여부(boolean)를 반환한다. 호출측이 useEffect 축약형으로 쓰면 그 값이
+// cleanup 으로 해석되므로 반드시 블록 본문으로 감쌀 것(App.jsx 참고).
 export function saveCalcState(settings, charges, items) {
-  writeJSON(KEY, serializeCalcState(settings, charges, items));
+  return writeJSON(KEY, serializeCalcState(settings, charges, items));
 }
 
 // ===== 자주 쓰는 아이템 =====
@@ -240,7 +354,13 @@ export function setDataOwner(userId) {
 // 데이터는 클라우드에 있으므로 재로그인하면 복원된다. calMode/theme 같은 기기별 뷰 설정은 남긴다.
 export function clearAccountData() {
   try {
-    [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY].forEach((k) => localStorage.removeItem(k));
+    const keys = [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY];
+    keys.forEach((k) => localStorage.removeItem(k));
+    // 손상 백업(.corrupt)에는 원장 원본이 그대로 들어 있다 → 공용 브라우저에 남기지 않는다.
+    // 소유자 마커로 막으려던 바로 그 유출 경로다.
+    [KEY, ITEMS_KEY, LKEY].forEach((k) => corruptSlots(k).forEach((s) => localStorage.removeItem(s)));
+    corrupted.clear();
+    emitIssue();
   } catch { /* ignore */ }
 }
 
@@ -270,12 +390,28 @@ export function saveCalMode(m) {
   } catch { /* ignore */ }
 }
 
+// 손상되어 파싱하지 못한 원본을 그대로 담는다. 백업 파일이 유일한 복구 수단이므로
+// 읽지 못한 데이터도 함께 나가야 한다(나중에 손으로 고칠 수 있다).
+function collectCorruptRaw() {
+  const out = {};
+  [KEY, ITEMS_KEY, LKEY].forEach((k) => {
+    corruptSlots(k).forEach((slot) => {
+      try {
+        const raw = localStorage.getItem(slot);
+        if (raw != null) out[slot] = raw;
+      } catch { /* ignore */ }
+    });
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
 // ===== 내보내기 / 가져오기 =====
 export function exportAll() {
   const data = {
     app: "mvp-calculator",
     version: 1,
     exportedAt: new Date().toISOString(),
+    corruptRaw: collectCorruptRaw(),
     calc: readJSON(KEY),
     myItems: readJSON(ITEMS_KEY),
     ledger: readJSON(LKEY),
@@ -300,13 +436,38 @@ export function importAll(text) {
   if (!data || data.app !== "mvp-calculator") {
     return { ok: false, error: "이 앱의 백업 파일이 아닙니다." };
   }
-  if (data.calc) writeJSON(KEY, data.calc);
-  if (data.myItems) writeJSON(ITEMS_KEY, data.myItems);
+  // 이 파일이 실제로 덮어쓸 키만 대상으로 한다(없는 키의 가드를 풀면 안 된다).
+  const targets = [];
+  if (data.calc) targets.push(KEY);
+  if (data.myItems) targets.push(ITEMS_KEY);
+  if (data.ledger) targets.push(LKEY);
+
+  // 차단은 '쓰기 성공 뒤에' 푼다. 먼저 풀고 쓰기가 실패하면 가드가 사라진 채 남아,
+  // 이후 자동저장이 백업 없는 원본을 덮어쓴다 — 이 기능이 막으려던 바로 그 파괴다.
+  // 대신 여기서 백업을 재시도해, 백업할 수 있으면 쓰기를 허용한다.
+  const blocked = targets.filter((k) => !ensureWritable(k));
+  if (blocked.length) {
+    return { ok: false, error: "손상된 원본을 백업할 공간이 없어 복원하지 못했습니다. 브라우저 저장소를 정리한 뒤 다시 시도해 주세요." };
+  }
+
+  const wrote = [];
+  if (data.calc) wrote.push(writeJSON(KEY, data.calc));
+  if (data.myItems) wrote.push(writeJSON(ITEMS_KEY, data.myItems));
   // 원장은 검증·정규화해서 쓴다. 파일의 tombstone 은 그대로 클라우드로 전파되어 거래를 지우므로
   // (그게 삭제 전파의 정상 동작이다) 최소한 malformed·미래 시각·만료 표식은 걸러내야 한다.
   // now 를 넘겨 미래 시각을 clamp: 조작된 백업이 '영원히 만료되지 않는' 표식으로 남의 거래를 계속 지우는 것을 막는다.
   // 가져오기는 서버와 무관하므로 만료 기준·clamp 상한이 모두 '지금'이다.
-  if (data.ledger) { const t = Date.now(); writeJSON(LKEY, normalizeLedger(data.ledger, t, t)); }
+  if (data.ledger) { const t = Date.now(); wrote.push(writeJSON(LKEY, normalizeLedger(data.ledger, t, t))); }
   if (data.calMode) saveCalMode(data.calMode);
+  // 쓰기가 하나라도 실패했으면(공간 부족 등) 복원이 조용히 반쪽 나지 않게 알린다.
+  // 이 경우 손상 표시는 그대로 둔다 — 원본은 여전히 백업본에만 있다.
+  if (wrote.some((ok) => ok === false)) {
+    return { ok: false, error: "저장 공간이 부족해 복원하지 못했습니다. 브라우저 저장소를 비운 뒤 다시 시도해 주세요." };
+  }
+  // 전부 성공했다 = 사용자가 이 키들을 의도적으로 복원했다 → 손상 표시를 걷는다.
+  // 백업 슬롯(.corrupt)은 **남긴다**. 슬롯이 차도 최근 슬롯을 밀어내므로 다음 손상 백업을 막지 않고,
+  // 사용자가 내보내기를 하지 않았다면 이게 복원 이전 원본의 유일한 사본이다. 지우는 쪽이 더 파괴적이다.
+  // (로그아웃·저장소 정리 시에는 clearAccountData 가 함께 지운다 — 공용 브라우저 프라이버시.)
+  targets.forEach(clearCorruptFlag);
   return { ok: true };
 }

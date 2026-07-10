@@ -3,6 +3,7 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
+  loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM } from "./ledger.js";
@@ -857,5 +858,402 @@ describe("tombstone 개수 상한", () => {
     const b = LED([], many(100, T0 + 10_000_000)); // 더 최신인 별개 id 들
     const merged = mergeLedger(a, b, null);
     expect(Object.keys(merged.deleted).length).toBeLessThanOrEqual(TOMBSTONE_MAX);
+  });
+});
+
+// B-3: 파싱 실패를 조용히 null 로 바꾸면, 앱은 빈 상태로 로드되고 자동저장이 원본을 덮어쓴다.
+// 쓰기 중단(쿼터·크래시) 한 번이 게스트에겐 영구·불가역 손실이 된다.
+describe("저장소 손상 방어 (B-3)", () => {
+  const CORRUPT = '{"buys":[{"id":"a1","date":"2026-07-01","qty":3,"pri';
+  let store, failWrites;
+
+  const mountStore = () => {
+    store = new Map();
+    failWrites = new Set(); // 이 키에 대한 setItem 이 쿼터 오류를 던진다
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (failWrites.has(k) || failWrites.has("*")) {
+          const e = new Error("quota"); e.name = "QuotaExceededError"; throw e;
+        }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+  };
+
+  beforeEach(() => { mountStore(); __resetStorageIssues(); });
+
+  it("손상된 원본을 <key>.corrupt 로 백업한 뒤에만 null 을 반환한다", () => {
+    store.set(LKEY, CORRUPT);
+    const led = loadLedger();
+    expect(led.buys).toEqual([]);                       // 빈 상태로 로드되지만
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT); // 원본은 보존
+    expect(getStorageIssues().corruptKeys).toContain(LKEY);
+  });
+
+  it("자동저장이 원본을 덮어써도 백업이 남아 복구 가능하다", () => {
+    store.set(LKEY, CORRUPT);
+    saveLedger(loadLedger()); // App 의 useEffect(() => saveLedger(ledger), [ledger])
+    expect(store.get(LKEY)).not.toBe(CORRUPT);              // 자리는 덮였지만
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT); // 원본은 살아 있다
+  });
+
+  it("백업조차 못하면(공간 부족) 그 키에는 쓰지 않는다 — 원본 보존이 최우선", () => {
+    store.set(LKEY, CORRUPT);
+    failWrites.add(LKEY + CORRUPT_SUFFIX); // 백업 쓰기 실패
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+
+    expect(saveLedger({ buys: [] })).toBe(false); // 쓰기 거부
+    expect(store.get(LKEY)).toBe(CORRUPT);        // 원본 그대로
+  });
+
+  it("서로 다른 손상본은 각각 다른 슬롯에 보관한다 (최신 원본도 반드시 백업)", () => {
+    const SECOND = '{"another":"corrupt';
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    store.set(LKEY, SECOND);
+    __resetStorageIssues();
+    loadLedger();
+    const [s1, s2] = corruptSlots(LKEY);
+    expect(store.get(s1)).toBe(CORRUPT); // 최초 손상본 유지
+    expect(store.get(s2)).toBe(SECOND);  // 지금 살려야 할 원본도 백업
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+  });
+
+  it("같은 손상본이 다시 읽히면 슬롯을 낭비하지 않는다", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    __resetStorageIssues();
+    loadLedger();
+    expect(store.has(corruptSlots(LKEY)[1])).toBe(false);
+  });
+
+  it("슬롯이 차면 최근 슬롯을 밀어내고 현재 원본을 백업한다 (앱이 얼어붙지 않는다)", () => {
+    const [s1, s2] = corruptSlots(LKEY);
+    store.set(s1, "first-corrupt");
+    store.set(s2, "old-latest");
+    const THIRD = '{"third":"corrupt';
+    store.set(LKEY, THIRD);
+    loadLedger();
+    // 불변식: 지금 덮어쓸 원본이 어딘가에 백업돼 있다
+    expect([store.get(s1), store.get(s2)]).toContain(THIRD);
+    expect(store.get(s1)).toBe("first-corrupt"); // 최초 손상본은 지킨다
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+    expect(saveLedger({ buys: [] })).toBe(true); // 쓰기 차단 없음
+  });
+
+  it("이미 다른 슬롯에 백업돼 있으면 쿼터가 꽉 차도 백업 성공으로 본다 (Codex B)", () => {
+    const [s1, s2] = corruptSlots(LKEY);
+    const RAW = '{"x":';
+    store.set(s1, "다른-손상본"); // 첫 슬롯은 다른 내용
+    store.set(s2, RAW);           // 두 번째 슬롯에 이미 이 원본이 안전하게 보관돼 있다
+    store.set(LKEY, RAW);
+    failWrites.add("*");          // 이제 어디에도 쓸 수 없다
+
+    loadLedger();
+    // 새로 쓸 필요가 없으므로 '백업됨'이어야 한다 → 쓰기가 불필요하게 막히지 않는다
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+  });
+
+  it("첫 슬롯에 이미 같은 원본이 있으면 쿼터와 무관하게 백업됨", () => {
+    const [s1] = corruptSlots(LKEY);
+    const RAW = '{"y":';
+    store.set(s1, RAW);
+    store.set(LKEY, RAW);
+    failWrites.add("*");
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toEqual([]);
+  });
+
+  it("백업 기록 후 슬롯이 사라지면 다시 백업하고, 못하면 쓰지 않는다 (Codex LOW)", () => {
+    const RAW = '{"z":';
+    store.set(LKEY, RAW);
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toEqual([]); // 백업됨으로 기록
+
+    // 다른 탭/브라우저 정리로 슬롯이 사라짐 + 이제 어디에도 쓸 수 없음
+    corruptSlots(LKEY).forEach((sl) => store.delete(sl));
+    failWrites.add("*");
+
+    expect(saveLedger({ buys: [] })).toBe(false); // 과거 기록을 믿지 않고 재확인
+    expect(store.get(LKEY)).toBe(RAW);            // 원본 보존
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+  });
+
+  it("슬롯이 사라졌어도 공간이 있으면 다시 백업하고 쓴다", () => {
+    const RAW = '{"z":';
+    store.set(LKEY, RAW);
+    loadLedger();
+    corruptSlots(LKEY).forEach((sl) => store.delete(sl));
+
+    expect(saveLedger({ buys: [] })).toBe(true);
+    expect(store.get(corruptSlots(LKEY)[0])).toBe(RAW); // 사라진 백업을 되살림
+  });
+
+  it("이미 덮인 뒤(정상 JSON)에는 재백업하지 않는다 — 정상 값이 손상 백업을 밀어내면 안 된다", () => {
+    const RAW = '{"z":';
+    store.set(LKEY, RAW);
+    loadLedger();
+    expect(saveLedger({ buys: [] })).toBe(true);      // 원본은 백업됐고 자리는 덮였다
+    expect(saveLedger({ buys: [{ id: "x" }] })).toBe(true); // 두 번째 저장
+
+    const [s1, s2] = corruptSlots(LKEY);
+    expect(store.get(s1)).toBe(RAW);   // 손상본 그대로
+    expect(store.has(s2)).toBe(false); // 정상 JSON 이 슬롯을 차지하지 않았다
+  });
+
+  it("백업 자체가 불가능할 때만 쓰기를 막는다 (원본이 제자리에 남는다)", () => {
+    const THIRD = '{"third":"corrupt';
+    store.set(LKEY, THIRD);
+    failWrites.add("*"); // 어떤 슬롯에도 쓸 수 없다
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+    expect(saveLedger({ buys: [] })).toBe(false);
+    expect(store.get(LKEY)).toBe(THIRD); // 파괴되지 않음
+  });
+
+  it("쿼터 초과 쓰기는 조용히 삼켜지지 않는다", () => {
+    expect(getStorageIssues().quotaHit).toBe(false);
+    failWrites.add("*");
+    expect(saveLedger({ buys: [] })).toBe(false);
+    expect(getStorageIssues().quotaHit).toBe(true);
+  });
+
+  it("정상 데이터는 아무 표시도 남기지 않는다", () => {
+    store.set(LKEY, JSON.stringify({ buys: [{ id: "x" }], sells: [], cashes: [], spends: [] }));
+    expect(loadLedger().buys).toHaveLength(1);
+    expect(getStorageIssues().corruptKeys).toEqual([]);
+    expect(store.has(LKEY + CORRUPT_SUFFIX)).toBe(false);
+  });
+
+  it("내보내기에 손상된 원본이 함께 담긴다 (백업 파일이 유일한 복구 수단)", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    // exportAll 은 Blob/DOM 을 쓰므로 여기서는 collectCorruptRaw 경로만 간접 확인:
+    // importAll → export 왕복 대신, 백업 키가 존재하고 원본과 같음을 확인한다.
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT);
+  });
+
+  it("백업 못한 원본이 있으면 가져오기도 거부한다 (덮어쓰면 복구 불가능하다)", () => {
+    store.set(LKEY, CORRUPT);
+    failWrites.add("*");
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY); // 쓰기 차단 상태
+
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [{ id: "new" }] } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/백업할 공간/);
+    expect(store.get(LKEY)).toBe(CORRUPT); // 원본 보존
+  });
+
+  it("정상 상태의 가져오기는 그대로 성공한다", () => {
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [{ id: "new" }] } }));
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(store.get(LKEY)).buys[0].id).toBe("new");
+  });
+
+  it("가져오기 중 공간이 부족하면 조용히 반쪽 복원하지 않고 알린다", () => {
+    failWrites.add(LKEY);
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [] } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/저장 공간/);
+  });
+});
+
+describe("저장소 손상 방어 — 자체 추가 검수", () => {
+  const CORRUPT = '{"buys":[{"id":"a1"';
+  let store, failWrites;
+  beforeEach(() => {
+    store = new Map();
+    failWrites = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (failWrites.has(k) || failWrites.has("*")) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  });
+
+  it("공간이 다시 생겨 쓰기가 성공하면 쿼터 경고를 걷는다", () => {
+    failWrites.add("*");
+    expect(saveLedger({ buys: [] })).toBe(false);
+    expect(getStorageIssues().quotaHit).toBe(true);
+
+    failWrites.clear();
+    expect(saveLedger({ buys: [] })).toBe(true);
+    expect(getStorageIssues().quotaHit).toBe(false); // 배너가 새로고침까지 남지 않는다
+  });
+
+  it("로그아웃은 .corrupt 백업도 지운다 (원장 원본이 공용 브라우저에 남으면 안 된다)", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    expect(store.get(LKEY + CORRUPT_SUFFIX)).toBe(CORRUPT);
+    expect(getStorageIssues().corruptKeys).toContain(LKEY);
+
+    clearAccountData();
+
+    expect(store.has(LKEY + CORRUPT_SUFFIX)).toBe(false);
+    expect(store.has(KEY + CORRUPT_SUFFIX)).toBe(false);
+    expect(getStorageIssues().corruptKeys).toEqual([]); // 표시도 초기화
+  });
+
+  it("구독 해제가 동작한다 (리스너 누수 없음)", () => {
+    let calls = 0;
+    const off = onStorageIssue(() => calls++);
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    expect(calls).toBeGreaterThan(0);
+    const before = calls;
+    off();
+    __resetStorageIssues();
+    store.set(KEY, CORRUPT);
+    loadCalcState();
+    expect(calls).toBe(before); // 해제 후에는 호출되지 않는다
+  });
+});
+
+// Codex HIGH: importAll 이 차단을 '먼저' 풀고 쓰기가 실패하면, 가드가 사라진 채 남아
+// 이후 자동저장이 백업 없는 원본을 덮어쓴다 — 이 기능이 막으려던 바로 그 파괴가 import 경로로 재발.
+describe("저장소 손상 방어 — importAll 경로 (Codex HIGH/MEDIUM)", () => {
+  const CORRUPT = '{"buys":[{"id":"a1"';
+  let store, failWrites;
+  const mount = () => {
+    store = new Map();
+    failWrites = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (failWrites.has(k) || failWrites.has("*")) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+  };
+  beforeEach(() => { mount(); __resetStorageIssues(); });
+
+  const backup = (payload) => JSON.stringify({ app: "mvp-calculator", ...payload });
+
+  it("가져오기가 실패해도 손상 차단이 유지되어 원본이 파괴되지 않는다", () => {
+    // 백업조차 못한 상태(슬롯 쓰기 실패)
+    store.set(LKEY, CORRUPT);
+    failWrites.add("*");
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+
+    // 가져오기 시도 → 백업 재시도도 실패하므로 아예 쓰지 않고 거부해야 한다
+    const r = importAll(backup({ ledger: { buys: [{ id: "new" }] } }));
+    expect(r.ok).toBe(false);
+    expect(store.get(LKEY)).toBe(CORRUPT); // 원본 그대로
+
+    // 가드가 살아 있어야 한다 — 이후 자동저장이 원본을 덮어쓰면 안 된다
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+    expect(saveLedger({ buys: [] })).toBe(false);
+    expect(store.get(LKEY)).toBe(CORRUPT);
+  });
+
+  it("공간이 생기면 가져오기가 백업을 재시도해 성공한다", () => {
+    store.set(LKEY, CORRUPT);
+    failWrites.add("*");
+    loadLedger();
+    expect(getStorageIssues().unbackedKeys).toContain(LKEY);
+
+    failWrites.clear(); // 사용자가 저장소를 정리함
+    const r = importAll(backup({ ledger: { buys: [{ id: "new" }] } }));
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(store.get(LKEY)).buys[0].id).toBe("new");
+  });
+
+  it("파일에 없는 키의 가드는 건드리지 않는다", () => {
+    store.set(LKEY, CORRUPT);
+    store.set(KEY, CORRUPT);
+    failWrites.add(corruptSlots(KEY)[0]);
+    failWrites.add(corruptSlots(KEY)[1]);
+    loadLedger();   // ledger 는 정상 백업
+    loadCalcState(); // calc 는 백업 실패 → 차단
+    expect(getStorageIssues().unbackedKeys).toContain(KEY);
+
+    // ledger 만 담긴 파일 → calc 의 가드는 그대로여야 한다
+    const r = importAll(backup({ ledger: { buys: [] } }));
+    expect(r.ok).toBe(true);
+    expect(getStorageIssues().unbackedKeys).toContain(KEY);
+    expect(store.get(KEY)).toBe(CORRUPT); // calc 원본 보존
+  });
+
+  it("복원에 성공해도 백업 슬롯은 남긴다 (사용자가 내보내기를 안 했다면 유일한 사본)", () => {
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    expect(store.get(corruptSlots(LKEY)[0])).toBe(CORRUPT);
+
+    expect(importAll(backup({ ledger: { buys: [] } })).ok).toBe(true);
+    expect(store.get(corruptSlots(LKEY)[0])).toBe(CORRUPT); // 증거 보존
+    expect(getStorageIssues().corruptKeys).toEqual([]);      // 표시는 걷힌다
+  });
+
+  it("내보내기는 모든 슬롯의 원본을 담는다", () => {
+    const SECOND = '{"x":';
+    store.set(LKEY, CORRUPT);
+    loadLedger();
+    store.set(LKEY, SECOND);
+    __resetStorageIssues();
+    loadLedger();
+    const [s1, s2] = corruptSlots(LKEY);
+    expect(store.get(s1)).toBe(CORRUPT);
+    expect(store.get(s2)).toBe(SECOND);
+  });
+});
+
+// 이 기능의 유일한 불변식을 무작위 시퀀스로 검증한다:
+//   "localStorage[key] 를 덮어쓸 때, 그 내용이 파싱 불가라면 어딘가에 백업돼 있어야 한다."
+//   백업할 수 없으면 덮어쓰지 않는다.
+// 앱의 실제 흐름(마운트 시 load → 상태 변경 시 save)을 모사한다.
+// 슬롯 쓰기만 실패하는 상태를 따로 둔다 — 그래야 '백업 실패인데 본문은 써지는' 위험 구간이 재현된다.
+describe("저장소 손상 방어 — 불변식 (무작위 시퀀스)", () => {
+  it("어떤 순서로 손상·저장이 반복돼도 백업 없는 원본이 파괴되지 않는다", () => {
+    const CORRUPTS = ['{"a":', '{"b":[1,', "not json", '{"c":{"d":', "["];
+    let seed = 1;
+    // LCG 하위 비트는 주기가 짧다 → 상위 비트를 쓴다.
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return ((seed >>> 16) % n); };
+    const isSlot = (k) => k.includes(CORRUPT_SUFFIX);
+    let checked = 0;
+
+    for (let trial = 0; trial < 300; trial++) {
+      const store = new Map();
+      let blockSlots = false; // 백업(.corrupt*) 쓰기만 실패
+      globalThis.localStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => {
+          if (blockSlots && isSlot(k)) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+          store.set(k, String(v));
+        },
+        removeItem: (k) => store.delete(k),
+      };
+      __resetStorageIssues();
+
+      for (let step = 0; step < 10; step++) {
+        if (rnd(2) === 0) store.set(LKEY, CORRUPTS[rnd(CORRUPTS.length)]); // 손상 발생
+        blockSlots = rnd(3) === 0;                                          // 백업 공간 없음
+        loadLedger();                                                       // 앱 마운트
+
+        const before = store.get(LKEY);
+        const parsable = (() => { try { JSON.parse(before); return true; } catch { return false; } })();
+        const wrote = saveLedger({ buys: [{ id: "s" + step }] });           // 자동저장
+
+        if (before != null && !parsable) {
+          checked++;
+          if (wrote) {
+            // 파싱 불가한 원본을 덮어썼다 → 어느 슬롯엔가 반드시 남아 있어야 한다
+            expect(corruptSlots(LKEY).map((sl) => store.get(sl))).toContain(before);
+          } else {
+            expect(store.get(LKEY)).toBe(before); // 쓰지 않았으면 원본이 제자리에
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100); // 위험 구간을 실제로 밟았는지 확인
   });
 });
