@@ -131,8 +131,10 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
 
   // 거래의 날짜를 다른 날로 바꾸면 그 행이 이 목록에서 빠진다 → 포커스가 있던 입력이 사라진다.
   // 포커스를 살아 있는 조상(이 컨테이너)으로 되돌린다. 안 그러면 body 로 떨어진다.
+  // 개수만 보면 '같은 개수의 다른 행으로 교체'(동기화 병합 등)를 놓친다 → 행 id 조합까지 본다.
   const wrapRef = useRef(null);
-  useFocusRescue(wrapRef, [cnt, date, buys.length, sells.length, cashes.length, spends.length]);
+  const rowSig = [buys, sells, cashes, spends].map((rs) => rs.map((r) => r.id).join(",")).join("|");
+  useFocusRescue(wrapRef, [date, rowSig]);
 
   return (
     <div style={{ marginTop: 16 }} ref={wrapRef} tabIndex={-1}>

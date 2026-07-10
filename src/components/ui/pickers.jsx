@@ -37,6 +37,9 @@ export function ItemCombo({ value, onChange, options, width, placeholder }) {
       if (e.key === "ArrowDown") { e.preventDefault(); setActive(0); openPop(); }
       return;
     }
+    // 포커스가 입력에 머무는 구조라 팝오버의 Tab 처리가 걸리지 않는다 → 여기서 닫는다.
+    // (닫지 않으면 사용자는 다음 컨트롤로 갔는데 목록이 화면에 떠 있다.)
+    if (e.key === "Tab") { close(); return; }
     if (!opts.length) return;
     // 활성 옵션은 순환한다(포커스가 아니라 인덱스만 움직이므로). 아무것도 안 고른 상태(-1)에서 ↑ 는 마지막 옵션.
     const next = cycleIndex(e.key, active, opts.length);

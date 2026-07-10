@@ -125,6 +125,16 @@ describe("ItemCombo 키보드 (포커스는 입력에 머문다)", () => {
     expect(document.getElementById(id).textContent).toContain("가");
   });
 
+  // Codex: 포커스가 입력에 머무는 구조라 팝오버의 Tab 처리가 걸리지 않아 목록이 열린 채 남았다.
+  it("Tab 으로 떠나면 목록이 닫힌다", () => {
+    mount(<ItemCombo value="" onChange={() => {}} options={opts} />);
+    const inp = container.querySelector(".icombo-inp");
+    focus(inp);
+    expect(document.querySelector(".icombo-pop")).toBeTruthy();
+    key(inp, "Tab");
+    expect(document.querySelector(".icombo-pop")).toBeNull();
+  });
+
   it("옵션이 없으면 방향키가 던지지 않는다", () => {
     mount(<ItemCombo value="" onChange={() => {}} options={[]} />);
     const inp = container.querySelector(".icombo-inp");
