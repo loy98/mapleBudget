@@ -1,6 +1,7 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
 import { clearAccountData, mergeDeleted, isDeleted } from "./storage.js";
 import { LEDGER_BUCKETS } from "./constants.js";
+import { hasSnapshot } from "./util.js";
 
 export { cloudEnabled };
 
@@ -173,7 +174,9 @@ const SNAPSHOT_KEYS = ["_fee", "_effD"];
 function keepSnapshots(prev, next) {
   let out = next;
   SNAPSHOT_KEYS.forEach((k) => {
-    if (next[k] == null && prev[k] != null) out = { ...out, [k]: prev[k] };
+    // `next[k] == null` 이 아니라 hasSnapshot 으로 판정한다. malformed 값(문자열·NaN·범위 밖)은
+    // '존재'하지만 계산부가 거부하고 현재 설정으로 폴백하므로, 살아 있는 prev 스냅샷을 덮으면 요율이 소실된다.
+    if (!hasSnapshot(next[k]) && hasSnapshot(prev[k])) out = { ...out, [k]: prev[k] };
   });
   return out;
 }

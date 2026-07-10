@@ -104,15 +104,27 @@ function resolveOne(cfg) {
 const EPOCH = "0000-01-01";
 const isDateStr = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
-export function resolveRuleHistory(cfgRules) {
+// 오늘 날짜(zero-padded). util.js 의 todayStr 을 쓰지 않는 이유: util.js 가 constants.js 를 import 해 순환이 된다.
+const nowStr = () => {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
+
+export function resolveRuleHistory(cfgRules, today = nowStr()) {
   if (!Array.isArray(cfgRules)) return [{ effectiveFrom: EPOCH, ...resolveOne(cfgRules) }];
   const entries = cfgRules
     .filter((e) => e && typeof e === "object" && !Array.isArray(e))
     .map((e) => ({ effectiveFrom: isDateStr(e.effectiveFrom) ? e.effectiveFrom : EPOCH, ...resolveOne(e) }))
     .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : a.effectiveFrom > b.effectiveFrom ? 1 : 0));
   if (!entries.length) return [{ effectiveFrom: EPOCH, ...DEFAULT_RULES }];
-  // 가장 이른 항목은 EPOCH 로 내려 '그 이전 거래'도 규칙을 갖게 한다(빈 구간 방지).
-  entries[0] = { ...entries[0], effectiveFrom: EPOCH };
+  // 가장 이른 항목을 EPOCH 로 내려 '그 이전 거래'도 규칙을 갖게 한다(빈 구간 방지).
+  // 운영자는 이력을 자신이 아는 가장 오래된 규칙부터 쓰므로, 그게 그 이전 시기의 최선의 추정이다.
+  //
+  // 단, **이미 발효한 규칙일 때만** 내린다. 미래 발효 규칙만 있는 이력(예: [{effectiveFrom:"2030-01-01"}])을
+  // 내리면 아직 오지 않은 규칙이 지금·과거에 소급 적용된다 — '발효일 이후부터'가 무의미해진다.
+  // 그 경우 EPOCH~발효일 구간은 코드 기본값이 메운다.
+  if (entries[0].effectiveFrom <= today) entries[0] = { ...entries[0], effectiveFrom: EPOCH };
+  else entries.unshift({ effectiveFrom: EPOCH, ...DEFAULT_RULES });
   return entries;
 }
 
@@ -125,15 +137,9 @@ export function rulesAt(history, date) {
   return found;
 }
 
-// 계산기('지금')가 쓰는 규칙.
-// today 를 생략하면 오늘. 생략 시 EPOCH 로 떨어지면 이력의 '가장 이른' 규칙을 고르게 되어 위험하다.
-// (util.js 의 todayStr 을 쓰지 않는 이유: util.js 가 constants.js 를 import 해 순환이 된다.)
-const nowStr = () => {
-  const d = new Date();
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-};
+// 계산기('지금')가 쓰는 규칙. today 를 생략하면 오늘.
 export function resolveRules(cfgRules, today = nowStr()) {
-  return rulesAt(resolveRuleHistory(cfgRules), today);
+  return rulesAt(resolveRuleHistory(cfgRules, today), today);
 }
 
 export const SPLITS = [

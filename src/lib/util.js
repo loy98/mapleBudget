@@ -38,6 +38,13 @@ export function padDate(v) {
   if (!m) return v;
   return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
 }
+
+// 거래 행에 남긴 요율 스냅샷(sells._fee, buys._effD)으로 인정할 값인가.
+// 수수료·충전 할인은 0 이상 1 미만의 비율이고, 우리가 기록하는 값은 항상 number 다(JSONB 왕복에서도 number).
+// 문자열("", "0.05")은 신뢰하지 않는다 — `+""` 가 0 이라 '수수료 0%' 로 조용히 샌다.
+// null/undefined(구 데이터)뿐 아니라 malformed 값도 '없음'으로 보고 현재 설정으로 폴백한다.
+export const hasSnapshot = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1;
+
 export function curMonth() {
   const d = new Date();
   return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);

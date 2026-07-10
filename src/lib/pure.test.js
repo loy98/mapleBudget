@@ -5,9 +5,8 @@ import {
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
-import { hasSnapshot } from "../components/logtab/useLedgerDerived.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
-import { uid, estGrade, fmtD, weekStartThu, padDate } from "./util.js";
+import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot } from "./util.js";
 import { computeForecast, cumNow } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
 import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt } from "./constants.js";
@@ -1175,5 +1174,66 @@ describe("normalizeLedger 는 입력을 변형하지 않는다 (M-7)", () => {
     const out = normalizeLedger({ buys: [{ id: "b", _effD: 0.1 }], sells: [{ id: "s", _fee: 0.05 }] });
     expect(out.buys[0]._effD).toBe(0.1);
     expect(out.sells[0]._fee).toBe(0.05);
+  });
+});
+
+// ===== Codex 2차 재검수 반영 =====
+// 발효일 이력의 '가장 이른 항목을 EPOCH 로 내리는' 편의 규칙이, 미래 발효 규칙까지 소급 적용했다.
+describe("B-5 · 미래 발효 규칙은 지금 적용되지 않는다 (Codex F1)", () => {
+  const TODAY = "2026-07-10";
+
+  it("미래 발효 규칙만 있는 이력에서 '지금'은 코드 기본값을 쓴다", () => {
+    const h = resolveRuleHistory([{ effectiveFrom: "2030-01-01", mileageRate: 50, feeBase: 8 }], TODAY);
+    expect(rulesAt(h, TODAY).mileageRate).toBe(DEFAULT_RULES.mileageRate);
+    expect(rulesAt(h, TODAY).feeBase).toBe(DEFAULT_RULES.feeBase);
+    expect(resolveRules([{ effectiveFrom: "2030-01-01", mileageRate: 50 }], TODAY).mileageRate)
+      .toBe(DEFAULT_RULES.mileageRate);
+  });
+
+  it("그 규칙은 발효일이 되면 적용된다", () => {
+    const h = resolveRuleHistory([{ effectiveFrom: "2030-01-01", mileageRate: 50 }], TODAY);
+    expect(rulesAt(h, "2029-12-31").mileageRate).toBe(DEFAULT_RULES.mileageRate);
+    expect(rulesAt(h, "2030-01-01").mileageRate).toBe(50);
+  });
+
+  it("이미 발효한 가장 이른 규칙은 그 이전 거래에도 적용된다 (빈 구간 방지는 유지)", () => {
+    const h = resolveRuleHistory([{ effectiveFrom: "2025-01-01", mileageRate: 40 }], TODAY);
+    expect(rulesAt(h, "2000-01-01").mileageRate).toBe(40);
+    expect(rulesAt(h, undefined).mileageRate).toBe(40);
+  });
+
+  it("과거·미래가 섞여 있으면 과거분만 EPOCH 로 내려간다", () => {
+    const h = resolveRuleHistory(
+      [{ effectiveFrom: "2025-01-01", mileageRate: 40 }, { effectiveFrom: "2030-01-01", mileageRate: 50 }],
+      TODAY
+    );
+    expect(rulesAt(h, "2000-01-01").mileageRate).toBe(40);
+    expect(rulesAt(h, TODAY).mileageRate).toBe(40);
+    expect(rulesAt(h, "2030-06-01").mileageRate).toBe(50);
+  });
+});
+
+// malformed 스냅샷은 '값이 있다'가 아니라 '스냅샷 없음'이다 → 살아 있는 스냅샷을 덮어써선 안 된다.
+describe("B-5 · malformed 스냅샷이 유효한 스냅샷을 덮지 않는다 (Codex F2)", () => {
+  const row = (extra) => ({ id: "s", date: "2026-06-01", qty: 1, meso: 10, ...extra });
+
+  it("클라우드 행의 _fee 가 malformed 면 로컬의 유효한 스냅샷을 지킨다", () => {
+    const out = mergeLedger({ sells: [row({ _fee: 0.05 })] }, { sells: [row({ _fee: "bad" })] });
+    expect(out.sells[0]._fee).toBe(0.05);
+  });
+
+  it("_effD 도 마찬가지 — 범위를 벗어난 값에 덮이지 않는다", () => {
+    const b = (extra) => ({ id: "b", date: "2026-06-01", qty: 1, price: 100, ...extra });
+    expect(mergeLedger({ buys: [b({ _effD: 0.1 })] }, { buys: [b({ _effD: 1.5 })] }).buys[0]._effD).toBe(0.1);
+    expect(mergeLedger({ buys: [b({ _effD: 0.1 })] }, { buys: [b({ _effD: NaN })] }).buys[0]._effD).toBe(0.1);
+  });
+
+  it("유효한 0 스냅샷은 '없음'이 아니다 — 클라우드의 0 이 로컬 0.05 를 이긴다", () => {
+    expect(mergeLedger({ sells: [row({ _fee: 0.05 })] }, { sells: [row({ _fee: 0 })] }).sells[0]._fee).toBe(0);
+  });
+
+  it("양쪽 다 malformed 면 폴백 대상으로 남는다 (hasSnapshot 이 거부)", () => {
+    const out = mergeLedger({ sells: [row({ _fee: "x" })] }, { sells: [row({ _fee: "bad" })] });
+    expect(hasSnapshot(out.sells[0]._fee)).toBe(false);
   });
 });

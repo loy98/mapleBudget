@@ -86,7 +86,8 @@ create trigger app_config_touch
 --       {"effectiveFrom":"2026-03-01", "feeMvp":3, "feeBase":5, "mileageRate":30, ...}
 --     ]
 --   거래는 그 날짜에 유효한 규칙으로 계산된다(src/lib/constants.js rulesAt).
---   가장 이른 항목은 자동으로 EPOCH 로 내려가므로 그 이전 거래도 규칙을 갖는다.
+--   가장 이른 항목이 **이미 발효했다면** 그 이전 거래에도 적용된다(빈 구간 없음).
+--   아직 발효하지 않은 규칙(미래 발효일)은 지금·과거에 소급되지 않는다 → 그 구간은 코드 기본값.
 --   각 항목은 독립적으로 검증되며 누락 키는 코드 기본값으로 채워진다.
 insert into public.app_config (id, config) values (1, '{
   "mesoRate": 3000, "giftRatio": 8000, "marketRatio": 7500, "force": [],

@@ -1,13 +1,7 @@
 import { useMemo } from "react";
 import { WINDOW_WEEKS, rulesAt } from "../../lib/constants.js";
-import { mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu } from "../../lib/util.js";
+import { mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, hasSnapshot } from "../../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, mesoWeeks, weeklyItems, itemSummary } from "../../lib/ledger.js";
-
-// 요율 스냅샷으로 인정할 값인가. 수수료·충전 할인은 0 이상 1 미만의 비율이다.
-// 우리가 기록하는 값은 항상 number 이고 JSONB 왕복에서도 number 로 남는다 →
-// 문자열("", "0.05")은 신뢰하지 않는다. `+""` 가 0 이라 '수수료 0%' 로 새는 것을 막는다.
-// null/undefined(구 데이터)뿐 아니라 malformed 값도 '없음'으로 보고 현재 설정으로 폴백한다.
-export const hasSnapshot = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1;
 
 // LogTab 의 파생값 전부를 한 곳에 모은다. 원장·계산기 값에서 나오는 순수 파생이라
 // 렌더 로직과 섞여 있을 이유가 없고, 섞여 있으면 useMemo 의존성 실수가 눈에 띄지 않는다.
