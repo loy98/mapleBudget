@@ -303,7 +303,8 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   <button className="btn sm" onClick={() => onAddMyItems([{ id: uid(), name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
                   <button className="btn ghost sm" onClick={addTableRowsToList}>아래 표를 목록에 추가</button>
                   {/* 기본 목록 복원 = '지금 목록을 기본값으로 바꾼다'. 지운 기본 아이템의 삭제 표식이 남아 있으면
-                      복원해도 병합에서 다시 빠지므로, 표식까지 걷어 주는 App 핸들러가 필요하다. */}
+                      복원해도 병합에서 다시 빠진다. 표식은 합집합이라 지울 수 없으므로, App 핸들러가
+                      표식보다 **뒤인 at** 을 찍어 복원이 삭제를 이기게 한다. */}
                   <button className="btn ghost sm" onClick={onRestoreDefaultItems}>기본 목록 복원</button>
                 </div>
               </div>
