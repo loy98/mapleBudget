@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveIndex } from "./ui/useRovingFocus.js";
+import { moveIndex, cycleIndex } from "./ui/useRovingFocus.js";
 
 // 커스텀 위젯(달력 셀·주차 목록·연월 격자)이 div onClick 이라 키보드로 조작할 수 없었다.
 // 모든 셀에 tabIndex=0 을 주면 달력 하나를 지나는 데 Tab 을 42번 눌러야 한다 → roving tabindex.
@@ -53,5 +53,36 @@ describe("moveIndex — 격자 방향키 이동", () => {
     expect(moveIndex("ArrowRight", 0, 0, 7)).toBe(null);
     expect(moveIndex("ArrowRight", 0, NaN, 7)).toBe(null);
     expect(moveIndex("ArrowRight", NaN, 10, 7)).toBe(null);
+  });
+});
+
+// ItemCombo 는 자유 입력이라 포커스가 입력에 머문다 → 활성 '인덱스'만 움직이고, 목록 끝에서 순환한다.
+// Codex: `(i - 1 + count) % count` 는 아무것도 안 고른 상태(i=-1)에서 마지막이 아니라
+// 뒤에서 두 번째를 고른다(오프바이원).
+describe("cycleIndex — 콤보 활성 옵션 (순환)", () => {
+  it("아무것도 안 고른 상태에서 ↓ 는 첫 옵션, ↑ 는 마지막 옵션", () => {
+    expect(cycleIndex("ArrowDown", -1, 3)).toBe(0);
+    expect(cycleIndex("ArrowUp", -1, 3)).toBe(2); // 옛 식은 1 을 줬다
+  });
+
+  it("끝에서 순환한다", () => {
+    expect(cycleIndex("ArrowDown", 2, 3)).toBe(0);
+    expect(cycleIndex("ArrowUp", 0, 3)).toBe(2);
+  });
+
+  it("가운데서는 한 칸씩", () => {
+    expect(cycleIndex("ArrowDown", 0, 3)).toBe(1);
+    expect(cycleIndex("ArrowUp", 2, 3)).toBe(1);
+  });
+
+  it("옵션이 하나면 제자리", () => {
+    expect(cycleIndex("ArrowDown", 0, 1)).toBe(0);
+    expect(cycleIndex("ArrowUp", -1, 1)).toBe(0);
+  });
+
+  it("빈 목록·모르는 키는 소비하지 않는다", () => {
+    expect(cycleIndex("ArrowDown", -1, 0)).toBe(null);
+    expect(cycleIndex("Enter", 0, 3)).toBe(null);
+    expect(cycleIndex("Tab", 0, 3)).toBe(null);
   });
 });

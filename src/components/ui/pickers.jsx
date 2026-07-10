@@ -1,9 +1,9 @@
-import { useState, useRef, useId } from "react";
+import { useState, useRef, useId, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { fmtD, todayStr, addDays, nowD, dateOf } from "../../lib/util.js";
 import { WD_SUN } from "../../lib/constants.js";
 import { usePopover, rectBelow } from "./usePopover.js";
-import { useRovingFocus } from "./useRovingFocus.js";
+import { useRovingFocus, cycleIndex } from "./useRovingFocus.js";
 import { IconView } from "./IconView.jsx";
 
 // 네 피커는 모두 같은 팝오버 동작을 쓴다(usePopover): pointerdown 바깥 클릭 + Esc 닫기.
@@ -28,15 +28,19 @@ export function ItemCombo({ value, onChange, options, width, placeholder }) {
     setOpen(true);
   };
   const pick = (o) => { onChange(o.name); setActive(-1); close(); };
+  // 입력을 타이핑해 목록이 줄면 active 가 범위를 벗어난다 → opts[active] 가 undefined.
+  useEffect(() => { if (active >= opts.length) setActive(opts.length ? opts.length - 1 : -1); }, [opts.length, active]);
 
   const onKeyDown = (e) => {
     if (!open) {
       if (e.key === "ArrowDown") { e.preventDefault(); setActive(0); openPop(); }
       return;
     }
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => (i + 1) % Math.max(1, opts.length)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => (i - 1 + opts.length) % Math.max(1, opts.length)); }
-    else if (e.key === "Enter" && active >= 0 && opts[active]) { e.preventDefault(); pick(opts[active]); }
+    if (!opts.length) return;
+    // 활성 옵션은 순환한다(포커스가 아니라 인덱스만 움직이므로). 아무것도 안 고른 상태(-1)에서 ↑ 는 마지막 옵션.
+    const next = cycleIndex(e.key, active, opts.length);
+    if (next != null) { e.preventDefault(); setActive(next); return; }
+    if (e.key === "Enter" && active >= 0 && opts[active]) { e.preventDefault(); pick(opts[active]); }
     // Esc 는 usePopover 가 캡처 단계에서 닫는다.
   };
 
@@ -91,6 +95,8 @@ export function WeekPicker({ value, onChange, weeks }) {
   const activate = (i) => { if (weeks[i]) { onChange(weeks[i].key); close(); } };
   // 1열 목록 — 위/아래로 이동, Enter/Space 로 선택.
   const roving = useRovingFocus({ count: weeks.length, cols: 1, initial: selIdx, activate });
+  // 팝오버가 열리면 목록으로 포커스를 옮긴다. 안 그러면 포커스가 버튼에 남아 방향키가 목록에 닿지 않는다.
+  useEffect(() => { if (open) roving.focusActive(selIdx); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <button
@@ -150,6 +156,7 @@ export function DateInput({ value, onChange, width }) {
   const activate = (i) => { onChange(keys[i]); close(); };
   // 7열 격자(.dpgrid) — 좌우로 하루, 상하로 한 주.
   const roving = useRovingFocus({ count: 42, cols: 7, initial, activate });
+  useEffect(() => { if (open) roving.focusActive(initial); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cells = keys.map((k, i) => {
     const cd = addDays(gs, i);
@@ -219,6 +226,7 @@ export function YMPicker({ value, onChange, anchorLabel }) {
   const pickMonth = (i) => { onChange(year + "-" + ("0" + (i + 1)).slice(-2)); close(); };
   // 3열 격자(.ymgrid) — 좌우로 한 칸, 상하로 세 칸 이동.
   const roving = useRovingFocus({ count: 12, cols: 3, initial: Math.max(0, (selM || 1) - 1), activate: pickMonth });
+  useEffect(() => { if (open) roving.focusActive(Math.max(0, (selM || 1) - 1)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <button
