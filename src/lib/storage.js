@@ -3,6 +3,7 @@ import {
   LEDGER_BUCKETS, LEDGER_ID_FIELDS, MY_ITEM_ID_FIELDS, ITEM_TOMBSTONE_PREFIX, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX,
 } from "./constants.js";
 import { uid, padDate, todayStr, legacyRowId, rowContentKey, occurrenceCounter } from "./util.js";
+import { getRecentErrors } from "./errorLog.js";
 
 // 기존 단일 HTML 버전과 동일한 키 → 사용자 데이터 그대로 승계
 export const KEY = "mvpCalc_v4";
@@ -534,6 +535,8 @@ export function exportAll() {
     // 순간(instant)은 UTC ISO 로 남긴다. 아래 파일명의 날짜와 달리 이건 시각이지 민간 날짜가 아니다.
     exportedAt: new Date().toISOString(),
     corruptRaw: collectCorruptRaw(),
+    // 최근 클라이언트 오류. 백업 파일은 사용자가 직접 보내는 것이므로 여기 담아도 자동 전송이 아니다.
+    errors: getRecentErrors(),
     calc: readJSON(KEY),
     myItems: readJSON(ITEMS_KEY),
     ledger: readJSON(LKEY),

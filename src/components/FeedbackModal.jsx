@@ -2,6 +2,7 @@
 // 모듈 스코프 컴포넌트(리마운트로 입력 포커스 유실 방지 규칙 준수).
 import { useState } from "react";
 import { submitFeedback, cloudEnabled } from "../lib/cloud.js";
+import { getRecentErrors, formatErrorsForFeedback } from "../lib/errorLog.js";
 import { CSelect } from "./ui.jsx";
 import Modal from "./Modal.jsx";
 
@@ -18,6 +19,9 @@ export default function FeedbackModal({ onClose, session }) {
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState(session?.user?.email || "");
   const [status, setStatus] = useState("idle"); // idle | sending | sent | error
+  // 최근 오류가 있으면 첨부 여부를 묻는다. 오류는 로컬에만 쌓이고, **사용자가 켰을 때만** 전송된다.
+  const [recentErrors] = useState(getRecentErrors);
+  const [attachErrors, setAttachErrors] = useState(false);
   const [errMsg, setErrMsg] = useState("");
 
   const canSend = message.trim().length > 0 && status !== "sending";
@@ -26,7 +30,9 @@ export default function FeedbackModal({ onClose, session }) {
     if (!canSend) return;
     setStatus("sending");
     setErrMsg("");
-    const { error } = await submitFeedback({ message, category, email });
+    // 첨부는 본문 뒤에 붙인다(서버가 message 를 4000자로 자르므로 사용자 글이 먼저 온다).
+    const body = attachErrors ? message + formatErrorsForFeedback(recentErrors) : message;
+    const { error } = await submitFeedback({ message: body, category, email });
     if (error) {
       setStatus("error");
       setErrMsg(
@@ -88,6 +94,15 @@ export default function FeedbackModal({ onClose, session }) {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
+
+            {recentErrors.length > 0 && (
+              <div className="fb-field">
+                <label className="fb-check">
+                  <input type="checkbox" checked={attachErrors} onChange={(e) => setAttachErrors(e.target.checked)} />
+                  {" "}최근 오류 {Math.min(recentErrors.length, 3)}건 첨부 <span className="muted">(원인 파악에 도움이 돼요)</span>
+                </label>
+              </div>
+            )}
 
             {status === "error" && <div className="fb-err">{errMsg}</div>}
             {!cloudEnabled && (

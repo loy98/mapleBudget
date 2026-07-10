@@ -521,3 +521,7 @@ input:focus,select:focus{background:var(--panel)}
   .ring-wrap circle,.mcard,.box,.chip,.navpills a,tbody tr{transition:none!important}
   .mcard:hover{transform:none}
 }
+
+/* 피드백 모달의 오류 첨부 체크박스 */
+.fb-check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.fb-check input { margin: 0; }

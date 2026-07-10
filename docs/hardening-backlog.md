@@ -324,8 +324,15 @@ XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 
 - ~~`normalizeLedger` 가 입력 객체를 제자리 변형(mutate)~~ — ✅ 해결. 행을 얕은 복사한 뒤 정규화한다.
 - `app_config` 검증이 `name` 만 확인(`chargeMethods` 의 rate/limit, `defaultItems` 의 cash 타입·범위 미검증).
   운영자 실수로 전체 유저 계산이 오염될 수 있다. `rules` 는 이번에 `resolveRules` 로 검증됨.
-- `IconView` 가 http(s) 이면 임의 호스트 이미지를 로드(트래킹 픽셀 표면). allowlist 미완(1차 P2-2 부분 해결).
-- 에러 트래킹 부재 — 프로덕션 오류를 알 방법이 없다(`ErrorBoundary.componentDidCatch` 에 전송 지점만 마련).
+- ~~`IconView` 가 임의 호스트 이미지를 로드~~ — ✅ 해결. `ICON_HOSTS` allowlist(`maplestory.io` + 서브도메인, https 만).
+  호스트 비교는 `host === h || host.endsWith("." + h)` — `endsWith(h)` 만 쓰면 `evil-maplestory.io` 가 통과한다.
+  비신뢰 URL 은 **아무것도 렌더하지 않는다**(긴 URL 문자열이 화면에 찍히지 않게).
+  `public/_headers` 의 CSP `img-src` 도 같은 목록으로 좁혀 브라우저가 한 번 더 막는다.
+- ~~에러 트래킹 부재~~ — ✅ 해결(로컬 기록 방식). `lib/errorLog.js` 가 최근 10건을 localStorage 에 남긴다.
+  **외부 트래킹 서비스를 붙이지 않았다** — 새 서드파티 엔드포인트는 CSP 를 열어야 하고 사용자 동의 없이
+  오류 데이터를 내보내게 된다. 대신 백업 내보내기에 포함하고, 피드백 모달에서 **사용자가 체크했을 때만** 첨부한다.
+  `ErrorBoundary`(렌더 오류) + `window.error`/`unhandledrejection`(핸들러·async)까지 담는다.
+  `recordError` 는 절대 던지지 않는다 — 기록하다 실패하면 ErrorBoundary 가 다시 돌아 무한 루프가 된다.
 - ~~`mileageRate` 상한 미검증~~ — ✅ 해결. 규칙으로 이동 + `resolveRules` 가 100 이상 거부.
 - ~~`manW` 만 `isFinite` 가드 없음~~, ~~`won(-0.4)` → `"-0원"`~~ — ✅ 해결. 포맷 함수 전체에 -0·무한대 가드.
   (`Math.round(-0.4)` 는 `-0`, `(-0.001).toFixed(2)` 는 `"-0.00"` 이다 — 화면엔 오작동으로 보인다.)

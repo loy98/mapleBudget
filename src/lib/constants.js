@@ -31,6 +31,24 @@ export const DEFAULT_ITEMS = [
   { name: "뷰티 쿠폰", cash: 4900, mAllowed: true, icon: "💅" },
 ];
 
+// ===== 아이콘 이미지 호스트 allowlist (B-8) =====
+// 아이콘 URL 은 클라우드로 동기화되는 **사용자 입력**이다. 임의 호스트를 허용하면
+// 트래킹 픽셀·콘텐츠 스푸핑 표면이 된다(스크립트 실행은 아니지만 요청은 나간다).
+// 신뢰 호스트만 <img> 로 로드하고, 나머지는 렌더하지 않는다.
+// `public/_headers` 의 CSP `img-src` 도 같은 목록으로 좁혀 브라우저가 한 번 더 막는다.
+export const ICON_HOSTS = ["maplestory.io"];
+
+// https 만. 정확히 그 호스트이거나 그 호스트의 서브도메인이어야 한다
+// (`evil-maplestory.io` 나 `maplestory.io.evil.com` 이 통과하면 안 된다).
+export function isAllowedIconUrl(url) {
+  if (typeof url !== "string" || !url) return false;
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  if (u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase();
+  return ICON_HOSTS.some((h) => host === h || host.endsWith("." + h));
+}
+
 export const MILEAGE_ACCRUAL = 0.05;
 
 // MVP 등급은 '최근 13주 누적 넥슨캐시 사용액' 기준. 롤링 창의 길이(주).

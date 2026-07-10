@@ -1,5 +1,6 @@
 import React from "react";
 import { exportAll } from "../lib/storage.js";
+import { recordError } from "../lib/errorLog.js";
 
 // 렌더 중 예외가 하나만 터져도 React 18은 트리 전체를 언마운트한다 → 백지 화면.
 // 공개 서비스에서는 사용자가 그 상태에서 할 수 있는 일이 아무것도 없으므로,
@@ -17,7 +18,9 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // 에러 트래킹 도입 시 이 지점에서 전송한다(현재는 콘솔만 — 프로덕션 오류를 알 방법이 없다는 한계).
+    // 로컬에 남긴다. 외부로 자동 전송하지 않는다 — 사용자가 백업 내보내기나 피드백에 스스로 첨부한다.
+    // recordError 는 절대 던지지 않는다(기록하다 실패하면 이 핸들러가 다시 돌아 무한 루프가 된다).
+    recordError(error, "render");
     console.error("[fatal] 렌더 오류", error, info?.componentStack);
   }
 
