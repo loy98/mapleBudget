@@ -157,6 +157,9 @@ export function withRowKeys(arr) {
 }
 // 원장 4개 버킷은 반드시 배열이어야 한다. 아니면 빈 배열로 강등(데이터 없음 < 앱 크래시).
 const asArray = (v) => (Array.isArray(v) ? v : []);
+// 배열은 객체가 아니다. `typeof [] === "object"` 라 순진하게 걸러내면 배열 행이 통과해
+// `{"0":1,"1":2,"id":"..."}` 같은 쓰레기 행으로 저장된다.
+const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 export function parseCalcState(d) {
   if (!d || typeof d !== "object" || Array.isArray(d)) {
     return { settings: { ...DEFAULT_SETTINGS }, charges: withRowKeys(DEFAULT_CHARGES), items: withRowKeys(DEFAULT_CALC_ITEMS) };
@@ -292,8 +295,8 @@ export function canonicalizeRows(bucket, rows) {
   const fields = LEDGER_ID_FIELDS[bucket];
   const nth = occurrenceCounter();
   return asArray(rows)
-    // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
-    .filter((x) => x && typeof x === "object")
+    // 원소가 객체가 아니면(문자열·null·배열 등) 뒤따르는 x.id 접근이 던지거나 쓰레기 행이 된다 → 걸러낸다.
+    .filter(isPlainObject)
     .map((x) => {
       const row = { ...x };
       if (row.date != null) row.date = padDate(row.date);
@@ -462,17 +465,24 @@ export function exportAll() {
 //  · **경고(warnings)** — 복원은 하되 조용히 넘어가면 안 되는 사실(버려진 행, 집계에서 빠질 날짜).
 const BACKUP_VERSION = 1;
 const CAL_MODES = ["month", "mvp"];
-const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 // 주차 집계·규칙 선택이 전부 사전식 문자열 비교다 → 이 형태가 아니면 어느 주에도 잡히지 않는다.
-const isValidDate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+// 형태만 보면 "2026-99-99" 나 "2026-02-30" 같은 **달력에 없는 날짜**를 통과시킨다. 그런 행은
+// 어떤 주에도 잡히지 않으면서 경고도 못 받는다 → 실제 날짜인지 왕복 검사한다.
+const isValidDate = (v) => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [y, m, d] = v.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+};
 
 export function validateBackup(data) {
   if (!isPlainObject(data) || data.app !== "mvp-calculator") {
     return { ok: false, error: "이 앱의 백업 파일이 아닙니다." };
   }
-  // version 이 없는 파일은 초기 내보내기(v1)로 본다. 미래 버전은 형태를 알 수 없으므로 거절한다 —
+  // version 키가 아예 없는 파일은 초기 내보내기(v1)로 본다. 하지만 `"version": null` 처럼 값이 있는데
+  // 정수가 아니면 거절한다 — 형태를 모르는 파일이다. 미래 버전도 거절한다:
   // 모르는 형태를 '최선을 다해' 쓰면 조용히 데이터를 잃는다.
-  const version = data.version == null ? 1 : data.version;
+  const version = data.version === undefined ? 1 : data.version;
   if (!Number.isInteger(version) || version < 1) {
     return { ok: false, error: "백업 파일의 버전 정보가 올바르지 않습니다." };
   }
@@ -551,25 +561,49 @@ export function importAll(text) {
 
   // 파일 내용을 그대로 쓰지 않고 **정규 형태로 바꿔서** 쓴다.
   // 그대로 쓰면 형태가 어긋난 값이 저장소에 남고, 다음 로드에서 조용히 기본값으로 떨어진다.
-  const wrote = [];
+  const writes = [];
   if (data.calc) {
     const { settings, charges, items } = parseCalcState(data.calc);
-    wrote.push(writeJSON(KEY, serializeCalcState(settings, charges, items)));
+    writes.push([KEY, serializeCalcState(settings, charges, items)]);
   }
   // malformed 원소는 걸러 낸다(위에서 개수를 경고로 알렸다). IconView 가 문자열 아닌 icon 에 크래시한다.
-  if (data.myItems) wrote.push(writeJSON(ITEMS_KEY, data.myItems.filter((x) => isPlainObject(x) && typeof x.name === "string")));
+  if (data.myItems) writes.push([ITEMS_KEY, data.myItems.filter((x) => isPlainObject(x) && typeof x.name === "string")]);
   // 원장은 검증·정규화해서 쓴다. 파일의 tombstone 은 그대로 클라우드로 전파되어 거래를 지우므로
   // (그게 삭제 전파의 정상 동작이다) 최소한 malformed·미래 시각·만료 표식은 걸러내야 한다.
   // now 를 넘겨 미래 시각을 clamp: 조작된 백업이 '영원히 만료되지 않는' 표식으로 남의 거래를 계속 지우는 것을 막는다.
   // 가져오기는 서버와 무관하므로 만료 기준·clamp 상한이 모두 '지금'이다.
-  if (data.ledger) { const t = Date.now(); wrote.push(writeJSON(LKEY, normalizeLedger(data.ledger, t, t))); }
+  if (data.ledger) { const t = Date.now(); writes.push([LKEY, normalizeLedger(data.ledger, t, t)]); }
+
+  // 복원은 **전부 아니면 전무**여야 한다. 순서대로 쓰다가 뒤쪽에서 쿼터로 실패하면,
+  // 앞쪽 키는 이미 새 값으로 덮인 채 "복원하지 못했습니다"를 돌려주게 된다 —
+  // 사용자는 아무 일도 없었다고 믿지만 계산기 설정은 바뀌어 있다.
+  // 그래서 쓰기 전에 원본 문자열을 잡아 두고, 하나라도 실패하면 되돌린다.
+  const prior = new Map();
+  writes.forEach(([k]) => { try { prior.set(k, localStorage.getItem(k)); } catch { prior.set(k, null); } });
+  const restore = (k) => {
+    const raw = prior.get(k);
+    try {
+      if (raw == null) localStorage.removeItem(k);
+      else localStorage.setItem(k, raw);
+      return true;
+    } catch { return false; }
+  };
+
+  const done = [];
+  for (const [k, val] of writes) {
+    if (writeJSON(k, val)) { done.push(k); continue; }
+    // 이 경우 손상 표시는 그대로 둔다 — 원본은 여전히 백업본에만 있다.
+    const rolledBack = done.every(restore);
+    return {
+      ok: false,
+      error: rolledBack
+        ? "저장 공간이 부족해 복원하지 못했습니다. 브라우저 저장소를 비운 뒤 다시 시도해 주세요."
+        : "저장 공간이 부족해 복원에 실패했고, 일부 데이터를 되돌리지 못했습니다. 브라우저 저장소를 비운 뒤 백업 파일로 다시 복원해 주세요.",
+    };
+  }
+  // JSON 키를 모두 쓴 뒤에만 부수적인 설정을 건드린다(실패 시 되돌릴 것이 없도록).
   // 아는 값만 쓴다. 임의 문자열을 넣으면 달력이 어느 모드도 아닌 상태로 렌더된다.
   if (CAL_MODES.includes(data.calMode)) saveCalMode(data.calMode);
-  // 쓰기가 하나라도 실패했으면(공간 부족 등) 복원이 조용히 반쪽 나지 않게 알린다.
-  // 이 경우 손상 표시는 그대로 둔다 — 원본은 여전히 백업본에만 있다.
-  if (wrote.some((ok) => ok === false)) {
-    return { ok: false, error: "저장 공간이 부족해 복원하지 못했습니다. 브라우저 저장소를 비운 뒤 다시 시도해 주세요." };
-  }
   // 전부 성공했다 = 사용자가 이 키들을 의도적으로 복원했다 → 손상 표시를 걷는다.
   // 백업 슬롯(.corrupt)은 **남긴다**. 슬롯이 차도 최근 슬롯을 밀어내므로 다음 손상 백업을 막지 않고,
   // 사용자가 내보내기를 하지 않았다면 이게 복원 이전 원본의 유일한 사본이다. 지우는 쪽이 더 파괴적이다.

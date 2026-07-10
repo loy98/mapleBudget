@@ -223,6 +223,17 @@ UTC-8 사용자가 수요일 오후에 열면 KST 로는 이미 목요일(새 �
 `myItems` 는 malformed 원소 제거, `calMode` 는 아는 값만, `ledger` 는 기존대로 `normalizeLedger`.
 `version` 은 `BACKUP_VERSION` 상수로 `exportAll` 과 묶었다.
 
+복원은 **전부 아니면 전무**다. 순서대로 쓰다 뒤쪽이 쿼터로 실패하면 앞 키는 이미 덮인 채
+"복원하지 못했습니다"를 돌려줬다(사용자는 아무 일도 없었다고 믿는다). 이제 쓰기 전에 원본 문자열을
+잡아 두고 실패 시 되돌린다. 되돌리기까지 실패하면 그 사실을 문구로 알린다.
+
+Codex 재검수 4건 반영:
+- 검증은 배열 행을 '제외했다'고 경고하는데 `canonicalizeRows` 의 `typeof x === "object"` 가 배열을 통과시켜
+  `{"0":1,"1":2,id:…}` 로 저장했다 → `isPlainObject` 로 통일(경고와 동작의 일치).
+- `isValidDate` 가 정규식만 봐서 `2026-99-99`·`2026-02-30` 이 경고 없이 통과했다 → 달력 왕복 검사.
+- `"version": null` 은 '버전 없음'이 아니라 형태를 모르는 파일 → 거절(`=== undefined` 만 v1 로 본다).
+- 부분 쓰기 롤백(위).
+
 ### ~~B-7. 구버전 원장 행의 id 재발급 → 동기화 후 중복~~ — ✅ 해결 (feature/legacy-row-ids)
 `normalizeLedger` 의 `if (!x.id) x.id = uid()` 가 **로드 시점에 랜덤** id 를 붙였다.
 같은 pre-id 원장을 가진 두 기기(단일 HTML 시절 데이터, 같은 백업을 양쪽에서 import)가

@@ -1993,3 +1993,85 @@ describe("B-6 · importAll 은 정규 형태로 쓴다", () => {
     expect(r.warnings.length).toBeGreaterThan(0);
   });
 });
+
+// ===== Codex 재검수 반영 (B-6 2차) =====
+describe("B-6 · Codex 지적 반영", () => {
+  let store, failKeys;
+  const mount = () => {
+    store = new Map();
+    failKeys = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => { if (failKeys.has(k)) { const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; } store.set(k, String(v)); },
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  };
+  beforeEach(mount);
+
+  // F1: 검증은 배열 행을 '제외했다'고 경고하는데 저장은 제외하지 않아, {"0":1,"1":2,id:...} 가 남았다.
+  it("배열 행은 경고대로 실제로 제외된다 (경고와 동작의 일치)", () => {
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [[1, 2], { id: "keep", date: "2026-07-01" }] } }));
+    expect(r.ok).toBe(true);
+    expect(r.warnings.join(" ")).toContain("1건은 형태가 깨져");
+    expect(JSON.parse(store.get(LKEY)).buys.map((b) => b.id)).toEqual(["keep"]);
+  });
+
+  // F3: 정규식만 보면 달력에 없는 날짜가 통과해, 경고 없이 모든 집계에서 빠진다.
+  it("달력에 없는 날짜를 경고한다 (2026-99-99, 2026-02-30)", () => {
+    const w = (d) => validateBackup({ app: "mvp-calculator", ledger: { buys: [{ id: "a", date: d }] } }).warnings.join(" ");
+    expect(w("2026-99-99")).toContain("집계에서 빠집니다");
+    expect(w("2026-02-30")).toContain("집계에서 빠집니다");
+    expect(w("2026-02-28")).toBe("");
+    expect(w("2028-02-29")).toBe(""); // 윤년은 실재한다
+    expect(w("2026-02-29")).toContain("집계에서 빠집니다"); // 평년엔 없다
+  });
+
+  // F4: "version": null 은 '버전 없음'이 아니라 '형태를 모르는 파일'이다.
+  it("version 이 null 이면 거절한다 (키가 아예 없는 것과 다르다)", () => {
+    expect(validateBackup({ app: "mvp-calculator", version: null, ledger: { buys: [] } }).ok).toBe(false);
+    expect(validateBackup({ app: "mvp-calculator", ledger: { buys: [] } }).ok).toBe(true);
+  });
+
+  // F2: 순서대로 쓰다 뒤에서 실패하면 앞 키는 이미 덮인 채 "복원 못 했습니다"가 나왔다.
+  it("쓰기가 중간에 실패하면 앞서 쓴 키를 되돌린다 (전부 아니면 전무)", () => {
+    store.set(KEY, '{"mesoRate":1111}');
+    store.set(CALMODE_KEY, "month");
+    failKeys.add(LKEY);
+    const r = importAll(JSON.stringify({
+      app: "mvp-calculator",
+      calc: { mesoRate: 2222 },
+      ledger: { buys: [{ id: "a", date: "2026-07-01" }] },
+      calMode: "mvp",
+    }));
+    expect(r.ok).toBe(false);
+    expect(store.get(KEY)).toBe('{"mesoRate":1111}'); // 되돌아왔다
+    expect(store.get(CALMODE_KEY)).toBe("month");     // 부수 설정도 안 건드렸다
+    expect(store.has(LKEY)).toBe(false);
+  });
+
+  it("원래 없던 키는 되돌릴 때 지운다", () => {
+    failKeys.add(LKEY);
+    const r = importAll(JSON.stringify({
+      app: "mvp-calculator",
+      calc: { mesoRate: 2222 },
+      ledger: { buys: [] },
+    }));
+    expect(r.ok).toBe(false);
+    expect(store.has(KEY)).toBe(false); // 복원 전에 없었으므로 남기지 않는다
+  });
+
+  it("되돌리기까지 실패하면 그 사실을 사용자에게 알린다", () => {
+    store.set(KEY, '{"mesoRate":1111}');
+    // LKEY 쓰기가 실패하는 그 순간부터 저장소 전체가 쓰기 불가가 된다 → 롤백도 실패한다.
+    globalThis.localStorage.setItem = (k, v) => {
+      if (k === LKEY || failKeys.has(k)) { failKeys.add(KEY); const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; }
+      store.set(k, String(v));
+    };
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", calc: { mesoRate: 2222 }, ledger: { buys: [] } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("되돌리지 못했");
+    // 되돌리지 못한 게 사실이다 — 문구가 진실이어야 한다(원본 1111 이 아니라 새 값이 남아 있다).
+    expect(JSON.parse(store.get(KEY)).mesoRate).toBe(2222);
+  });
+});
