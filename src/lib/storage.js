@@ -2,7 +2,7 @@ import {
   DEFAULT_SETTINGS, DEFAULT_CHARGES, DEFAULT_CALC_ITEMS, DEFAULT_ITEMS,
   LEDGER_BUCKETS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX,
 } from "./constants.js";
-import { uid, padDate } from "./util.js";
+import { uid, padDate, todayStr } from "./util.js";
 
 // 기존 단일 HTML 버전과 동일한 키 → 사용자 데이터 그대로 승계
 export const KEY = "mvpCalc_v4";
@@ -417,6 +417,7 @@ export function exportAll() {
   const data = {
     app: "mvp-calculator",
     version: 1,
+    // 순간(instant)은 UTC ISO 로 남긴다. 아래 파일명의 날짜와 달리 이건 시각이지 민간 날짜가 아니다.
     exportedAt: new Date().toISOString(),
     corruptRaw: collectCorruptRaw(),
     calc: readJSON(KEY),
@@ -427,7 +428,8 @@ export function exportAll() {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "mvp-calculator-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  // 파일명의 날짜는 사용자가 읽는 '오늘'이다 → KST 기준(UTC 를 쓰면 아침 9시 이전 내보내기가 어제 날짜로 찍힌다).
+  a.download = "mvp-calculator-backup-" + todayStr() + ".json";
   a.click();
   URL.revokeObjectURL(a.href);
 }

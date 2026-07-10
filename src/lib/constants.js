@@ -1,3 +1,5 @@
+import { tzDateStr } from "./tz.js";
+
 // ===== 도메인 상수 =====
 export const TIERS = [
   { name: "브론즈", amt: 150000 },
@@ -104,11 +106,9 @@ function resolveOne(cfg) {
 const EPOCH = "0000-01-01";
 const isDateStr = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
-// 오늘 날짜(zero-padded). util.js 의 todayStr 을 쓰지 않는 이유: util.js 가 constants.js 를 import 해 순환이 된다.
-const nowStr = () => {
-  const d = new Date();
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-};
+// 오늘 날짜(KST, zero-padded). util.js 의 todayStr 을 쓰지 않는 이유: util.js 가 constants.js 를 import 해 순환이 된다.
+// tz.js 는 의존성이 없어 양쪽이 안전하게 쓴다.
+const nowStr = () => tzDateStr();
 
 export function resolveRuleHistory(cfgRules, today = nowStr()) {
   if (!Array.isArray(cfgRules)) return [{ effectiveFrom: EPOCH, ...resolveOne(cfgRules) }];

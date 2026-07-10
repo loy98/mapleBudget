@@ -1,4 +1,7 @@
 import { TIERS } from "./constants.js";
+import { tzDateStr, dateOf, nowD } from "./tz.js";
+
+export { APP_TZ, tzDateStr, dateOf, nowD } from "./tz.js";
 
 // ===== 포맷 =====
 export const won = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "–") + "원";
@@ -26,7 +29,9 @@ export function fmtD(dt) {
     ("0" + dt.getDate()).slice(-2)
   );
 }
-export const todayStr = () => fmtD(new Date());
+// '오늘'은 언제나 KST 기준이다(MVP 주 경계가 게임 서버 시간으로 정해지므로).
+// fmtD 는 넘겨받은 민간 날짜의 Y/M/D 를 읽을 뿐이라 시간대를 모른다 → 여기서 tz 를 해석한다.
+export const todayStr = () => tzDateStr();
 
 // 원장의 날짜는 zero-padded "YYYY-MM-DD" 여야 한다 — 주차 필터·규칙 선택이 모두 사전식 문자열 비교이기 때문.
 // "2026-7-2" 같은 값은 `"2026-7-2" >= "2026-07-02"` 가 true, `<= "2026-07-08"` 이 false 라
@@ -45,13 +50,12 @@ export function padDate(v) {
 // null/undefined(구 데이터)뿐 아니라 malformed 값도 '없음'으로 보고 현재 설정으로 폴백한다.
 export const hasSnapshot = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1;
 
-export function curMonth() {
-  const d = new Date();
-  return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
-}
+export const curMonth = () => todayStr().slice(0, 7);
 export const mmdd = (dt) => ("0" + (dt.getMonth() + 1)).slice(-2) + "/" + ("0" + dt.getDate()).slice(-2);
 
-// MVP 주 = 목요일 시작 ~ 수요일 마감
+// MVP 주 = 목요일 시작 ~ 수요일 마감.
+// 아래 함수들은 **민간 날짜 연산**이다(Y/M/D 만 읽고 쓴다). 시간대 해석은 이미 끝난 뒤여야 한다 —
+// '지금'이 필요하면 `new Date()` 가 아니라 `nowD()`(KST 기준 오늘)를 넘길 것.
 export function weekStartThu(dt) {
   const w = new Date(dt);
   w.setHours(0, 0, 0, 0);
@@ -66,7 +70,7 @@ export function weekStartSun(dt) {
   return w;
 }
 export function start13() {
-  const w = weekStartThu(new Date());
+  const w = weekStartThu(nowD());
   const s = new Date(w);
   s.setDate(w.getDate() - 12 * 7);
   return s;

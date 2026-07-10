@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useId } from "react";
 import { createPortal } from "react-dom";
-import { fmtD, todayStr, addDays } from "../lib/util.js";
+import { fmtD, todayStr, addDays, nowD, dateOf } from "../lib/util.js";
 import { WD_SUN } from "../lib/constants.js";
 
 // ===== 숫자 입력 (테마 스테퍼) =====
@@ -265,12 +265,12 @@ export function WeekPicker({ value, onChange, weeks }) {
 export function DateInput({ value, onChange, width }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ left: 0, top: 0 });
-  const [cursor, setCursor] = useState(() => (value ? new Date(value + "T00:00:00") : new Date()));
+  const [cursor, setCursor] = useState(() => (value ? dateOf(value) : nowD()));
   const inpRef = useRef(null);
   const popRef = useRef(null);
 
   const openPop = () => {
-    setCursor(value ? new Date(value + "T00:00:00") : new Date());
+    setCursor(value ? dateOf(value) : nowD());
     const r = inpRef.current.getBoundingClientRect();
     setPos({ left: window.scrollX + r.left, top: window.scrollY + r.bottom + 6 });
     setOpen(true);
@@ -333,7 +333,7 @@ export function DateInput({ value, onChange, width }) {
 export function YMPicker({ value, onChange, anchorLabel }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ left: 0, top: 0 });
-  const [year, setYear] = useState(() => +(value || "").split("-")[0] || new Date().getFullYear());
+  const [year, setYear] = useState(() => +(value || "").split("-")[0] || nowD().getFullYear());
   const btnRef = useRef(null);
   const popRef = useRef(null);
   useEffect(() => {
@@ -352,7 +352,7 @@ export function YMPicker({ value, onChange, anchorLabel }) {
         ref={btnRef}
         className="btn ghost sm"
         onClick={() => {
-          setYear(selY || new Date().getFullYear());
+          setYear(selY || nowD().getFullYear());
           const r = btnRef.current.getBoundingClientRect();
           setPos({ left: window.scrollX + r.left, top: window.scrollY + r.bottom + 6 });
           setOpen(!open);

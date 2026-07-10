@@ -161,11 +161,27 @@ TTL 정리는 신뢰 가능한 서버 시각이 있을 때만 하므로 게스�
   반쪽 복원하지 않고 오류를 돌려준다.
 · `StorageAlert` 배너로 사용자에게 알린다(이전에는 아무 표시도 없었다).
 
-### B-4. 주차 경계가 브라우저 로컬 타임존 기준 — MEDIUM
-MVP 주는 넥슨 서버(KST) 목요일 경계인데 `weekStartThu` 는 로컬 `getDay()` 를 쓴다.
-UTC-8 사용자가 수요일 오후에 열면 KST로는 이미 새 주. 앱 내부는 일관되나 게임과 최대 하루 어긋난다.
-→ `weekStartThu(dt, tz = "Asia/Seoul")`.
-(DST·윤년·연말연시는 실측 확인 결과 이상 없음 — `setDate` 정규화 + `fmtD` 가 Y/M/D만 읽음.)
+### ~~B-4. 주차 경계가 브라우저 로컬 타임존 기준~~ — ✅ 해결 (feature/week-tz)
+MVP 주는 넥슨 서버(KST) 목요일 경계인데 `new Date()` 를 그대로 주차 계산에 넣어 **로컬 타임존**이 기준이었다.
+UTC-8 사용자가 수요일 오후에 열면 KST 로는 이미 목요일(새 주)인데 앱은 지난 주를 보여줬다.
+
+고친 방식은 `weekStartThu(dt, tz)` 가 아니다. 주차 함수들은 **민간 날짜(Y/M/D) 연산**이라 시간대를 몰라도 되고,
+시간대 해석이 필요한 곳은 오직 **'지금'이 며칠인가** 하나뿐이다. 그래서 진입점을 하나로 모았다:
+- `src/lib/tz.js` (의존성 없음 — `util.js`/`constants.js` 가 함께 쓴다)
+  - `tzDateStr(instant, tz=APP_TZ)` — 그 순간의 KST 민간 날짜. `formatToParts` 로 조립(로케일 형식 비의존),
+    Intl 시간대 데이터가 없으면 로컬로 폴백하고 던지지 않는다.
+  - `dateOf("YYYY-MM-DD")` — 민간 날짜 Date. **정오 고정**: 로컬 타임존이 자정에 DST 전환을 하면
+    (America/Santiago 등) 그 날 00:00 이 없어 날짜가 밀린다.
+  - `nowD()` — 날짜 계산이 '지금'을 얻는 **유일한 진입점**. `todayStr()`/`start13()`/`curMonth()` 가 이것을 쓴다.
+- 주차·달력 계산부의 `new Date()` 를 전부 `nowD()` 로 교체(`ledger.js`, `LogTab`, `CalendarPanel`,
+  `StatsPanel`, `useLedgerDerived`, `ui.jsx`). `constants.js` 의 `nowStr` 도 `tzDateStr` 로.
+- 백업 파일명도 KST(`todayStr()`) — UTC 면 아침 9시 이전 내보내기가 어제 날짜로 찍힌다.
+  `exportedAt` 은 '순간'이므로 UTC ISO 유지.
+
+**검증의 함정**: 개발 기계가 KST 라 로컬 기준 코드와 KST 기준 코드가 같은 답을 낸다.
+게다가 **Windows 의 Node 는 `TZ=... npm test` 셸 프리픽스를 무시한다**(실측 확인 — 여전히 GMT+0900).
+`src/lib/tz.test.js` 가 프로세스 안에서 `process.env.TZ = "America/Los_Angeles"` 를 할당하고
+`vi.setSystemTime` 으로 시계를 고정한다. 뮤테이션 검증으로 결함을 실제로 잡는 것을 확인했다.
 
 ### ~~B-5. 과거 거래에 현재 설정을 소급 적용~~ — ✅ 해결 (feature/rate-snapshot)
 근본 원인의 절반은 **넥슨 규칙을 사용자 설정으로 모델링한 것**이었다.
