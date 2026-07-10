@@ -269,38 +269,46 @@ export const isDeleted = (deleted, id) => !!id && hasOwn(deleted, id);
 // id 가 "__proto__" 인 행은 삭제해도 표식이 기록되지 않아(UNSAFE_KEYS 차단) 다른 기기에서 부활한다.
 const safeRowId = (id) => typeof id === "string" && !!id && !UNSAFE_KEYS.has(id);
 
+// 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
+// meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.
+// **id 유도보다 먼저** 돌려야 한다 — rate 가 id 필드라, 한 기기는 won 만 갖고 다른 기기는 rate 도 가진
+// 같은 거래가 서로 다른 id 를 얻어 병합에서 2건이 된다(Codex 지적).
+function deriveCashRate(c) {
+  if ((c.rate == null || c.rate === "") && c.won != null && +c.meso > 0) c.rate = +c.won / +c.meso;
+}
+
+// 한 버킷의 행들을 **정규 형태**로 만든다: 날짜 zero-pad → 파생값 유도 → id 부여.
+// 이 순서가 곧 계약이다. id 는 행의 내용에서 유도되므로, 내용을 정규화하기 전에 id 를 만들면
+// 같은 거래가 기기마다 다른 id 를 얻는다.
+//
+// id 없는 행에는 **결정적** id 를 준다(B-7). 랜덤 id 를 주면 같은 백업을 연 두 기기가 같은 거래에
+// 다른 id 를 만들고, 병합이 id 합집합이라 거래가 두 배로 불어난다.
+// 순번은 'id 없는 행'끼리만 센다 — 이미 id 가 있는 행은 두 기기에서 같은 id 를 가지므로 셈에서 빠져야
+// 나머지 행의 순번이 어긋나지 않는다.
+//
+// 입력 행을 제자리 변형하지 않는다(M-7). 호출자가 넘긴 객체(클라우드 응답 등)를 오염시키면 안 된다.
+// 이미 정규화된 입력에 다시 적용해도 결과가 같다(멱등) — mergeLedger 가 양쪽에 무조건 적용하기 때문.
+export function canonicalizeRows(bucket, rows) {
+  const fields = LEDGER_ID_FIELDS[bucket];
+  const nth = occurrenceCounter();
+  return asArray(rows)
+    // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
+    .filter((x) => x && typeof x === "object")
+    .map((x) => {
+      const row = { ...x };
+      if (row.date != null) row.date = padDate(row.date);
+      if (bucket === "cashes") deriveCashRate(row);
+      if (!safeRowId(row.id)) row.id = fields ? legacyRowId(fields, row, nth(rowContentKey(fields, row))) : uid();
+      return row;
+    });
+}
+
 export function normalizeLedger(d, now = null, ceiling = now) {
   const src = d && typeof d === "object" && !Array.isArray(d) ? d : {};
   const led = { deleted: normalizeDeleted(src.deleted, now, ceiling) };
   LEDGER_BUCKETS.forEach((k) => {
-    // 원소가 객체가 아니면(문자열·null 등) 뒤따르는 x.id 접근이 던진다 → 여기서 걸러낸다.
-    // 입력 행을 제자리 변형하지 않는다(M-7). asArray 는 원본 배열의 참조를 그대로 돌려주므로,
-    // 여기서 복사하지 않으면 호출자가 넘긴 객체(예: mergeSnapshots 결과의 클라우드 행)가 오염된다.
-    const rows = asArray(src[k]).filter((x) => x && typeof x === "object").map((x) => ({ ...x }));
-    // id 없는 행에는 **결정적** id 를 준다(B-7). 랜덤 id 를 주면 같은 백업을 연 두 기기가 같은 거래에
-    // 다른 id 를 만들고, 병합이 id 합집합이라 거래가 두 배로 불어난다.
-    // 순번은 'id 없는 행'끼리만 센다 — 이미 id 가 있는 행은 두 기기에서 같은 id 를 가지므로 셈에서 빠져야
-    // 나머지 행의 순번이 어긋나지 않는다.
-    const fields = LEDGER_ID_FIELDS[k];
-    const nth = occurrenceCounter();
-    rows.forEach((x) => {
-      // 날짜 비교는 전부 사전식 문자열 비교다 → zero-pad 되어 있지 않으면 주차 집계에서 조용히 누락되고
-      // 규칙 선택(rulesAt)도 엉뚱한 시점을 고른다. 패딩만으로 고칠 수 있는 형태는 여기서 바로잡는다.
-      // **id 유도보다 먼저** 정규화해야 "2026-7-2" 와 "2026-07-02" 가 같은 id 를 얻는다.
-      if (x.date != null) x.date = padDate(x.date);
-      if (!safeRowId(x.id)) {
-        x.id = fields ? legacyRowId(fields, x, nth(rowContentKey(fields, x))) : uid();
-      }
-    });
     // 로컬에 tombstone 이 있는데 항목도 남아 있으면(가져오기·구데이터) 삭제를 존중한다.
-    led[k] = rows.filter((x) => !isDeleted(led.deleted, x.id));
-  });
-  // 현금화: 구 데이터(판매현금 won 직접 입력) → 억당(rate) 기반으로 승계.
-  // meso가 0/빈값이면 rate를 만들 수 없으므로 그대로 두고(won 폴백 유지) 데이터 손실을 막는다.
-  led.cashes.forEach((c) => {
-    if ((c.rate == null || c.rate === "") && c.won != null && +c.meso > 0) {
-      c.rate = +c.won / +c.meso;
-    }
+    led[k] = canonicalizeRows(k, src[k]).filter((x) => !isDeleted(led.deleted, x.id));
   });
   return led;
 }

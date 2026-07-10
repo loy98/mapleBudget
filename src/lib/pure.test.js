@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
-  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
+  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows,
   loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
@@ -1780,5 +1780,75 @@ describe("B-7 · 구버전 행은 결정적 id 를 받는다", () => {
   it("필드 경계가 뭉개지지 않는다 (\"ab\"+\"c\" 와 \"a\"+\"bc\" 가 다른 id)", () => {
     const F = [["item", "s"], ["memo", "s"]];
     expect(legacyRowId(F, { item: "ab", memo: "c" }, 0)).not.toBe(legacyRowId(F, { item: "a", memo: "bc" }, 0));
+  });
+});
+
+// ===== Codex 재검수 반영 (B-7 2차) =====
+describe("B-7 · 정규화는 병합 경로에도 적용된다 (Codex F1)", () => {
+  const preId = () => ({ buys: [{ date: "2026-07-01", item: "펫", qty: 1, price: 22000, mil: false }] });
+
+  it("id 없는 클라우드 행이 병합에서 조용히 사라지지 않는다", () => {
+    // 예전엔 `if (x && x.id)` 에 걸려 통째로 소실됐다 — 구버전 클라이언트가 올린 원장이 병합 한 번에 증발.
+    const merged = mergeLedger({ buys: [] }, preId());
+    expect(merged.buys).toHaveLength(1);
+    expect(merged.buys[0].item).toBe("펫");
+    expect(merged.buys[0].id.startsWith("L")).toBe(true);
+  });
+
+  it("정규화된 로컬 행과 pre-id 클라우드 행이 같은 거래면 하나로 합쳐진다", () => {
+    const local = normalizeLedger(preId());
+    const merged = mergeLedger(local, preId());
+    expect(merged.buys).toHaveLength(1); // 중복 아님 — 양쪽이 같은 결정적 id 를 얻는다
+  });
+
+  it("병합이 입력 객체를 변형하지 않는다", () => {
+    const cloud = preId();
+    const before = JSON.parse(JSON.stringify(cloud));
+    mergeLedger({ buys: [] }, cloud);
+    expect(cloud).toEqual(before); // id 가 원본에 심기지 않는다
+  });
+
+  it("tombstone 은 유도된 id 에도 그대로 적용된다", () => {
+    const local = normalizeLedger(preId());
+    const id = local.buys[0].id;
+    const merged = mergeLedger({ buys: [], deleted: { [id]: 1000 } }, preId());
+    expect(merged.buys).toHaveLength(0); // 삭제 우선 — pre-id 행이 부활하지 않는다
+  });
+});
+
+describe("B-7 · 파생값은 id 유도보다 먼저 (Codex F2)", () => {
+  it("현금화의 rate 를 won 에서 유도한 뒤 id 를 만든다", () => {
+    // 한 기기는 won 만(구 데이터), 다른 기기는 rate 까지 가진 같은 거래.
+    const a = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, won: 1000 }] });
+    const b = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, won: 1000, rate: 500 }] });
+    expect(a.cashes[0].rate).toBe(500);
+    expect(a.cashes[0].id).toBe(b.cashes[0].id);
+    expect(mergeLedger(a, b).cashes).toHaveLength(1); // 같은 현금화가 2건이 되지 않는다
+  });
+
+  it("rate 가 다르면 다른 거래다 (뭉개지 않는다)", () => {
+    const a = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, won: 1000 }] });      // rate 500
+    const b = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, rate: 999 }] });
+    expect(a.cashes[0].id).not.toBe(b.cashes[0].id);
+  });
+
+  it("meso 가 0 이면 rate 를 만들지 않는다 (won 폴백 유지) — 그래도 결정적", () => {
+    const a = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 0, won: 1000 }] });
+    const b = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 0, won: 1000 }] });
+    expect(a.cashes[0].rate).toBeUndefined();
+    expect(a.cashes[0].id).toBe(b.cashes[0].id);
+  });
+});
+
+describe("canonicalizeRows 는 멱등이다", () => {
+  it("이미 정규화된 행에 다시 적용해도 결과가 같다 (mergeLedger 가 무조건 적용한다)", () => {
+    const once = canonicalizeRows("buys", [{ date: "2026-7-2", item: "펫", qty: 1, price: 100 }]);
+    const twice = canonicalizeRows("buys", once);
+    expect(twice).toEqual(once);
+  });
+
+  it("cashes 도 멱등 (rate 유도가 두 번 돌아도 같다)", () => {
+    const once = canonicalizeRows("cashes", [{ date: "2026-07-04", meso: 2, won: 1000 }]);
+    expect(canonicalizeRows("cashes", once)).toEqual(once);
   });
 });
