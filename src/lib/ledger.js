@@ -1,5 +1,18 @@
-import { fmtD, start13, addDays, weekStartThu, estGrade } from "./util.js";
-import { TIERS } from "./constants.js";
+import { fmtD, start13, addDays, weekStartThu, estGrade, nowD } from "./util.js";
+import { TIERS, WINDOW_WEEKS } from "./constants.js";
+
+// ===== 거래별 요율 =====
+// 과거 거래를 '현재 설정'으로 계산하면, 사용자가 설정을 바꾸는 순간 과거 기록이 조용히 변한다(B-5).
+// 그래서 요율은 스칼라가 아니라 **거래 행을 받는 함수**로도 넘길 수 있다:
+//   · 마일리지 결제 비율 = 거래일에 유효한 넥슨 규칙 (rulesAt)
+//   · 경매장 수수료 / 충전 할인 = 거래 행의 스냅샷(_fee/_effD), 없으면 현재 설정으로 폴백
+// 숫자도 그대로 받는다(구 호출부·테스트 호환). 이 헬퍼가 둘을 흡수한다.
+// 유한하지 않은 값은 0으로 떨어뜨린다. malformed 스냅샷을 '수수료 0%'로 조용히 바꾸지 않으려면
+// **호출측(env)이 먼저** 유효성을 검사해 현재 설정으로 폴백해야 한다(useLedgerDerived 참고).
+const rate = (r, row) => {
+  const n = +(typeof r === "function" ? r(row) : r);
+  return Number.isFinite(n) ? n : 0;
+};
 
 // ===== 주간 과금 (MVP 주: 목~수) =====
 export function weeklyAch(ledger, ws, mileageR) {
@@ -11,7 +24,7 @@ export function weeklyAch(ledger, ws, mileageR) {
     if (b.date >= ss && b.date <= es) {
       const q = +b.qty || 0,
         p = +b.price || 0,
-        mf = b.mil ? mileageR : 0;
+        mf = b.mil ? rate(mileageR, b) : 0;
       tot += q * p * (1 - mf);
     }
   });
@@ -25,7 +38,7 @@ export function weeklyAch(ledger, ws, mileageR) {
 export function cumNow(ledger, mileageR) {
   const s = start13();
   let c = 0;
-  for (let w = 0; w < 13; w++) c += weeklyAch(ledger, addDays(s, w * 7), mileageR);
+  for (let w = 0; w < WINDOW_WEEKS; w++) c += weeklyAch(ledger, addDays(s, w * 7), mileageR);
   return c;
 }
 
@@ -48,7 +61,7 @@ export function weeklyMeso(ledger, ws, fee) {
   ledger.sells.forEach((sl) => {
     if (sl.date >= ss && sl.date <= es) {
       sellQty += +sl.qty || 0;
-      sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+      sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - rate(fee, sl));
     }
   });
   ledger.cashes.forEach((c) => {
@@ -87,7 +100,7 @@ export function weeklyItems(ledger, ws, fee) {
       const q = +sl.qty || 0, m = +sl.meso || 0, r = row(itemKey(sl.item));
       r.sellQty += q;
       r.gross += q * m;
-      r.sold += q * m * (1 - fee);
+      r.sold += q * m * (1 - rate(fee, sl));
     }
   });
   return [...map.values()]
@@ -116,17 +129,17 @@ export function itemSummary(ledger, match, { fee, effD, mileageR }, rateWon) {
 
   ledger.buys.forEach((b) => {
     if (!match(b.date)) return;
-    const q = +b.qty || 0, p = +b.price || 0, mf = b.mil ? mileageR : 0;
+    const q = +b.qty || 0, p = +b.price || 0, mf = b.mil ? rate(mileageR, b) : 0;
     const t = row(itemKey(b.item));
     t.buyQty += q;
-    t.spend += q * p * (1 - mf) * (1 - effD);
+    t.spend += q * p * (1 - mf) * (1 - rate(effD, b));
   });
   ledger.sells.forEach((sl) => {
     if (!match(sl.date)) return;
     const q = +sl.qty || 0, m = +sl.meso || 0, t = row(itemKey(sl.item));
     t.sellQty += q;
     t.gross += q * m;
-    t.sold += q * m * (1 - fee);
+    t.sold += q * m * (1 - rate(fee, sl));
   });
   return [...map.values()]
     .filter((x) => x.buyQty || x.sellQty)
@@ -142,7 +155,7 @@ export function itemSummary(ledger, match, { fee, effD, mileageR }, rateWon) {
 export function mesoWeeks(ledger, fee) {
   const s = start13();
   const arr = [];
-  for (let w = 0; w < 13; w++) {
+  for (let w = 0; w < WINDOW_WEEKS; w++) {
     const ws = addDays(s, w * 7);
     arr.push({ ws, we: addDays(ws, 6), ...weeklyMeso(ledger, ws, fee) });
   }
@@ -156,16 +169,16 @@ export function ledgerStats(ledger, match, { fee, effD, mileageR }) {
     if (match(b.date)) {
       const q = +b.qty || 0,
         p = +b.price || 0,
-        mf = b.mil ? mileageR : 0;
+        mf = b.mil ? rate(mileageR, b) : 0;
       st.ach += q * p * (1 - mf);
       st.mil += q * p * mf;
-      st.spend += q * p * (1 - mf) * (1 - effD);
+      st.spend += q * p * (1 - mf) * (1 - rate(effD, b));
       st.buys++;
     }
   });
   ledger.sells.forEach((sl) => {
     if (match(sl.date)) {
-      st.meso += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+      st.meso += (+sl.qty || 0) * (+sl.meso || 0) * (1 - rate(fee, sl));
       st.sells++;
     }
   });
@@ -200,7 +213,7 @@ export function dayInfo(ledger, mileageR) {
   ledger.buys.forEach((b) => {
     const q = +b.qty || 0,
       p = +b.price || 0,
-      mf = b.mil ? mileageR : 0;
+      mf = b.mil ? rate(mileageR, b) : 0;
     add(b.date, q * p * (1 - mf));
   });
   ledger.spends.forEach((s) => add(s.date, +s.amount || 0));
@@ -210,14 +223,18 @@ export function dayInfo(ledger, mileageR) {
 }
 
 // ===== 예상 & 추천: 목표 등급 유지 스케줄 =====
-export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, optPer10k) {
+export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, optPer10k, tiers = TIERS) {
   const C = cumNow(ledger, mileageR);
-  const T = TIERS[tierIdx].amt;
-  const cur = weekStartThu(new Date());
+  // tierIdx 는 셀렉트 값이라 tiers 길이가 DB에서 바뀌면 범위를 벗어날 수 있다 → 마지막 등급으로 클램프.
+  const tier = tiers[tierIdx] || tiers[tiers.length - 1];
+  const T = tier.amt;
+  const cur = weekStartThu(nowD());
   const weekOf = (o) => addDays(cur, o * 7);
   const achPast = (o) => weeklyAch(ledger, weekOf(o), mileageR);
   const immediate = Math.max(0, T - C);
   const startOff = includeThis ? 0 : 1;
+  // divisor = '13주 롤링 창에 최소 몇 번 과금이 들어가는가'(격주 최악 6회, 월 1회 최소 3회).
+  // SPLITS 의 '격주=7회'와 다른 이유이며 창 유지에 필요한 회당 금액으로는 이쪽이 맞다.
   const divisor = timing === "weekly" ? 13 : timing === "biweekly" ? 6 : 3;
   const perCharge = T / divisor;
 
@@ -238,8 +255,12 @@ export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, 
     return false;
   };
 
+  // 예측 지평은 startOff 부터 13주. 이전에는 `o <= 13` 이라 includeThis(startOff=0)일 때
+  // 14주에 과금이 배정되어 총액이 목표의 107.7%(14×T/13)가 됐다.
+  const lastOff = startOff + WINDOW_WEEKS - 1;
+
   const x = {};
-  for (let o = startOff; o <= 13; o++) {
+  for (let o = startOff; o <= lastOff; o++) {
     const ws = weekOf(o);
     let charge = false;
     if (timing === "weekly") charge = true;
@@ -248,20 +269,23 @@ export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, 
     else if (timing === "monthLast") charge = hasLast(ws);
     if (charge) x[o] = perCharge;
   }
-  const achAt = (o) => (o < startOff ? achPast(o) : x[o] || 0);
+  // 지나간 주와 이번 주(o<=0)의 과금은 '이미 일어난 사실'이므로 언제나 원장에서 읽는다.
+  // 계획값 x[o] 는 그 위에 더한다. 이전에는 includeThis 일 때 o=0 이 계획값으로 '대체'되어
+  // 이번 주에 이미 쓴 돈이 롤링 창에서 통째로 사라졌다(체크박스를 켤수록 도달이 늦어지는 역설).
+  const achAt = (o) => (o <= 0 ? achPast(o) : 0) + (o >= startOff ? x[o] || 0 : 0);
 
   let total = 0;
-  for (let o = startOff; o <= 13; o++) total += x[o] || 0;
+  for (let o = startOff; o <= lastOff; o++) total += x[o] || 0;
   const cost = (total / 10000) * optPer10k;
 
   const rows = [];
   let reached = null;
-  for (let i = startOff; i <= 13; i++) {
+  for (let i = startOff; i <= lastOff; i++) {
     const ws = weekOf(i),
       we = addDays(ws, 6);
     let sum = 0;
-    for (let oo = i - 12; oo <= i; oo++) sum += achAt(oo);
-    const g = estGrade(sum);
+    for (let oo = i - (WINDOW_WEEKS - 1); oo <= i; oo++) sum += achAt(oo);
+    const g = estGrade(sum, tiers);
     if (reached === null && sum >= T) reached = i;
     rows.push({ i, ws, we, charge: x[i] > 0 ? x[i] : 0, sum, grade: g });
   }

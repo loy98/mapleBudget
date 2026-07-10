@@ -1,5 +1,7 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearCloudSynced } from "./storage.js";
+import { clearAccountData, mergeDeleted, isDeleted, canonicalizeRows, canonicalizeMyItems, isItemDeleted } from "./storage.js";
+import { LEDGER_BUCKETS } from "./constants.js";
+import { hasSnapshot } from "./util.js";
 
 export { cloudEnabled };
 
@@ -22,9 +24,14 @@ export function signInWithEmail(email) {
     options: { emailRedirectTo: window.location.origin },
   });
 }
-export function signOut() {
-  clearCloudSynced(); // 재로그인 시 게스트↔클라우드 선택을 다시 판별하도록 마커 제거
-  return supabase.auth.signOut();
+// 로그아웃은 '이 기기에서 계정 데이터를 떼어내는' 동작이다.
+// 지우기 전에 signOut 성공을 확인한다 — 실패했는데 로컬만 비우면 세션은 살아 있는 채로
+// 다음 새로고침에서 빈 로컬이 클라우드와 병합돼 혼란을 준다(구현은 마커만 지워 이 문제가 있었다).
+// 데이터는 클라우드에 있으므로 재로그인하면 복원된다. 호출측이 성공 시 페이지를 리로드해 상태를 초기화한다.
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (!error) clearAccountData();
+  return { error };
 }
 
 // ===== 앱 공용 설정 (app_config 1행, 누구나 읽기) =====
@@ -60,6 +67,10 @@ export async function submitFeedback({ message, category, email } = {}) {
     user_agent: (typeof navigator !== "undefined" ? navigator.userAgent : "").slice(0, 500),
   };
   const { error } = await supabase.from("feedback").insert(row);
+  // DB 트리거(feedback_rate_limit)가 던지는 토큰을 안정적인 사유 코드로 바꿔 UI에 넘긴다.
+  if (error && String(error.message || "").includes("feedback_rate_limited")) {
+    return { error: new Error("rate-limited") };
+  }
   return { error };
 }
 
@@ -73,14 +84,84 @@ export async function fetchUserData(userId) {
   if (error) throw error;
   return data; // 없으면 null
 }
-export async function upsertUserData(userId, snap) {
-  const { error } = await supabase
+// ===== 낙관적 동시성 제어 =====
+// 이전에는 무조건 upsert(행 전체 덮어쓰기)였다. 그래서 오래된 스냅샷을 든 탭이 나중에 쓰면
+// 다른 탭이 올린 거래와 삭제 표식(tombstone)을 통째로 지웠다 — 삭제 전파의 존재 이유가 무너진다.
+//
+// 서버가 트리거로 채우는 updated_at 을 '버전'으로 삼는다. 내가 마지막으로 본 버전일 때만 쓰기가 성립하고,
+// 그 사이 누가 썼다면 0행이 갱신되어 conflict 로 돌아온다(로컬 PostgreSQL 로 실측 확인).
+// 호출측은 다시 읽어 병합한 뒤 재시도한다.
+//
+// 반환: { updatedAt } 성공 | { conflict: true } 버전 불일치(또는 첫 삽입 경쟁)
+export async function writeUserData(userId, snap, expectedUpdatedAt) {
+  const row = { calc: snap.calc, my_items: snap.my_items, ledger: snap.ledger };
+
+  // 아직 행이 없다고 알고 있는 경우 → INSERT. 다른 기기가 먼저 만들었으면 23505 로 conflict.
+  if (!expectedUpdatedAt) {
+    const { data, error } = await supabase
+      .from("user_data")
+      .insert({ user_id: userId, ...row })
+      .select("updated_at")
+      .maybeSingle();
+    if (!error) return { updatedAt: data?.updated_at ?? null };
+    if (error.code === "23505") return { conflict: true };
+    throw error;
+  }
+
+  const { data, error } = await supabase
     .from("user_data")
-    .upsert(
-      { user_id: userId, calc: snap.calc, my_items: snap.my_items, ledger: snap.ledger },
-      { onConflict: "user_id" }
-    );
+    .update(row)
+    .eq("user_id", userId)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("updated_at")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) return { conflict: true }; // 0행 = 그 사이 다른 기기가 씀(또는 행이 사라짐)
+  return { updatedAt: data.updated_at };
+}
+
+// ===== 자주 쓰는 아이템 병합 (B-2b) =====
+// 예전에는 이 탭의 배열이 통째로 이겼다(last-writer-wins). 그래서 오래된 스냅샷을 든 탭이 업로드하면
+// **다른 탭에서 추가한 아이템이 사라졌다.**
+//
+// 이제 id 합집합 + 삭제 표식 차감이다(원장과 같은 규칙). 표식은 `ledger.deleted` 안에
+// `item:<id>` 네임스페이스로 산다 → 구버전 탭도 모르는 키를 보존하므로, 신버전이 만든 삭제는 살아남는다.
+// (구버전 탭 **자신의** 삭제는 표식이 없어 합집합에서 부활한다 — 표식 이전과 같은 한계다.)
+//
+// `winner` 는 **같은 id 일 때** 어느 쪽 내용을 쓸지 정한다:
+//  · 업로드 충돌 → 이 탭(사용자가 방금 편집한 값을 잃으면 안 된다)
+//  · 최초 로그인 → 클라우드(calc 와 같은 기준)
+// 순서는 loser 를 먼저 깔고 winner 로 덮는다 → 양쪽 추가분이 모두 남고, 표시 순서도 안정적이다.
+export function mergeMyItems(loser, winner, deleted, ceiling = null) {
+  const map = new Map();
+  canonicalizeMyItems(loser).forEach((x) => map.set(x.id, x));
+  canonicalizeMyItems(winner).forEach((x) => map.set(x.id, x));
+  // 표식보다 나중에 추가된 아이템은 살아남는다 — 지웠다가 다시 넣은 것이다(isItemDeleted 참고).
+  return [...map.values()].filter((x) => !isItemDeleted(deleted, x, ceiling));
+}
+
+// 업로드 충돌 시의 병합 규칙.
+// calc = 지금 이 탭의 값이 이긴다(사용자가 방금 편집한 것). 스칼라 묶음이라 last-writer-wins 로 충분하다.
+// ledger/my_items = 합집합 + tombstone 차감. 손실도 부활도 없어야 하므로 진짜 병합이 필요하다.
+export function mergeForUpload(localSnap, cloud, clientNow = Date.now()) {
+  const t = tombstoneClock(cloud, clientNow);
+  const ledger = mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, t.now, t.ceiling);
+  return {
+    calc: localSnap.calc,
+    // 같은 id 면 이 탭이 이긴다 — 방금 고친 캐시가·아이콘을 서버의 옛 값으로 되돌리지 않는다.
+    my_items: mergeMyItems(cloud ? cloud.my_items : [], localSnap.my_items, ledger.deleted, t.ceiling),
+    ledger,
+  };
+}
+
+// tombstone 시각 파라미터를 한 곳에서 만든다(만료 기준과 clamp 상한을 혼동하지 않도록).
+//  now     = 서버 updated_at (없으면 null → 만료 정리 안 함)
+//  ceiling = max(서버 시각, 내 시계) — 방금 만든 로컬 표식이 과거로 되감기지 않게.
+export function tombstoneClock(cloud, clientNow = Date.now()) {
+  const serverNow = cloud ? Date.parse(cloud.updated_at) : NaN;
+  const now = isFinite(serverNow) ? serverNow : null;
+  const ceiling = Math.max(isFinite(serverNow) ? serverNow : -Infinity, clientNow);
+  return { now, ceiling: isFinite(ceiling) ? ceiling : null };
 }
 
 // ===== 병합 (최초 로그인 시 로컬 ↔ 클라우드) =====
@@ -91,10 +172,16 @@ export async function upsertUserData(userId, snap) {
 // opts.localTouched: 이 기기에서 사용자가 계산기/아이템을 직접 편집했는지(거래 없이 설정만 바꾼 경우 포착 — P1-4).
 export function mergeSnapshots(local, cloud, opts = {}) {
   if (!cloud) return { snapshot: local, conflict: false };
-  const ledger = mergeLedger(local.ledger, cloud.ledger);
-  const cloudHasItems = !!(cloud.my_items && cloud.my_items.length);
+  const ledger = mergeLedger(local.ledger, cloud.ledger, opts.now, opts.ceiling);
+  // '병합할 아이템 데이터가 있는가'와 '충돌을 물어야 하는가'는 다른 질문이다(B-2b).
+  //  · 병합 여부 = 배열의 존재. `[]` 는 '사용자가 목록을 비웠다'는 상태이고 그것도 지켜야 한다.
+  //  · 충돌 여부 = 비어 있지 않은 클라우드 아이템. 이제 아이템은 합집합이라 덮어써지지 않으므로,
+  //    아이템 때문에 사용자에게 선택을 물을 이유가 없어졌다. 기존 UX 를 그대로 두기 위해 판정만 유지한다.
+  const cloudItems = Array.isArray(cloud.my_items);
+  const cloudHasItems = cloudItems && cloud.my_items.length > 0;
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
-  const my_items = cloudHasItems ? cloud.my_items : local.my_items;
+  // 아이템은 합집합 + 표식 차감. 같은 id 면 클라우드가 이긴다(calc 와 같은 기준).
+  const my_items = cloudItems ? mergeMyItems(local.my_items, cloud.my_items, ledger.deleted, opts.ceiling) : local.my_items;
   const calc = cloudHasCalc ? cloud.calc : local.calc;
   const ledgerActive = ["buys", "sells", "cashes", "spends"].some(
     (k) => local.ledger && local.ledger[k] && local.ledger[k].length > 0
@@ -104,15 +191,48 @@ export function mergeSnapshots(local, cloud, opts = {}) {
   const conflict = (cloudHasCalc || cloudHasItems) && localActive;
   return { snapshot: { calc, my_items, ledger }, conflict };
 }
-function mergeLedger(a = {}, b = {}) {
+// id 합집합 + tombstone 차감.
+// 합집합만으로는 '삭제'를 표현할 수 없어, 삭제된 항목을 아직 가진 기기가 접속하면 부활시켰다.
+// (단일 기기에서도: 삭제 후 디바운스 안에 탭을 닫으면 로컬엔 없고 클라우드엔 있는 상태가 된다.)
+// 이제 양쪽 tombstone 을 먼저 합치고, 그 id 는 어느 쪽 버킷에 있든 결과에서 제거한다.
+// now     : TTL 만료 기준(서버 updated_at). null 이면 만료 정리를 하지 않는다.
+// ceiling : 미래 시각 clamp 상한('정상적인 지금'). 기본은 now 지만 호출측이 max(서버, 로컬)을 넘긴다.
+// 거래 생성 시점의 요율. 한 번 정해지면 바뀌지 않는 사실이므로, 병합에서 절대 잃지 않는다.
+const SNAPSHOT_KEYS = ["_fee", "_effD"];
+function keepSnapshots(prev, next) {
+  let out = next;
+  SNAPSHOT_KEYS.forEach((k) => {
+    // `next[k] == null` 이 아니라 hasSnapshot 으로 판정한다. malformed 값(문자열·NaN·범위 밖)은
+    // '존재'하지만 계산부가 거부하고 현재 설정으로 폴백하므로, 살아 있는 prev 스냅샷을 덮으면 요율이 소실된다.
+    if (!hasSnapshot(next[k]) && hasSnapshot(prev[k])) out = { ...out, [k]: prev[k] };
+  });
+  return out;
+}
+
+export function mergeLedger(a = {}, b = {}, now = null, ceiling = now) {
   const out = {};
-  ["buys", "sells", "cashes", "spends"].forEach((k) => {
+  // 양쪽 행을 먼저 **정규 형태**로 만든다(날짜 zero-pad → 파생값 → id 부여).
+  //  · 클라우드 행은 정규화를 거치지 않고 여기로 들어온다. 예전에는 id 없는 행이 `if (x && x.id)` 에
+  //    걸려 **조용히 사라졌다** — 구버전 클라이언트가 올린 pre-id 원장이 병합 한 번에 소실된다.
+  //  · id 는 내용에서 유도되므로(B-7), 양쪽을 같은 규칙으로 정규화해야 같은 거래가 같은 id 를 얻어
+  //    합집합에서 하나로 합쳐진다. 그러지 않으면 중복된다.
+  // canonicalizeRows 는 멱등이라 이미 정규화된 로컬 원장에 다시 적용해도 결과가 같다.
+  const deleted = mergeDeleted(a && a.deleted, b && b.deleted, now, ceiling);
+  LEDGER_BUCKETS.forEach((k) => {
     const map = new Map();
-    (a[k] || []).forEach((x) => { if (x && x.id) map.set(x.id, x); });
+    // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
+    canonicalizeRows(k, a && a[k]).forEach((x) => { map.set(x.id, x); });
     // 같은 id면 클라우드(b) 우선. 항목별 타임스탬프가 없어 정밀 비교는 불가(알려진 한계).
     // 서로 다른 id는 모두 보존되므로 '거래가 사라지는' 손실은 없음.
-    (b[k] || []).forEach((x) => { if (x && x.id) map.set(x.id, x); });
-    out[k] = [...map.values()];
+    canonicalizeRows(k, b && b[k]).forEach((x) => {
+      // 예외: 요율 스냅샷(_fee/_effD)은 '그때 그랬다'는 불변의 사실이다. 한쪽에만 있으면 살린다.
+      // (스냅샷 없이 만든 구버전 클라이언트의 행이 스냅샷 있는 행을 덮어써 요율이 소실되는 것을 막는다.)
+      const prev = map.get(x.id);
+      map.set(x.id, prev ? keepSnapshots(prev, x) : x);
+    });
+    // 삭제 우선: 한쪽이 지우고 다른 쪽이 수정했어도 되살리지 않는다.
+    out[k] = [...map.values()].filter((x) => !isDeleted(deleted, x.id));
   });
+  out.deleted = deleted;
   return out;
 }

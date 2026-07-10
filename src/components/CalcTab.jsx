@@ -1,22 +1,27 @@
-import { useState } from "react";
-import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_ITEMS, DEFAULT_SETTINGS } from "../lib/constants.js";
-import { won, pct, eok, ml, mlN } from "../lib/util.js";
+import { useState, useMemo } from "react";
+import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS } from "../lib/constants.js";
+import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
+import { hasFeeBenefit } from "../lib/calc.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
 
-const tierOptions = TIERS.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
+const tierOptionsOf = (tiers) =>
+  tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
 const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
 const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
 
-export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, chargeMethods = CHARGE_METHODS, calc }) {
+export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, onAddMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
+  // 등급 기준은 app_config(rules.tiers)에서 올 수 있다 → 목록 길이가 바뀌어도 인덱스가 깨지지 않게 방어.
+  const tierOptions = useMemo(() => tierOptionsOf(tiers), [tiers]);
   // 충전 방식 프리셋 옵션 — DB 설정 목록(chargeMethods) 기반. DB에 malformed/null 원소가 섞여도
   // 안전하도록 name 있는 원소만 사용(옵션·addPreset이 같은 목록을 써 인덱스 정합 유지). 기본은 constants.
   const validCharges = (chargeMethods || []).filter((m) => m && typeof m.name === "string");
   const presetOptions = validCharges.map((m, i) => ({ value: i, label: m.name + (m.rate ? ` (${m.rate}%)` : "") }));
 
   const c = calc;
-  const feeBenefit = +settings.mvpGrade >= 1 || settings.pcRoom === "1";
+  // 조건을 여기서 다시 쓰지 않는다 — 화면 설명과 실제 계산이 갈라지지 않게 calc.js 의 판정을 그대로 쓴다.
+  const feeBenefit = hasFeeBenefit(settings.mvpGrade, settings.pcRoom);
   const basicName = c.giftBest ? "선물식" : "메소마켓";
 
   // ----- 히어로/방식비교 파생값 -----
@@ -24,7 +29,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   const curAch = +settings.curAchieved || 0;
   const rawProgPct = c.remain <= 0 ? 100 : goalAmt > 0 ? (curAch / goalAmt) * 100 : 0;
   const progPct = Math.max(0, Math.min(100, Number.isFinite(rawProgPct) ? rawProgPct : 0));
-  const targetName = (TIERS[+settings.tierSel] || {}).name || "목표";
+  const targetName = (tiers[+settings.tierSel] || {}).name || "목표";
   const optName = c.useItem ? "경매장 되팔기" : basicName;
   const bestBasicVal = Math.min(c.gift, c.market);
   // 순비용은 음수(이득)일 수 있어 0을 포함한 범위로 정규화 후 0~100 클램프(바 폭 왜곡 방지)
@@ -50,12 +55,14 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
 
   // ----- 자주 쓰는 아이템 -----
   const setMyItem = (i, patch) => setMyItems(myItems.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const delMyItem = (i) => setMyItems(myItems.filter((_, j) => j !== i));
+  // 배열에서 빼기만 하면 그 아이템을 아직 가진 기기가 다음 접속 때 되살린다 → 삭제 표식을 남기는 App 핸들러를 쓴다.
+  const delMyItem = (i) => onRemoveMyItem(myItems[i].id);
   const addTableRowsToList = () => {
     const add = items.filter(
       (r) => r.name && r.name.trim() && !myItems.some((m) => m.name === r.name && "" + m.cash === "" + r.cash)
     );
-    if (add.length) setMyItems([...myItems, ...add.map((r) => ({ name: r.name, cash: +r.cash, mAllowed: r.mAllowed !== false }))]);
+    // 추가 시각(at)은 App 이 찍는다 — 예전에 지운 같은 이름의 삭제 표식보다 뒤여야 살아남는다.
+    if (add.length) onAddMyItems(add.map((r) => ({ name: r.name, cash: +r.cash, mAllowed: r.mAllowed !== false })));
   };
 
   const resetAll = () => {
@@ -144,8 +151,11 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             <div className="hint">적용 수수료 <b>{c.feePct}%</b> — {feeBenefit ? "MVP 브론즈+ 또는 PC방" : "기본 요율"}</div>
 
             <div className="subhead">마일리지</div>
-            <label>마일리지 결제 비율 (%)</label>
-            <NumInput value={settings.mileageRate} step={1} onChange={(v) => setSettings({ mileageRate: v })} />
+            {/* 마일리지 결제 비율은 넥슨이 정하는 상한이라 사용자가 바꾸는 값이 아니다.
+                예전에는 입력칸이었고, 바꾸면 13주 누적 과금이 재계산되어 과거 기록과 표시 등급이 흔들렸다. */}
+            <div className="hint" style={{ marginTop: 8 }}>
+              마일리지 결제 비율 <b>{Math.round((c.mileageR || 0) * 100)}%</b> — 게임 규칙(고정)
+            </div>
             <label>월 사용 가능 마일리지</label>
             <NumInput value={settings.milAvail} step={1000} onChange={(v) => setSettings({ milAvail: v })} />
             <label>월 적립 한도 (참고)</label>
@@ -219,7 +229,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
               <div>
                 <label>목표 등급</label>
                 <CSelect value={settings.tierSel} options={tierOptions}
-                  onChange={(v) => setSettings({ tierSel: v, tierAmt: TIERS[+v].amt })} />
+                  onChange={(v) => setSettings({ tierSel: v, tierAmt: (tiers[+v] || tiers[tiers.length - 1]).amt })} />
               </div>
               <div><label>목표 기준 금액 (원)</label><NumInput value={settings.tierAmt} step={10000} onChange={(v) => setSettings({ tierAmt: v })} /></div>
               <div><label>현재 누적 실적 (원)</label><NumInput value={settings.curAchieved} step={10000} onChange={(v) => setSettings({ curAchieved: v })} /></div>
@@ -286,12 +296,18 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   </tbody>
                 </table>
                 <div className="hint" style={{ marginTop: 4 }}>
-                  아이콘은 이모지(🫐) 또는 이미지 URL을 넣을 수 있어요. 실제 메이플 아이콘 URL(예: maplestory.io)을 붙여넣으면 그대로 표시됩니다.
+                  아이콘은 이모지(🫐) 또는 <b>maplestory.io</b> 의 https 이미지 URL을 넣을 수 있어요. 다른 주소는 안전을 위해 표시하지 않습니다.
                 </div>
                 <div className="row-actions">
-                  <button className="btn sm" onClick={() => setMyItems([...myItems, { name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
+                  {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다.
+                      (id 는 한 번 정해지면 바뀌지 않는다. 이름을 입력할 때 id 를 다시 계산하면 React key 가 바뀌어
+                       입력 도중 리마운트로 포커스를 잃는다.) */}
+                  <button className="btn sm" onClick={() => onAddMyItems([{ id: uid(), name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
                   <button className="btn ghost sm" onClick={addTableRowsToList}>아래 표를 목록에 추가</button>
-                  <button className="btn ghost sm" onClick={() => setMyItems(DEFAULT_ITEMS.map((x) => ({ ...x })))}>기본 목록 복원</button>
+                  {/* 기본 목록 복원 = '지금 목록을 기본값으로 바꾼다'. 지운 기본 아이템의 삭제 표식이 남아 있으면
+                      복원해도 병합에서 다시 빠진다. 표식은 합집합이라 지울 수 없으므로, App 핸들러가
+                      표식보다 **뒤인 at** 을 찍어 복원이 삭제를 이기게 한다. */}
+                  <button className="btn ghost sm" onClick={onRestoreDefaultItems}>기본 목록 복원</button>
                 </div>
               </div>
             )}

@@ -10,7 +10,12 @@
 
 ## cloud.js (얇은 API + 순수 병합)
 - 인증: `onAuthChange/signInWithGoogle/signInWithEmail/signOut(→clearCloudSynced)`.
-- 데이터: `fetchUserData(uid)`(updated_at 포함 select), `upsertUserData(uid, {calc,my_items,ledger})`.
+- 데이터: `fetchUserData(uid)`(updated_at 포함 select), `writeUserData(uid, {calc,my_items,ledger}, expectedUpdatedAt)`.
+  - **낙관적 동시성 제어**: 서버가 트리거로 채우는 `updated_at` 이 버전이다. 내가 마지막으로 본 버전일 때만
+    `update ... where user_id=? and updated_at=?` 가 성립하고, 그 사이 누가 썼으면 0행 → `{conflict:true}`.
+    행이 없다고 알고 있으면(`expectedUpdatedAt=null`) INSERT 시도, 경쟁하면 23505 → conflict.
+  - 충돌 시 `fetchUserData` → `mergeForUpload`(설정은 이 탭 우선, 원장은 합집합+tombstone 차감) → 재시도(최대 5회).
+  - 무조건 upsert 였을 때는 오래된 스냅샷을 든 탭이 다른 탭의 거래와 삭제 표식을 통째로 덮어썼다.
 - 설정: `fetchAppConfig()` → app_config.config(실패/오프라인/게스트면 null → constants 폴백).
 - **순수 병합**: `mergeSnapshots(local, cloud, {localTouched})` → `{snapshot, conflict}`. ledger는 `mergeLedger`로 **id 기준 합집합**(거래 손실 없음, 같은 id는 클라우드 우선 — 항목별 타임스탬프 없어 정밀비교 불가한 알려진 한계). calc/my_items는 클라우드 비어있지 않으면 클라우드 우선. `conflict = (cloudHasCalc||cloudHasItems) && (ledgerActive || localTouched)`.
 

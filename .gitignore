@@ -16,3 +16,6 @@ _archive
 
 # Claude Code 로컬 권한 오버라이드(개인 전용)
 .claude/settings.local.json
+
+# Claude Code IDE 실행 설정(기기별) — 저장소에 넣지 않는다
+.claude/launch.json

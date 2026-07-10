@@ -2,7 +2,9 @@
 // 모듈 스코프 컴포넌트(리마운트로 입력 포커스 유실 방지 규칙 준수).
 import { useState } from "react";
 import { submitFeedback, cloudEnabled } from "../lib/cloud.js";
+import { getRecentErrors, formatErrorsForFeedback } from "../lib/errorLog.js";
 import { CSelect } from "./ui.jsx";
+import Modal from "./Modal.jsx";
 
 const CATEGORIES = [
   { value: "suggestion", label: "💡 건의 · 개선" },
@@ -17,6 +19,9 @@ export default function FeedbackModal({ onClose, session }) {
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState(session?.user?.email || "");
   const [status, setStatus] = useState("idle"); // idle | sending | sent | error
+  // 최근 오류가 있으면 첨부 여부를 묻는다. 오류는 로컬에만 쌓이고, **사용자가 켰을 때만** 전송된다.
+  const [recentErrors] = useState(getRecentErrors);
+  const [attachErrors, setAttachErrors] = useState(false);
   const [errMsg, setErrMsg] = useState("");
 
   const canSend = message.trim().length > 0 && status !== "sending";
@@ -25,12 +30,16 @@ export default function FeedbackModal({ onClose, session }) {
     if (!canSend) return;
     setStatus("sending");
     setErrMsg("");
-    const { error } = await submitFeedback({ message, category, email });
+    // 첨부는 본문 뒤에 붙인다(서버가 message 를 4000자로 자르므로 사용자 글이 먼저 온다).
+    const body = attachErrors ? message + formatErrorsForFeedback(recentErrors) : message;
+    const { error } = await submitFeedback({ message: body, category, email });
     if (error) {
       setStatus("error");
       setErrMsg(
         error.message === "cloud-disabled"
           ? "지금은 피드백 전송을 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+          : error.message === "rate-limited"
+          ? "짧은 시간에 너무 많이 보내셨어요. 10분 뒤에 다시 시도해 주세요."
           : "전송에 실패했어요. 잠시 후 다시 시도해 주세요."
       );
       return;
@@ -39,8 +48,8 @@ export default function FeedbackModal({ onClose, session }) {
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="피드백 보내기" onClick={onClose}>
-      <div className="modal-card feedback" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} label="피드백 보내기" cardClass="feedback">
+      <>
         <div className="modal-head">
           <div className="modal-title">💬 피드백 보내기</div>
           <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
@@ -86,6 +95,15 @@ export default function FeedbackModal({ onClose, session }) {
               />
             </div>
 
+            {recentErrors.length > 0 && (
+              <div className="fb-field">
+                <label className="fb-check">
+                  <input type="checkbox" checked={attachErrors} onChange={(e) => setAttachErrors(e.target.checked)} />
+                  {" "}최근 오류 {Math.min(recentErrors.length, 3)}건 첨부 <span className="muted">(원인 파악에 도움이 돼요)</span>
+                </label>
+              </div>
+            )}
+
             {status === "error" && <div className="fb-err">{errMsg}</div>}
             {!cloudEnabled && (
               <div className="hint">※ 현재 환경에서는 피드백 전송이 비활성화되어 있어요.</div>
@@ -99,7 +117,7 @@ export default function FeedbackModal({ onClose, session }) {
             </div>
           </>
         )}
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

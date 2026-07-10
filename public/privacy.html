@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>개인정보처리방침 · 메이플 MVP작 효율 계산기</title>
+<meta name="description" content="메이플 MVP작 효율 계산기의 개인정보처리방침. 수집 항목, 이용 목적, 보유 기간, 처리위탁 및 국외 이전, 정보주체의 권리를 안내합니다." />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 32px 20px 72px;
+    font-family: "Noto Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+    line-height: 1.75; color: #23201a; background: #f4efe4;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 36px 0 8px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,.12); }
+  .meta { color: #6b6459; font-size: .86rem; margin-bottom: 28px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: .92rem; }
+  th, td { border: 1px solid rgba(0,0,0,.15); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: rgba(0,0,0,.04); font-weight: 600; }
+  code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 3px; font-size: .88em; }
+  ul { padding-left: 1.2em; }
+  a { color: #7a5a1e; }
+  .back { display: inline-block; margin-bottom: 24px; font-size: .9rem; }
+  .notice { background: rgba(0,0,0,.04); border-left: 3px solid #b99450; padding: 12px 14px; margin: 16px 0; font-size: .92rem; }
+  footer { max-width: 760px; margin: 56px auto 0; padding-top: 20px; border-top: 1px solid rgba(0,0,0,.12); color: #6b6459; font-size: .84rem; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e2d9; background: #0a0b0e; }
+    h2 { border-color: rgba(255,255,255,.14); }
+    .meta, footer { color: #8d8579; }
+    th, td { border-color: rgba(255,255,255,.16); }
+    th { background: rgba(255,255,255,.05); }
+    code, .notice { background: rgba(255,255,255,.07); }
+    a { color: #d7b26a; }
+    footer { border-color: rgba(255,255,255,.14); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">← 계산기로 돌아가기</a>
+  <h1>개인정보처리방침</h1>
+  <p class="meta">시행일: 2026년 7월 10일 · 최종 개정: 2026년 7월 10일</p>
+
+  <p>
+    <b>메이플 MVP작 효율 계산기</b>(이하 "서비스")는 이용자의 개인정보를 소중히 다루며,
+    「개인정보 보호법」을 비롯한 관계 법령을 준수합니다. 본 방침은 서비스가 어떤 정보를 수집하고,
+    무엇을 위해 이용하며, 언제 파기하는지를 설명합니다.
+  </p>
+
+  <div class="notice">
+    <b>핵심 요약.</b> 로그인하지 않으면 어떤 정보도 서버로 전송되지 않습니다.
+    모든 데이터는 이용자의 브라우저에만 저장됩니다. 로그인은 기기 간 동기화를 위한 선택 기능입니다.
+  </div>
+
+  <h2>1. 수집하는 개인정보 항목과 수집 방법</h2>
+
+  <p><b>가. 로그인 없이 이용하는 경우 (기본)</b></p>
+  <p>
+    서버로 전송되는 개인정보가 없습니다. 아래 항목은 이용자의 브라우저 저장소(localStorage)에만
+    보관되며, 서비스 운영자는 이에 접근할 수 없습니다. 브라우저 데이터를 삭제하면 함께 사라집니다.
+  </p>
+  <table>
+    <thead><tr><th>저장 키</th><th>내용</th></tr></thead>
+    <tbody>
+      <tr><td><code>mvpCalc_v4</code></td><td>계산기 설정값(시세, 등급, 충전 방식 등)</td></tr>
+      <tr><td><code>mvpItems_v1</code></td><td>자주 쓰는 아이템 목록</td></tr>
+      <tr><td><code>mvpLedger_v2</code></td><td>이용자가 직접 입력한 게임 내 거래 기록</td></tr>
+      <tr><td><code>mvpCalMode</code>, <code>mvpTheme</code></td><td>달력 보기 방식, 화면 테마 설정</td></tr>
+      <tr><td><code>mvpCloudSyncedUid</code>, <code>mvpUserTouched</code></td><td>동기화 상태 관리용 내부 표식</td></tr>
+    </tbody>
+  </table>
+
+  <p><b>나. 로그인(동기화)을 이용하는 경우</b></p>
+  <table>
+    <thead><tr><th>구분</th><th>항목</th><th>수집 방법</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>필수</td>
+        <td>이메일 주소, 인증 제공자가 전달하는 고유 식별자</td>
+        <td>Google 계정 로그인 또는 이메일 매직링크 인증 시</td>
+      </tr>
+      <tr>
+        <td>필수</td>
+        <td>Google 계정의 기본 프로필 정보(이름, 프로필 사진 URL)</td>
+        <td>Google 로그인을 선택한 경우, 인증 과정에서 자동 전달</td>
+      </tr>
+      <tr>
+        <td>서비스 이용 데이터</td>
+        <td>계산기 설정값, 자주 쓰는 아이템 목록, 이용자가 입력한 게임 내 거래 기록</td>
+        <td>기기 간 동기화를 위해 자동 저장</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p><b>다. 피드백을 보내는 경우</b></p>
+  <table>
+    <thead><tr><th>구분</th><th>항목</th></tr></thead>
+    <tbody>
+      <tr><td>필수</td><td>피드백 내용, 분류(건의·버그·질문·기타)</td></tr>
+      <tr><td>선택</td><td>회신용 이메일 주소</td></tr>
+      <tr><td>자동 수집</td><td>브라우저 User-Agent 문자열(오류 재현 목적), 로그인 상태인 경우 계정 식별자</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    서비스는 주민등록번호를 비롯한 고유식별정보와 「개인정보 보호법」 제23조의 민감정보를
+    일절 수집하지 않습니다. 만 14세 미만 아동의 개인정보를 알면서 수집하지 않습니다.
+  </p>
+
+  <h2>2. 개인정보의 이용 목적</h2>
+  <ul>
+    <li>이용자 식별 및 로그인 상태 유지</li>
+    <li>기기 간 계산기 설정·거래 기록 동기화</li>
+    <li>피드백 접수, 문의에 대한 회신, 오류 원인 파악</li>
+  </ul>
+  <p>수집한 개인정보는 위 목적 외의 용도로 이용하지 않으며, 목적이 변경될 경우 사전에 동의를 받습니다.</p>
+
+  <h2>3. 개인정보의 보유 및 이용 기간</h2>
+  <table>
+    <thead><tr><th>구분</th><th>보유 기간</th></tr></thead>
+    <tbody>
+      <tr><td>계정 정보 및 동기화 데이터</td><td>회원 탈퇴 요청 시까지. 탈퇴 시 지체 없이 파기</td></tr>
+      <tr><td>피드백 내용 및 회신 이메일</td><td>접수일로부터 1년. 이후 파기</td></tr>
+      <tr><td>브라우저 저장 데이터</td><td>이용자가 직접 삭제할 때까지(서비스가 보유하지 않음)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    관계 법령에서 일정 기간 보존을 요구하는 경우 해당 기간 동안 보관한 뒤 파기합니다.
+    파기는 데이터베이스에서 복구 불가능한 방법으로 삭제하는 방식으로 이루어집니다.
+  </p>
+
+  <h2>4. 개인정보의 제3자 제공</h2>
+  <p>
+    서비스는 이용자의 개인정보를 제3자에게 제공하지 않습니다.
+    다만 법령에 따라 수사기관이 적법한 절차로 요구하는 경우에는 그러하지 아니합니다.
+  </p>
+
+  <h2>5. 개인정보 처리의 위탁 및 국외 이전</h2>
+  <p>서비스 운영을 위해 아래 사업자에게 개인정보 처리를 위탁하고 있으며, 이에 따라 개인정보가 국외로 이전됩니다.</p>
+  <table>
+    <thead><tr><th>수탁자</th><th>위탁 업무</th><th>이전 국가 · 시점 · 방법</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Supabase, Inc.</td>
+        <td>인증 처리, 데이터베이스 보관</td>
+        <td>미국 등 Supabase가 지정한 리전. 로그인·동기화·피드백 발생 시점에 네트워크를 통해 전송</td>
+      </tr>
+      <tr>
+        <td>Cloudflare, Inc.</td>
+        <td>웹사이트 호스팅 및 콘텐츠 전송</td>
+        <td>미국 등 Cloudflare 글로벌 네트워크. 접속 시점에 네트워크를 통해 전송</td>
+      </tr>
+      <tr>
+        <td>Google LLC</td>
+        <td>Google 계정 로그인 인증(이용자가 선택한 경우에 한함)</td>
+        <td>미국. 로그인 시도 시점에 네트워크를 통해 전송</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    이용자는 개인정보의 국외 이전을 거부할 수 있습니다. 다만 이 경우 로그인 및 동기화 기능을
+    이용할 수 없으며, 로그인 없이 서비스의 모든 계산 기능을 그대로 사용할 수 있습니다.
+  </p>
+
+  <h2>6. 정보주체의 권리와 행사 방법</h2>
+  <p>이용자는 언제든지 다음 권리를 행사할 수 있습니다.</p>
+  <ul>
+    <li>개인정보 열람 요구</li>
+    <li>오류가 있을 경우 정정 요구</li>
+    <li>삭제 요구</li>
+    <li>처리 정지 요구</li>
+  </ul>
+  <p>
+    권리 행사는 서비스 내 <b>피드백</b> 기능 또는 아래 연락처를 통해 요청할 수 있으며,
+    서비스는 지체 없이 조치합니다. 서비스 내 <b>데이터 내보내기</b> 기능으로 저장된 데이터를
+    언제든 직접 내려받을 수 있고, 로그아웃 후 브라우저 저장소를 비우면 로컬 데이터를 즉시 삭제할 수 있습니다.
+  </p>
+
+  <h2>7. 쿠키 및 유사 기술</h2>
+  <p>
+    서비스는 광고·분석 목적의 추적 쿠키를 사용하지 않습니다. 로그인 상태 유지를 위해
+    브라우저 저장소(localStorage)에 인증 토큰을 보관하며, 이는 로그아웃 시 삭제됩니다.
+  </p>
+
+  <h2>8. 개인정보의 안전성 확보 조치</h2>
+  <ul>
+    <li>데이터베이스 행 단위 접근 통제(Row Level Security)를 적용해, 로그인한 이용자는 자신의 데이터에만 접근할 수 있습니다.</li>
+    <li>모든 통신은 HTTPS로 암호화됩니다.</li>
+    <li>비밀번호를 저장하지 않습니다. 인증은 Google 또는 이메일 매직링크에 위임합니다.</li>
+  </ul>
+
+  <h2>9. 개인정보 보호책임자</h2>
+  <p>
+    개인정보 처리에 관한 문의, 불만 처리, 피해 구제는 아래로 연락해 주십시오.
+  </p>
+  <ul>
+    <li>담당: 서비스 운영자</li>
+    <li>연락처: <a href="mailto:yesfine13@gmail.com">yesfine13@gmail.com</a></li>
+  </ul>
+  <p>
+    개인정보 침해에 대한 신고나 상담이 필요하시면 아래 기관에 문의하실 수 있습니다.
+  </p>
+  <ul>
+    <li>개인정보침해신고센터 (privacy.kisa.or.kr / 국번없이 118)</li>
+    <li>개인정보 분쟁조정위원회 (kopico.go.kr / 1833-6972)</li>
+    <li>대검찰청 사이버수사과 (spo.go.kr / 1301)</li>
+    <li>경찰청 사이버수사국 (ecrm.police.go.kr / 182)</li>
+  </ul>
+
+  <h2>10. 방침의 변경</h2>
+  <p>
+    본 방침의 내용이 변경되는 경우, 변경 사항을 시행일 최소 7일 전부터 서비스 내에 공지합니다.
+    이용자에게 불리한 중요한 변경의 경우 최소 30일 전에 공지합니다.
+  </p>
+</main>
+
+<footer>
+  <p>
+    본 서비스는 넥슨코리아 및 「메이플스토리」와 무관한 비공식 팬 사이트입니다.
+    「메이플스토리」와 관련 명칭·이미지의 모든 권리는 ㈜넥슨코리아에 있습니다.
+  </p>
+  <p><a href="/">계산기</a> · <a href="/terms.html">이용약관</a></p>
+</footer>
+</body>
+</html>
