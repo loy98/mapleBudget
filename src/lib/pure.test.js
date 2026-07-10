@@ -2376,3 +2376,24 @@ describe("B-2b · 충돌 병합 결과는 모든 병합 대상 키를 상태에 
     expect(gotItems).toEqual([]); // 기본 목록으로 되살아나면 안 된다
   });
 });
+
+// ===== 구버전 탭 호환 (Codex B-2b 2차 지적 — 알려진 한계로 확정) =====
+describe("B-2b · 구버전 탭과의 상호작용", () => {
+  it("구버전 탭이 만든 삭제(표식 없이 배열만 줄임)는 전파되지 않는다 — 표식 방식의 내재적 한계", () => {
+    const items = canonicalizeMyItems([{ name: "펫" }]);
+    // 구버전 탭은 표식을 만들지 못하고 my_items 만 비워 올린다.
+    const cloud = { calc: { a: 1 }, my_items: [], ledger: { deleted: {} } };
+    const local = { calc: {}, my_items: items, ledger: {} };
+    // 합집합이라 로컬의 '펫'이 살아남는다. B-2b 이전(LWW)에도 결과는 같았다 → 회귀가 아니다.
+    expect(mergeSnapshots(local, cloud).snapshot.my_items.map((x) => x.name)).toEqual(["펫"]);
+  });
+
+  it("신버전이 만든 표식은 구버전 탭을 거쳐도 살아남는다 (모르는 키를 보존해 올리므로)", () => {
+    const items = canonicalizeMyItems([{ name: "펫" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    // 구버전 탭이 원장을 받아 그대로 다시 올린 상태를 흉내낸다(표식 키를 이해하지 못하지만 보존한다).
+    const cloudFromOldTab = { calc: { a: 1 }, my_items: canonicalizeMyItems([{ name: "펫" }]), ledger: { deleted: { ...del.ledger.deleted } } };
+    const local = { calc: {}, my_items: [], ledger: del.ledger };
+    expect(mergeSnapshots(local, cloudFromOldTab).snapshot.my_items).toEqual([]);
+  });
+});

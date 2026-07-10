@@ -259,7 +259,7 @@ export const itemTombstoneKey = (id) => ITEM_TOMBSTONE_PREFIX + id;
 export const isItemTombstone = (key) => typeof key === "string" && key.startsWith(ITEM_TOMBSTONE_PREFIX);
 
 // 아이템 삭제 = 목록에서 제거 + 표식 기록. 배열에서 빼기만 하면 그 아이템을 아직 가진 기기가 되살린다.
-// 표식은 `ledger.deleted` 에 함께 산다(구버전 탭도 모르는 키를 보존해 전파한다 — 자가 치유).
+// 표식은 `ledger.deleted` 에 함께 산다(구버전 탭도 모르는 키를 보존하므로 표식이 살아남는다).
 export function deleteMyItem(myItems, ledger, id, now = Date.now()) {
   if (!safeRowId(id)) return { myItems, ledger }; // 표식을 남길 수 없는 id → 삭제도 하지 않는다
   const rows = asArray(myItems);
