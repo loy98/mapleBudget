@@ -8,11 +8,12 @@
 ## 0. 30초 요약
 
 전체 검수(분야별 에이전트 5종 + Codex) → 발견 → 수정 → Codex 재검수를 반복했다.
-테스트 **52건 → 200건**, `npm audit` **5건(critical 1·high 1) → 0건**.
+테스트 **52건 → 276건**, `npm audit` **5건(critical 1·high 1) → 0건**.
 
-- `main`: 프로덕션. **`dev`가 34커밋 앞서 있다. 아직 배포 안 함.**
-- `dev`: 미병합 브랜치 **없음**. B-3(저장소 손상 방어) · B-5(거래별 요율) · B-4(주 경계 KST)까지 전부 병합됨.
-  전 항목 Codex PASS. 테스트 200건 · 빌드 통과.
+- `main`: 프로덕션. **`dev`가 48커밋 앞서 있다. 아직 배포 안 함.**
+- `dev`: 미병합 브랜치 **없음**. MEDIUM 이상 데이터 정합 항목을 전부 해결했다 —
+  B-3(저장소 손상) · B-5(거래별 요율) · B-4(주 경계 KST) · B-7(결정적 행 id) · B-6(백업 검증) · B-2b(아이템 병합).
+  전 항목 Codex PASS. 테스트 276건 · 빌드 통과 · `npm audit` 0건.
 
 **배포하려면 §5의 세 가지를 먼저 해야 한다.**
 
@@ -27,7 +28,10 @@ main ──────────────── (프로덕션, https://map
        ├─ 37fd1bc  merge: tombstone + 낙관적 동시성 제어
        ├─ 4dd6ec3  merge: 저장소 손상 방어 (B-3)
        ├─ fedf954  merge: 거래별 요율 스냅샷 + 발효일 규칙 이력 (B-5)
-       └─ e8dabe0  merge: 주 경계·'오늘'을 KST 로 고정 (B-4)
+       ├─ e8dabe0  merge: 주 경계·'오늘'을 KST 로 고정 (B-4)
+       ├─ ...      merge: 구버전 원장 행에 결정적 id (B-7)
+       ├─ ...      merge: 백업 파일 검증 + 전부-아니면-전무 복원 (B-6)
+       └─ ...      merge: 자주 쓰는 아이템도 진짜 병합 (B-2b)
 ```
 
 `dev`는 다른 워크트리에 체크아웃돼 있어 이쪽(`C:\Users\82108\orca\workspaces\MVP작\dev`)에서
@@ -71,7 +75,7 @@ main ──────────────── (프로덕션, https://map
 
 ---
 
-## 3. 최근에 끝낸 것 (B-5 · B-4)
+## 3. 최근에 끝낸 것 (B-5 · B-4 · B-7 · B-6 · B-2b)
 
 ### B-5 — 과거 거래에 현재 설정을 소급 적용
 
@@ -100,18 +104,37 @@ malformed 값이 **유효한 스냅샷을 덮어쓰던** 병합 결함, 미래 �
 
 ---
 
+### B-7 — 구버전 원장 행의 id 재발급 → 동기화 후 중복
+
+로드할 때마다 랜덤 `uid()` 를 붙여, 같은 백업을 연 두 기기가 같은 거래를 두 건으로 만들었다.
+내용에서 유도한 결정적 id(`legacyRowId`)를 준다. **내용만 해시하면 안 된다** — "같은 날 같은 값에 두 번 산 것"이
+하나로 합쳐진다(중복보다 나쁜 소실). 같은 내용의 등장 순번을 함께 넣는다.
+정규화 순서가 계약이다: **날짜 zero-pad → 파생값(won→rate) → id 부여**(`canonicalizeRows`). `mergeLedger` 도 이걸 쓴다
+(예전엔 id 없는 클라우드 행을 조용히 버렸다).
+
+### B-6 — 백업 파일 검증
+
+`data.app` 문자열 하나만 보고 그대로 썼다. 크래시는 없었지만 형태가 깨진 값은 다음 로드에서 조용히 기본값이 됐다.
+`validateBackup` 이 **거절(아무것도 안 씀)** 과 **경고(복원하되 알림)** 를 구분한다.
+복원은 **전부 아니면 전무** — 쓰기 전에 원본을 잡아 두고 실패 시 되돌린다. 원본을 못 읽으면 아예 쓰지 않는다.
+
+### B-2b — 자주 쓰는 아이템도 진짜 병합
+
+아이템에 결정적 id, 삭제 표식은 `ledger.deleted` 의 `item:<id>` 네임스페이스에.
+`at`(목록에 들어온 시각)으로 '지웠다가 다시 추가'를 표현한다(표식보다 나중이면 살아남는다).
+`[]` = 사용자가 비운 목록, `null` = 데이터 없음. **충돌 병합 결과는 `applyMergedSnapshot` 한 곳에서 전부 반영한다** —
+하나라도 빠뜨리면 다음 업로드가 stale 값으로 서버를 덮는다.
+
+---
+
 ## 4. 남은 백로그 (우선순위)
 
 상세는 [hardening-backlog.md](hardening-backlog.md).
 
 | ID | 내용 | 심각도 | 비고 |
 |---|---|---|---|
-| **B-2b** | `calc`/`my_items`는 여전히 last-writer-wins | MEDIUM | `my_items`에 안정 id 없음 → tombstone 필요 |
-| B-6 | `importAll`이 백업 파일 스키마를 검증 안 함 | MEDIUM | 날짜 포맷은 `padDate` 로 해소. 나머지 검증 남음 |
-| B-7 | 레거시 원장 행의 id 재발급 → 동기화 후 중복 | MEDIUM | 결정적 id(해시) 유도 필요 |
-| B-9 | feedback rate limit의 IP 버킷은 best-effort | MEDIUM | 전역 백스톱으로 완화됨. 근본해법=Turnstile+Edge Function |
+| **B-9** | feedback rate limit의 IP 버킷은 best-effort | MEDIUM | **프로덕션 관찰 필요** — 배포 후 `anon:__all__` 카운터를 보고 판단 |
 | B-8 잔여 | `visibilitychange` 플러시가 평범한 `fetch`(탭 종료 시 취소) | LOW | `sendBeacon`/`keepalive` |
-| B-8 잔여 | `normalizeMyItems`: `[]`와 '없음'을 구분 못해 아이템 전체 삭제 불가 | LOW | |
 | B-8 잔여 | `IconView`가 임의 http(s) 호스트 이미지 로드 | LOW | allowlist 미완 |
 | B-8 잔여 | 에러 트래킹 부재 | LOW | `ErrorBoundary.componentDidCatch`에 전송 지점만 있음 |
 | B-8 잔여 | `manW`만 `isFinite` 가드 없음, `won(-0.4)` → `"-0원"` | LOW | |
