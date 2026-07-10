@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_ITEMS, DEFAULT_SETTINGS } from "../lib/constants.js";
-import { won, pct, eok, ml, mlN } from "../lib/util.js";
+import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS } from "../lib/constants.js";
+import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
 
 const tierOptionsOf = (tiers) =>
@@ -8,7 +8,7 @@ const tierOptionsOf = (tiers) =>
 const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
 const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
 
-export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
+export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
   // 등급 기준은 app_config(rules.tiers)에서 올 수 있다 → 목록 길이가 바뀌어도 인덱스가 깨지지 않게 방어.
@@ -53,12 +53,14 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
 
   // ----- 자주 쓰는 아이템 -----
   const setMyItem = (i, patch) => setMyItems(myItems.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const delMyItem = (i) => setMyItems(myItems.filter((_, j) => j !== i));
+  // 배열에서 빼기만 하면 그 아이템을 아직 가진 기기가 다음 접속 때 되살린다 → 삭제 표식을 남기는 App 핸들러를 쓴다.
+  const delMyItem = (i) => onRemoveMyItem(myItems[i].id);
   const addTableRowsToList = () => {
     const add = items.filter(
       (r) => r.name && r.name.trim() && !myItems.some((m) => m.name === r.name && "" + m.cash === "" + r.cash)
     );
-    if (add.length) setMyItems([...myItems, ...add.map((r) => ({ name: r.name, cash: +r.cash, mAllowed: r.mAllowed !== false }))]);
+    // at = 목록에 들어온 시각. 예전에 지운 같은 이름의 아이템이 남긴 삭제 표식을 이겨야 다시 추가된다.
+    if (add.length) setMyItems([...myItems, ...add.map((r) => ({ name: r.name, cash: +r.cash, mAllowed: r.mAllowed !== false, at: Date.now() }))]);
   };
 
   const resetAll = () => {
@@ -295,9 +297,12 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   아이콘은 이모지(🫐) 또는 이미지 URL을 넣을 수 있어요. 실제 메이플 아이콘 URL(예: maplestory.io)을 붙여넣으면 그대로 표시됩니다.
                 </div>
                 <div className="row-actions">
-                  <button className="btn sm" onClick={() => setMyItems([...myItems, { name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
+                  {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다. */}
+                  <button className="btn sm" onClick={() => setMyItems([...myItems, { id: uid(), at: Date.now(), name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
                   <button className="btn ghost sm" onClick={addTableRowsToList}>아래 표를 목록에 추가</button>
-                  <button className="btn ghost sm" onClick={() => setMyItems(DEFAULT_ITEMS.map((x) => ({ ...x })))}>기본 목록 복원</button>
+                  {/* 기본 목록 복원 = '지금 목록을 기본값으로 바꾼다'. 지운 기본 아이템의 삭제 표식이 남아 있으면
+                      복원해도 병합에서 다시 빠지므로, 표식까지 걷어 주는 App 핸들러가 필요하다. */}
+                  <button className="btn ghost sm" onClick={onRestoreDefaultItems}>기본 목록 복원</button>
                 </div>
               </div>
             )}

@@ -56,7 +56,8 @@ function useToday() {
 //  - force 정착 판정은 syncedUserRef(실제 데이터 로드) — cloudReady state의 stale read 회피.
 // ============================================================
 // setCalcState/setMyItems/setLedger는 React useState 세터(안정 identity)만 받는다 → stale closure 없음.
-// 내부에서 setMyItems(withRowKeys(...))로 안정 key를 부여(App의 applyMyItems 래퍼에 의존하지 않음).
+// 내부에서 setMyItems(normalizeMyItems(...))로 결정적 id·안정 key를 부여(App의 applyMyItems 래퍼에 의존하지 않음).
+// id 없이 넣으면 삭제 표식을 남길 수 없어 아이템 삭제가 조용히 실패한다(B-2b).
 export function useCloudSync({ settings, charges, items, myItems, ledger, setCalcState, setMyItems, setLedger }) {
   const [session, setSession] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
@@ -133,7 +134,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     }
     if (freshRef.current.items) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) setMyItems(withRowKeys(its));
+      if (its.length) setMyItems(normalizeMyItems(its));
     }
   }, [appConfig, authResolved, userId]);
 
@@ -152,7 +153,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     if (force.includes("defaultItems")) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) setMyItems(withRowKeys(its));
+      if (its.length) setMyItems(normalizeMyItems(its));
     }
   }, [appConfig, authResolved, userId, cloudReady]);
 

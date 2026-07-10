@@ -1,5 +1,5 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearAccountData, mergeDeleted, isDeleted, canonicalizeRows } from "./storage.js";
+import { clearAccountData, mergeDeleted, isDeleted, canonicalizeRows, canonicalizeMyItems, isItemDeleted } from "./storage.js";
 import { LEDGER_BUCKETS } from "./constants.js";
 import { hasSnapshot } from "./util.js";
 
@@ -120,15 +120,36 @@ export async function writeUserData(userId, snap, expectedUpdatedAt) {
   return { updatedAt: data.updated_at };
 }
 
+// ===== 자주 쓰는 아이템 병합 (B-2b) =====
+// 예전에는 이 탭의 배열이 통째로 이겼다(last-writer-wins). 그래서 오래된 스냅샷을 든 탭이 업로드하면
+// **다른 탭에서 추가한 아이템이 사라졌다.**
+//
+// 이제 id 합집합 + 삭제 표식 차감이다(원장과 같은 규칙). 표식은 `ledger.deleted` 안에
+// `item:<id>` 네임스페이스로 산다 → 구버전 탭도 모르는 키를 보존해 삭제가 전파된다.
+//
+// `winner` 는 **같은 id 일 때** 어느 쪽 내용을 쓸지 정한다:
+//  · 업로드 충돌 → 이 탭(사용자가 방금 편집한 값을 잃으면 안 된다)
+//  · 최초 로그인 → 클라우드(calc 와 같은 기준)
+// 순서는 loser 를 먼저 깔고 winner 로 덮는다 → 양쪽 추가분이 모두 남고, 표시 순서도 안정적이다.
+export function mergeMyItems(loser, winner, deleted) {
+  const map = new Map();
+  canonicalizeMyItems(loser).forEach((x) => map.set(x.id, x));
+  canonicalizeMyItems(winner).forEach((x) => map.set(x.id, x));
+  // 표식보다 나중에 추가된 아이템은 살아남는다 — 지웠다가 다시 넣은 것이다(isItemDeleted 참고).
+  return [...map.values()].filter((x) => !isItemDeleted(deleted, x));
+}
+
 // 업로드 충돌 시의 병합 규칙.
-// calc/my_items = 지금 이 탭의 값이 이긴다(사용자가 방금 편집한 것). 설정은 last-writer-wins 로 충분하다.
-// ledger = 합집합 + tombstone 차감. 거래는 손실도 부활도 없어야 하므로 여기서만 진짜 병합이 필요하다.
+// calc = 지금 이 탭의 값이 이긴다(사용자가 방금 편집한 것). 스칼라 묶음이라 last-writer-wins 로 충분하다.
+// ledger/my_items = 합집합 + tombstone 차감. 손실도 부활도 없어야 하므로 진짜 병합이 필요하다.
 export function mergeForUpload(localSnap, cloud, clientNow = Date.now()) {
   const t = tombstoneClock(cloud, clientNow);
+  const ledger = mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, t.now, t.ceiling);
   return {
     calc: localSnap.calc,
-    my_items: localSnap.my_items,
-    ledger: mergeLedger(localSnap.ledger, cloud ? cloud.ledger : {}, t.now, t.ceiling),
+    // 같은 id 면 이 탭이 이긴다 — 방금 고친 캐시가·아이콘을 서버의 옛 값으로 되돌리지 않는다.
+    my_items: mergeMyItems(cloud ? cloud.my_items : [], localSnap.my_items, ledger.deleted),
+    ledger,
   };
 }
 
@@ -151,9 +172,15 @@ export function tombstoneClock(cloud, clientNow = Date.now()) {
 export function mergeSnapshots(local, cloud, opts = {}) {
   if (!cloud) return { snapshot: local, conflict: false };
   const ledger = mergeLedger(local.ledger, cloud.ledger, opts.now, opts.ceiling);
-  const cloudHasItems = !!(cloud.my_items && cloud.my_items.length);
+  // '병합할 아이템 데이터가 있는가'와 '충돌을 물어야 하는가'는 다른 질문이다(B-2b).
+  //  · 병합 여부 = 배열의 존재. `[]` 는 '사용자가 목록을 비웠다'는 상태이고 그것도 지켜야 한다.
+  //  · 충돌 여부 = 비어 있지 않은 클라우드 아이템. 이제 아이템은 합집합이라 덮어써지지 않으므로,
+  //    아이템 때문에 사용자에게 선택을 물을 이유가 없어졌다. 기존 UX 를 그대로 두기 위해 판정만 유지한다.
+  const cloudItems = Array.isArray(cloud.my_items);
+  const cloudHasItems = cloudItems && cloud.my_items.length > 0;
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
-  const my_items = cloudHasItems ? cloud.my_items : local.my_items;
+  // 아이템은 합집합 + 표식 차감. 같은 id 면 클라우드가 이긴다(calc 와 같은 기준).
+  const my_items = cloudItems ? mergeMyItems(local.my_items, cloud.my_items, ledger.deleted) : local.my_items;
   const calc = cloudHasCalc ? cloud.calc : local.calc;
   const ledgerActive = ["buys", "sells", "cashes", "spends"].some(
     (k) => local.ledger && local.ledger[k] && local.ledger[k].length > 0
