@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { TIERS } from "../../lib/constants.js";
-import { won, pct, eok, mlN, mmdd, fmtD, weekStartThu, estGrade } from "../../lib/util.js";
+import { won, pct, eok, mlN, mmdd, fmtD, weekStartThu, estGrade, nowD } from "../../lib/util.js";
 import { YMPicker, WeekPicker, StatGroup, CostLabel, PlLabel, Sparkline } from "../ui.jsx";
 import { ItemSubRow, ItemSummary, Qty } from "./ItemTables.jsx";
 
@@ -125,7 +125,7 @@ export default function StatsPanel({
           </thead>
           <tbody>
             {mWeeks.map((w, wi) => {
-              const wk = fmtD(w.ws), isCur = wk === fmtD(weekStartThu(new Date()));
+              const wk = fmtD(w.ws), isCur = wk === fmtD(weekStartThu(nowD()));
               const empty = !w.sold && !w.cashed; // 메소 열 전용 — 개수 열은 각자 0이면 '–'
               const items = mWeekItems[wi];
               const canOpen = items.length > 0;

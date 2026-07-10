@@ -1,5 +1,5 @@
 import { WD_MVP, WD_SUN } from "../../lib/constants.js";
-import { won, eok, mmdd, fmtD, todayStr, addDays, start13, weekStartThu, weekStartSun, manW } from "../../lib/util.js";
+import { won, eok, mmdd, fmtD, todayStr, addDays, start13, weekStartThu, weekStartSun, manW, nowD } from "../../lib/util.js";
 import { weeklyAch, cashWonOf } from "../../lib/ledger.js";
 import { DateInput, ItemCombo, NumInput } from "../ui.jsx";
 
@@ -9,7 +9,7 @@ function MonthCal({ cursor, days, selectedDate, onSelect }) {
   const first = new Date(y, m, 1);
   const gs = addDays(first, -first.getDay());
   const tdy = todayStr();
-  const tws = fmtD(weekStartSun(new Date()));
+  const tws = fmtD(weekStartSun(nowD()));
   const cells = [];
   for (let i = 0; i < 42; i++) {
     const cd = addDays(gs, i);
@@ -41,7 +41,7 @@ function MonthCal({ cursor, days, selectedDate, onSelect }) {
 // ===== MVP 주간 (13주, 목~수) =====
 function MvpCal({ ledger, days, mileageR, selectedDate, onSelect }) {
   const s = start13();
-  const cur = fmtD(weekStartThu(new Date()));
+  const cur = fmtD(weekStartThu(nowD()));
   const tdy = todayStr();
   const rows = [];
   for (let w = 0; w < 13; w++) {
@@ -208,7 +208,7 @@ export default function CalendarPanel({
             <button className="navbtn" onClick={() => setCalCursor(new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1))}>‹</button>
             <span id="calTitle">{calCursor.getFullYear()}년 {calCursor.getMonth() + 1}월</span>
             <button className="navbtn" onClick={() => setCalCursor(new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1))}>›</button>
-            <button className="btn ghost sm" onClick={() => setCalCursor(new Date())}>오늘</button>
+            <button className="btn ghost sm" onClick={() => setCalCursor(nowD())}>오늘</button>
           </div>
         )}
       </div>

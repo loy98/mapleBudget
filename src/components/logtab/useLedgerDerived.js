@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { WINDOW_WEEKS, rulesAt } from "../../lib/constants.js";
-import { mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, hasSnapshot } from "../../lib/util.js";
+import { mmdd, fmtD, todayStr, curMonth, addDays, start13, weekStartThu, hasSnapshot, nowD, dateOf } from "../../lib/util.js";
 import { weeklyAch, cumNow, ledgerStats, dayInfo, mesoWeeks, weeklyItems, itemSummary } from "../../lib/ledger.js";
 
 // LogTab 의 파생값 전부를 한 곳에 모은다. 원장·계산기 값에서 나오는 순수 파생이라
@@ -32,7 +32,7 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
     if (periodMode === "month") { const m = statMonth || curMonth(); return (dt) => (dt || "").indexOf(m) === 0; }
     if (periodMode === "week") {
       const ws = statWeek;
-      const we = fmtD(addDays(new Date(statWeek + "T00:00:00"), 6));
+      const we = fmtD(addDays(dateOf(statWeek), 6));
       return (dt) => (dt || "") >= ws && (dt || "") <= we;
     }
     // 상한도 둔다. cumNow 는 13주(마지막 수요일)까지만 더하므로, 상한이 없으면 미래 날짜 거래가
@@ -95,7 +95,7 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
 
   // 주차 선택 목록 (MVP 주: 목~수, 최근 26주 최신순)
   const weekOptions = useMemo(() => {
-    const base = weekStartThu(new Date());
+    const base = weekStartThu(nowD());
     const curKey = fmtD(base);
     const arr = [];
     for (let i = 0; i < 26; i++) {
@@ -113,7 +113,7 @@ export function useLedgerDerived({ ledger, calc, myItems, periodMode, statMonth,
 
   const selWeek = weekOptions.find((w) => w.key === statWeek);
   const periodRange =
-    periodMode === "w13" ? mmdd(start13()) + " ~ " + mmdd(new Date()) + " · 최근 13주"
+    periodMode === "w13" ? mmdd(start13()) + " ~ " + mmdd(nowD()) + " · 최근 13주"
     : periodMode === "month" ? (statMonth || curMonth()) + " 한 달"
     : periodMode === "week" ? (selWeek ? selWeek.label : statWeek) + " · 한 주(목~수)"
     : "전체 기간";

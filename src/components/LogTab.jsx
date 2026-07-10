@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { TIERS } from "../lib/constants.js";
-import { fmtD, todayStr, curMonth, weekStartThu, uid } from "../lib/util.js";
+import { fmtD, todayStr, curMonth, weekStartThu, uid, nowD } from "../lib/util.js";
 import { loadCalMode, saveCalMode, deleteLedgerEntry } from "../lib/storage.js";
 import { useLedgerDerived } from "./logtab/useLedgerDerived.js";
 import StatsPanel from "./logtab/StatsPanel.jsx";
@@ -17,9 +17,9 @@ export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS
   const [periodMode, setPeriodMode] = useState("w13");
   const [chartMode, setChartMode] = useState("line"); // 추세 차트: line | bars
   const [statMonth, setStatMonth] = useState(curMonth());
-  const [statWeek, setStatWeek] = useState(() => fmtD(weekStartThu(new Date())));
+  const [statWeek, setStatWeek] = useState(() => fmtD(weekStartThu(nowD())));
   const [calMode, setCalModeState] = useState(loadCalMode);
-  const [calCursor, setCalCursor] = useState(() => new Date());
+  const [calCursor, setCalCursor] = useState(() => nowD());
   const [selectedDate, setSelectedDate] = useState(null);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [entryDate, setEntryDate] = useState(todayStr);

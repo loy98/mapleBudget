@@ -7,7 +7,8 @@ import {
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
-import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot } from "./util.js";
+import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth } from "./util.js";
+import { tzDateStr, dateOf, nowD, APP_TZ } from "./tz.js";
 import { computeForecast, cumNow } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
 import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt } from "./constants.js";
@@ -1634,5 +1635,58 @@ describe("B-5 · malformed 스냅샷이 유효한 스냅샷을 덮지 않는다 
   it("양쪽 다 malformed 면 폴백 대상으로 남는다 (hasSnapshot 이 거부)", () => {
     const out = mergeLedger({ sells: [row({ _fee: "x" })] }, { sells: [row({ _fee: "bad" })] });
     expect(hasSnapshot(out.sells[0]._fee)).toBe(false);
+  });
+});
+
+// ===== B-4: 주 경계는 브라우저 로컬 타임존이 아니라 KST 기준 =====
+// UTC-8 사용자가 수요일 오후에 열면 KST 로는 이미 목요일(새 MVP 주)이다.
+// 로컬 기준으로 판단하면 그 거래가 지난 주 칸에 쌓이고 13주 창도 한 주 어긋난다.
+describe("B-4 · 주차 경계 타임존 (KST 고정)", () => {
+  // 2026-07-08T16:00:00Z → KST 2026-07-09(목, 새 주 시작) / LA 2026-07-08(수, 지난 주)
+  const INSTANT = new Date("2026-07-08T16:00:00Z");
+
+  it("같은 순간이라도 시간대에 따라 민간 날짜가 다르다 (문제의 존재)", () => {
+    expect(tzDateStr(INSTANT, "Asia/Seoul")).toBe("2026-07-09");
+    expect(tzDateStr(INSTANT, "America/Los_Angeles")).toBe("2026-07-08");
+  });
+
+  it("앱은 언제나 KST 를 쓴다 — tz 를 생략하면 Asia/Seoul", () => {
+    expect(APP_TZ).toBe("Asia/Seoul");
+    expect(tzDateStr(INSTANT)).toBe(tzDateStr(INSTANT, "Asia/Seoul"));
+  });
+
+  it("그 순간의 MVP 주는 KST 기준으로 새 주다 (로컬 기준이면 지난 주)", () => {
+    const kst = fmtD(weekStartThu(dateOf(tzDateStr(INSTANT, "Asia/Seoul"))));
+    const la = fmtD(weekStartThu(dateOf(tzDateStr(INSTANT, "America/Los_Angeles"))));
+    expect(kst).toBe("2026-07-09");  // 목요일 당일 = 그 주의 시작
+    expect(la).toBe("2026-07-02");   // 한 주 전
+    expect(kst).not.toBe(la);
+  });
+
+  it("todayStr/curMonth 도 KST 기준이다", () => {
+    expect(todayStr()).toBe(tzDateStr(new Date(), "Asia/Seoul"));
+    expect(curMonth()).toBe(todayStr().slice(0, 7));
+  });
+
+  it("nowD 는 KST 오늘의 민간 날짜를 가리킨다", () => {
+    expect(fmtD(nowD())).toBe(todayStr());
+  });
+
+  it("dateOf 는 정오 고정 — 브라우저 DST 전환일에도 날짜가 밀리지 않는다", () => {
+    const d = dateOf("2026-03-08");
+    expect(d.getHours()).toBe(12);
+    expect(fmtD(d)).toBe("2026-03-08");
+    expect(fmtD(dateOf("2026-07-09"))).toBe("2026-07-09");
+  });
+
+  it("잘못된 입력은 Invalid Date / null 로 드러난다 (조용히 오늘이 되지 않는다)", () => {
+    expect(isNaN(dateOf("2026-7-9").getTime())).toBe(true);  // zero-pad 안 된 값은 padDate 가 먼저 고친다
+    expect(isNaN(dateOf("어제").getTime())).toBe(true);
+    expect(tzDateStr(new Date("bad"))).toBe(null);
+    expect(tzDateStr("문자열")).toBe(null);
+  });
+
+  it("알 수 없는 시간대는 로컬로 폴백하고 던지지 않는다", () => {
+    expect(tzDateStr(INSTANT, "Not/AZone")).toBe(fmtD(INSTANT));
   });
 });

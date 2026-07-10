@@ -1,4 +1,4 @@
-import { fmtD, start13, addDays, weekStartThu, estGrade } from "./util.js";
+import { fmtD, start13, addDays, weekStartThu, estGrade, nowD } from "./util.js";
 import { TIERS, WINDOW_WEEKS } from "./constants.js";
 
 // ===== 거래별 요율 =====
@@ -228,7 +228,7 @@ export function computeForecast(ledger, mileageR, tierIdx, timing, includeThis, 
   // tierIdx 는 셀렉트 값이라 tiers 길이가 DB에서 바뀌면 범위를 벗어날 수 있다 → 마지막 등급으로 클램프.
   const tier = tiers[tierIdx] || tiers[tiers.length - 1];
   const T = tier.amt;
-  const cur = weekStartThu(new Date());
+  const cur = weekStartThu(nowD());
   const weekOf = (o) => addDays(cur, o * 7);
   const achPast = (o) => weeklyAch(ledger, weekOf(o), mileageR);
   const immediate = Math.max(0, T - C);
