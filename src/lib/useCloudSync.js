@@ -5,6 +5,7 @@ import {
   getDataOwner, setDataOwner,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
+import { fitsKeepalive, setKeepalive } from "./supabaseClient.js";
 import { CHARGE_METHODS, resolveRuleHistory, rulesAt } from "./constants.js";
 import { todayStr } from "./util.js";
 
@@ -358,15 +359,26 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
 
   // 마지막 편집 유실 방지: 탭 숨김 시 대기 중 변경을 즉시 업로드(같은 runUpload → dirty-retry 공유).
   useEffect(() => {
-    const onHide = () => {
-      if (document.visibilityState !== "hidden") return;
+    // 탭이 사라지는 순간의 마지막 업로드. 평범한 fetch 는 문서와 함께 취소되므로 keepalive 로 보낸다.
+    // 64KB 를 넘는 원장은 keepalive 가 거부하므로 평범한 요청으로 보낸다 — 취소될 수 있지만
+    // 로컬에는 이미 저장돼 있어 다음 접속에 동기화된다.
+    const flush = () => {
       if (!userId || !cloudReady || upsertingRef.current || !dirtyForFlushRef.current) return;
       if (liveUserIdRef.current !== userId) return;
       clearTimeout(upsertTimer.current);
-      runUpload(userId);
+      const ka = fitsKeepalive(dataRef.current);
+      if (ka) setKeepalive(true);
+      // 플러시가 끝나면 반드시 되돌린다. 켜 둔 채로 두면 이후의 큰 업로드가 상한에 걸려 실패한다.
+      Promise.resolve(runUpload(userId)).finally(() => { if (ka) setKeepalive(false); });
     };
+    const onHide = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onHide);
-    return () => document.removeEventListener("visibilitychange", onHide);
+    // pagehide 는 탭 닫기·bfcache 진입에서 더 확실히 불린다(iOS Safari 는 visibilitychange 를 거르기도 한다).
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flush);
+    };
   }, [userId, cloudReady, runUpload]);
 
   return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory };

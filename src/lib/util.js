@@ -4,19 +4,27 @@ import { tzDateStr, dateOf, nowD } from "./tz.js";
 export { APP_TZ, tzDateStr, dateOf, nowD } from "./tz.js";
 
 // ===== 포맷 =====
-export const won = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "–") + "원";
-export const pct = (n) => (isFinite(n) ? n.toFixed(1) : "–") + "%";
-export const eok = (n) => (isFinite(n) ? n.toFixed(2) : "–") + "억";
-export const ml = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "–") + " 마일리지";
-// 숫자만(단위 없음) — 모노(.num) 안에서 쓰고 "마일리지" 단위는 .u 로 따로 붙일 때 사용
-export const mlN = (n) => (isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : "–");
+// 반올림·자릿수 절삭이 -0 을 만들면 화면에 "-0원", "-0.00억" 이 뜬다. 사용자에겐 오작동으로 보인다.
+// (`Math.round(-0.4)` 는 -0 이고 `(-0.001).toFixed(2)` 는 "-0.00" 이다.)
+const noNegZero = (n) => (Object.is(n, -0) ? 0 : n);
+// "-0.00" 처럼 모든 자리가 0인데 부호만 남은 문자열을 바로잡는다.
+const stripNegZero = (s) => (/^-0(\.0+)?$/.test(s) ? s.slice(1) : s);
 
+export const won = (n) => (isFinite(n) ? noNegZero(Math.round(n)).toLocaleString("ko-KR") : "–") + "원";
+export const pct = (n) => (isFinite(n) ? stripNegZero(n.toFixed(1)) : "–") + "%";
+export const eok = (n) => (isFinite(n) ? stripNegZero(n.toFixed(2)) : "–") + "억";
+export const ml = (n) => (isFinite(n) ? noNegZero(Math.round(n)).toLocaleString("ko-KR") : "–") + " 마일리지";
+// 숫자만(단위 없음) — 모노(.num) 안에서 쓰고 "마일리지" 단위는 .u 로 따로 붙일 때 사용
+export const mlN = (n) => (isFinite(n) ? noNegZero(Math.round(n)).toLocaleString("ko-KR") : "–");
+
+// 큰 금액을 "1.2억"/"3만" 으로 줄여 쓴다. 0·빈값은 빈 문자열(표에서 자리만 차지하지 않게).
+// 다른 포맷 함수와 달리 isFinite 가드가 없어 `manW(Infinity)` 가 "Infinity억" 을 냈다.
 export function manW(n) {
+  if (!isFinite(n) || !n) return "";
   const a = Math.abs(n);
-  if (!n) return "";
-  if (a >= 1e8) return (n / 1e8).toFixed(1) + "억";
-  if (a >= 10000) return Math.round(n / 10000) + "만";
-  return Math.round(n) + "";
+  if (a >= 1e8) return stripNegZero((n / 1e8).toFixed(1)) + "억";
+  if (a >= 10000) return noNegZero(Math.round(n / 10000)) + "만";
+  return noNegZero(Math.round(n)) + "";
 }
 
 // ===== 날짜 =====

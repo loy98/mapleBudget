@@ -9,10 +9,10 @@ import {
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock, mergeMyItems } from "./cloud.js";
 import { applyMergedSnapshot } from "./useCloudSync.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
-import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth, legacyRowId } from "./util.js";
+import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth, legacyRowId, won, pct, eok, ml, mlN, manW } from "./util.js";
 import { tzDateStr, dateOf, nowD, APP_TZ } from "./tz.js";
 import { computeForecast, cumNow } from "./ledger.js";
-import { computeCalc, computeFeePct } from "./calc.js";
+import { computeCalc, computeFeePct, hasFeeBenefit } from "./calc.js";
 import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
@@ -2395,5 +2395,61 @@ describe("B-2b · 구버전 탭과의 상호작용", () => {
     const cloudFromOldTab = { calc: { a: 1 }, my_items: canonicalizeMyItems([{ name: "펫" }]), ledger: { deleted: { ...del.ledger.deleted } } };
     const local = { calc: {}, my_items: [], ledger: del.ledger };
     expect(mergeSnapshots(local, cloudFromOldTab).snapshot.my_items).toEqual([]);
+  });
+});
+
+// ===== B-8 LOW: 포맷 함수의 -0 / Infinity =====
+// 반올림·자릿수 절삭이 -0 을 만들면 화면에 "-0원", "-0.00억" 이 뜬다. 사용자에겐 오작동으로 보인다.
+describe("포맷 함수 — -0 과 무한대", () => {
+  it("won 은 -0 을 만들지 않는다", () => {
+    expect(won(-0.4)).toBe("0원");
+    expect(won(-0)).toBe("0원");
+    expect(won(0)).toBe("0원");
+    expect(won(-1)).toBe("-1원");
+    expect(won(NaN)).toBe("–원");
+    expect(won(Infinity)).toBe("–원");
+  });
+
+  it("pct·eok 는 '-0.0' / '-0.00' 을 만들지 않는다", () => {
+    expect(pct(-0.01)).toBe("0.0%");
+    expect(pct(-1.24)).toBe("-1.2%");
+    expect(eok(-0.001)).toBe("0.00억");
+    expect(eok(-1.235)).toBe("-1.24억"); // 진짜 음수는 그대로
+    expect(eok(Infinity)).toBe("–억");
+  });
+
+  it("ml·mlN 도 -0 을 만들지 않는다", () => {
+    expect(ml(-0.4)).toBe("0 마일리지");
+    expect(mlN(-0.4)).toBe("0");
+  });
+
+  it("manW 는 무한대에 'Infinity억' 을 내지 않는다", () => {
+    expect(manW(Infinity)).toBe("");
+    expect(manW(-Infinity)).toBe("");
+    expect(manW(NaN)).toBe("");
+    expect(manW(0)).toBe("");
+    expect(manW(1.5e8)).toBe("1.5억");
+    expect(manW(30000)).toBe("3만");
+    expect(manW(-0.4)).toBe("0");   // -0 방지
+    expect(manW(-30000)).toBe("-3만");
+  });
+});
+
+// ===== B-8 LOW: 수수료 우대 판정의 진실 원천은 하나 =====
+describe("hasFeeBenefit — CalcTab 의 재구현 제거", () => {
+  it("computeFeePct 와 같은 조건을 쓴다", () => {
+    const rules = { feeMvp: 3, feeBase: 5 };
+    const cases = [["0", "0"], ["0", "1"], ["1", "0"], ["1", "1"], ["3", "0"], [0, "0"], [1, "0"]];
+    cases.forEach(([g, p]) => {
+      const expected = hasFeeBenefit(g, p) ? rules.feeMvp : rules.feeBase;
+      expect(computeFeePct(g, p, rules)).toBe(expected);
+    });
+  });
+
+  it("MVP 브론즈(1) 이상이거나 프리미엄 PC방이면 우대", () => {
+    expect(hasFeeBenefit("0", "0")).toBe(false);
+    expect(hasFeeBenefit("0", "1")).toBe(true);
+    expect(hasFeeBenefit("1", "0")).toBe(true);
+    expect(hasFeeBenefit("6", "0")).toBe(true);
   });
 });
