@@ -339,7 +339,13 @@ XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 
 - ~~`computeFeePct` 의 조건이 `CalcTab.jsx` 에 재구현~~ — ✅ 해결. `hasFeeBenefit` 하나가 진실 원천이고
   `computeFeePct` 와 `CalcTab` 이 함께 쓴다.
 - `MVP_GRADES[0] = "무등급 (15만 미만)"` 이 `TIERS[0].amt` 를 문자열로 복제. `"무등급"` 리터럴이 4곳.
-- `ui.jsx`(576줄) 분할 권장: inputs / pickers / Sparkline / labels + `usePopover` 추출(5곳 복붙 ~50줄).
+- ~~`ui.jsx` 분할 + `usePopover` 추출~~ — ✅ 해결(feature/ui-split). 647줄 → 13줄 배럴 + `ui/` 모듈 6개.
+  **import 경로는 그대로 둔다**(`from "./ui.jsx"`) — 경로 변경은 이 리팩터의 목적이 아니다.
+  팝오버 4종의 복붙을 `ui/usePopover.js` 로 모으며 **실제 버그도 고쳤다**: 셋은 바깥 판정을
+  `e.target !== btnRef.current` 로 참조 비교해서, 앵커 버튼 안의 자식을 누르면 '바깥'으로 오판해
+  닫혔다가 버튼 onClick 이 다시 열었다. 이제 `contains` 로 판정하고 `pointerdown` 하나로 통일했다
+  (mousedown/click 이 뒤섞여 있었다). Esc 닫기는 캡처 단계에서 소비해 모달이 함께 닫히지 않는다.
+  검증: 분할 전후 App 의 SSR 마크업 15,650B **바이트 동일**.
 - 커스텀 위젯(`ItemCombo`·`DateInput`·`WeekPicker`·`YMPicker`·달력 셀)이 키보드로 조작 불가.
 - CSP `script-src 'self'` 는 애드센스를 차단한다. 광고 종류 확정 시 해당 도메인만 허용할 것.
 - `PRIVACY_CONTACT_EMAIL` 플레이스홀더를 실제 연락처로 치환해야 배포 가능.
