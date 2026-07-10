@@ -43,6 +43,8 @@ export function CSelect({ value, onChange, options, style, ariaLabel }) {
   }, [open]);
 
   const onBtnKey = (e) => {
+    // 열린 채 Tab 으로 떠나면 목록이 화면에 남는다. 포커스가 옮겨가므로 되돌리지 않고 닫기만 한다.
+    if (open && e.key === "Tab") { close(false); return; }
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
         e.preventDefault();

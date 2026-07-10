@@ -346,7 +346,15 @@ XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 
   닫혔다가 버튼 onClick 이 다시 열었다. 이제 `contains` 로 판정하고 `pointerdown` 하나로 통일했다
   (mousedown/click 이 뒤섞여 있었다). Esc 닫기는 캡처 단계에서 소비해 모달이 함께 닫히지 않는다.
   검증: 분할 전후 App 의 SSR 마크업 15,650B **바이트 동일**.
-- 커스텀 위젯(`ItemCombo`·`DateInput`·`WeekPicker`·`YMPicker`·달력 셀)이 키보드로 조작 불가.
+- ~~커스텀 위젯 키보드 조작~~ — ✅ 해결(feature/a11y-keyboard). `div onClick` 이라 키보드로 아예 조작할 수 없었다.
+  · 격자·목록(달력 셀 42/91칸, 주차 26개, 연월 12칸, 날짜 42칸)은 **roving tabindex**(`ui/useRovingFocus.js`).
+    모든 셀에 `tabIndex=0` 을 주면 접근성 '통과'는 되지만 달력 하나를 지나는 데 Tab 을 42번 눌러야 한다.
+    격자당 Tab 정지점은 하나, 그 안에서는 방향키로 이동한다. **경계에서 멈춘다**(순환하면 위치를 잃는다).
+    모르는 키는 소비하지 않는다 — Tab·Esc 가 막히면 안 된다.
+  · `ItemCombo` 는 자유 입력이라 포커스가 입력에 머물러야 한다 → roving 대신 `aria-activedescendant` 패턴
+    (↑↓ 로 활성 옵션 이동, Enter 로 선택). `CSelect` 와 같은 모델.
+  · `DateInput` 은 readOnly 입력이라 Enter/Space/↓ 로도 열린다(예전엔 클릭 말고는 여는 길이 없었다).
+  · `div` 셀에는 기본 포커스 링이 없다 → `:focus-visible` 아웃라인을 CSS 에 추가.
 - CSP `script-src 'self'` 는 애드센스를 차단한다. 광고 종류 확정 시 해당 도메인만 허용할 것.
 - `PRIVACY_CONTACT_EMAIL` 플레이스홀더를 실제 연락처로 치환해야 배포 가능.
 

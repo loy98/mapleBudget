@@ -1,7 +1,10 @@
+import { useRef } from "react";
 import { WD_MVP, WD_SUN } from "../../lib/constants.js";
 import { won, eok, mmdd, fmtD, todayStr, addDays, start13, weekStartThu, weekStartSun, manW, nowD } from "../../lib/util.js";
 import { weeklyAch, cashWonOf } from "../../lib/ledger.js";
 import { DateInput, ItemCombo, NumInput } from "../ui.jsx";
+import { useRovingFocus } from "../ui/useRovingFocus.js";
+import { useFocusRescue } from "../ui/useFocusRescue.js";
 
 // ===== 월력 =====
 function MonthCal({ cursor, days, selectedDate, onSelect }) {
@@ -10,10 +13,14 @@ function MonthCal({ cursor, days, selectedDate, onSelect }) {
   const gs = addDays(first, -first.getDay());
   const tdy = todayStr();
   const tws = fmtD(weekStartSun(nowD()));
-  const cells = [];
-  for (let i = 0; i < 42; i++) {
+  const keys = Array.from({ length: 42 }, (_, i) => fmtD(addDays(gs, i)));
+  // 7열 격자 — 좌우로 하루, 상하로 한 주. 처음 Tab 으로 들어오면 선택일(없으면 오늘)에 앉는다.
+  const initial = Math.max(0, [selectedDate, tdy, fmtD(first)].map((k) => keys.indexOf(k)).find((i) => i >= 0) ?? 0);
+  const roving = useRovingFocus({ count: 42, cols: 7, initial, activate: (i) => onSelect(keys[i]) });
+
+  const cells = keys.map((k, i) => {
     const cd = addDays(gs, i);
-    const k = fmtD(cd), dow = cd.getDay(), info = days[k];
+    const dow = cd.getDay(), info = days[k];
     let cls = "mcell";
     cls += cd.getMonth() !== m ? " other" : " inmonth";
     if (dow === 0) cls += " sun";
@@ -21,19 +28,27 @@ function MonthCal({ cursor, days, selectedDate, onSelect }) {
     if (k === tdy) cls += " today";
     if (k === selectedDate) cls += " sel";
     if (fmtD(weekStartSun(cd)) === tws) cls += " curweek";
-    cells.push(
-      <div key={k} className={cls} onClick={() => onSelect(k)}>
+    return (
+      <div
+        key={k}
+        role="button"
+        aria-label={k}
+        aria-pressed={k === selectedDate}
+        className={cls}
+        onClick={() => onSelect(k)}
+        {...roving.itemProps(i)}
+      >
         <div className="mc-dn">{cd.getDate()}</div>
         {info && (info.ach > 0 ? <div className="evt">₩{manW(info.ach)}</div> : <div className="dotrow"><i></i></div>)}
       </div>
     );
-  }
+  });
   return (
     <div className="monthcal">
       <div className="mc-head">
         {WD_SUN.map((w, i) => <div key={w} className={i === 0 ? "sun" : i === 6 ? "sat" : ""}>{w}</div>)}
       </div>
-      <div className="mc-body">{cells}</div>
+      <div className="mc-body" role="group" aria-label="월별 달력">{cells}</div>
     </div>
   );
 }
@@ -43,6 +58,10 @@ function MvpCal({ ledger, days, mileageR, selectedDate, onSelect }) {
   const s = start13();
   const cur = fmtD(weekStartThu(nowD()));
   const tdy = todayStr();
+  // 13주 × 7일 = 91칸. 좌우로 하루, 상하로 한 주(7칸)씩 이동한다.
+  const keys = Array.from({ length: 91 }, (_, i) => fmtD(addDays(s, i)));
+  const initial = Math.max(0, [selectedDate, tdy].map((k) => keys.indexOf(k)).find((i) => i >= 0) ?? 0);
+  const roving = useRovingFocus({ count: 91, cols: 7, initial, activate: (i) => onSelect(keys[i]) });
   const rows = [];
   for (let w = 0; w < 13; w++) {
     const ws = addDays(s, w * 7), we = addDays(ws, 6);
@@ -50,6 +69,7 @@ function MvpCal({ ledger, days, mileageR, selectedDate, onSelect }) {
     const wt = weeklyAch(ledger, ws, mileageR);
     const tds = [];
     for (let dd = 0; dd < 7; dd++) {
+      const idx = w * 7 + dd;
       const cd = addDays(ws, dd), k = fmtD(cd), info = days[k];
       let cls = "day";
       if (info) cls += " has";
@@ -57,7 +77,14 @@ function MvpCal({ ledger, days, mileageR, selectedDate, onSelect }) {
       if (k === selectedDate) cls += " sel";
       tds.push(
         <td key={k}>
-          <div className={cls} onClick={() => onSelect(k)}>
+          <div
+            role="button"
+            aria-label={k}
+            aria-pressed={k === selectedDate}
+            className={cls}
+            onClick={() => onSelect(k)}
+            {...roving.itemProps(idx)}
+          >
             <span className="dn">{cd.getDate()}</span>
             {info && (info.ach > 0 ? <span className="amt">₩{manW(info.ach)}</span> : <span className="amt">{info.n}건</span>)}
           </div>
@@ -102,8 +129,15 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
   const spends = ledger.spends.filter((x) => x.date === date);
   const cnt = buys.length + sells.length + cashes.length + spends.length;
 
+  // 거래의 날짜를 다른 날로 바꾸면 그 행이 이 목록에서 빠진다 → 포커스가 있던 입력이 사라진다.
+  // 포커스를 살아 있는 조상(이 컨테이너)으로 되돌린다. 안 그러면 body 로 떨어진다.
+  // 개수만 보면 '같은 개수의 다른 행으로 교체'(동기화 병합 등)를 놓친다 → 행 id 조합까지 본다.
+  const wrapRef = useRef(null);
+  const rowSig = [buys, sells, cashes, spends].map((rs) => rs.map((r) => r.id).join(",")).join("|");
+  useFocusRescue(wrapRef, [date, rowSig]);
+
   return (
-    <div style={{ marginTop: 16 }}>
+    <div style={{ marginTop: 16 }} ref={wrapRef} tabIndex={-1}>
       <div className="subhead">
         {date} 내역 {cnt ? `(${cnt}건)` : <span className="muted" style={{ fontWeight: 400 }}>· 기록 없음, 아래 버튼으로 추가</span>}
       </div>

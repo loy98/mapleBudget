@@ -38,18 +38,36 @@ export function usePopover() {
   const anchorRef = useRef(null);
   const popRef = useRef(null);
 
-  const close = useCallback(() => setOpen(false), []);
+  // `restoreFocus` = 닫으면서 트리거(앵커)로 포커스를 되돌린다.
+  // 팝오버 안의 셀에 포커스가 있는 채로 그 셀이 언마운트되면 포커스는 `<body>` 로 떨어진다 —
+  // 키보드 사용자는 자기가 어디 있는지 잃고 Tab 을 처음부터 다시 눌러야 한다.
+  // 단, **바깥을 클릭해 닫을 때는 되돌리지 않는다**(사용자가 이미 다른 곳으로 갔다).
+  const close = useCallback((restoreFocus = false) => {
+    setOpen(false);
+    if (!restoreFocus) return;
+    const el = anchorRef.current;
+    if (el && typeof el.focus === "function") el.focus();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e) => {
-      if (isOutsideClick(e.target, [popRef.current, anchorRef.current])) close();
+      if (isOutsideClick(e.target, [popRef.current, anchorRef.current])) close(false);
     };
     const onKeyCapture = (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation(); // 바깥 모달이 같은 Esc 로 닫히지 않게 여기서 소비
-      close();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation(); // 바깥 모달이 같은 Esc 로 닫히지 않게 여기서 소비
+        close(true); // Esc 로 닫으면 트리거로 돌아간다
+        return;
+      }
+      // 팝오버는 portal 로 <body> 끝에 붙는다. 그 안에서 Tab 을 누르면 포커스가 문서의 엉뚱한 끝으로
+      // 새어 나가고 팝오버는 열린 채 남는다. 포커스 트랩 대신 **닫고 트리거로 돌아간다** —
+      // 사용자는 Tab 을 한 번 더 눌러 자연스럽게 다음 요소로 간다.
+      if (e.key === "Tab" && popRef.current && popRef.current.contains(e.target)) {
+        e.preventDefault();
+        close(true);
+      }
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyCapture, true);
