@@ -312,7 +312,10 @@ XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 
 배포 후 `feedback_throttle` 의 `anon:__all__` 카운터를 관찰해 상한을 조정할 것.
 
 ### B-8. 그 외 (LOW~MEDIUM)
-- `visibilitychange` 플러시가 평범한 `fetch` — 탭 종료 시 취소된다. `sendBeacon`/`keepalive` 필요.
+- ~~`visibilitychange` 플러시가 평범한 `fetch`~~ — ✅ 해결. `keepalive: true` 로 보낸다(문서가 사라져도 요청이 산다).
+  `sendBeacon` 은 **쓸 수 없다** — 헤더를 못 실어 PostgREST 의 `apikey`/`Authorization` 을 보낼 방법이 없다.
+  keepalive 는 본문 64KB 상한이 있어 `fitsKeepalive`(UTF-8 바이트 기준)로 재고, 넘으면 평범한 요청으로 보낸다.
+  `pagehide` 도 함께 듣는다(iOS Safari 는 visibilitychange 를 거르기도 한다).
 - ~~`writeJSON` 이 `QuotaExceededError` 를 조용히 삼킴~~ — ✅ 해결(B-3 과 함께). `writeJSON` 이 성공 여부를
   반환하고, 쿼터 초과를 `StorageAlert` 로 노출한다. `save*` 도 boolean 을 반환하므로 `useEffect` 축약형
   금지(반환값이 cleanup 으로 해석된다 — App.jsx 주석 참고).
@@ -324,9 +327,10 @@ XFF 는 신뢰 프록시가 '뒤에 덧붙이는' 헤더라 마지막 항목을 
 - `IconView` 가 http(s) 이면 임의 호스트 이미지를 로드(트래킹 픽셀 표면). allowlist 미완(1차 P2-2 부분 해결).
 - 에러 트래킹 부재 — 프로덕션 오류를 알 방법이 없다(`ErrorBoundary.componentDidCatch` 에 전송 지점만 마련).
 - ~~`mileageRate` 상한 미검증~~ — ✅ 해결. 규칙으로 이동 + `resolveRules` 가 100 이상 거부.
-- `manW` 만 `isFinite` 가드 없음(`manW(Infinity)` → `"Infinity억"`). `manW(99999999)` → `"10000만"`.
-- `won(-0.4)` → `"-0원"`.
-- `computeFeePct` 의 조건이 `CalcTab.jsx` 에 재구현(`feeBenefit`) — 한쪽만 고치면 표시와 계산이 갈라진다.
+- ~~`manW` 만 `isFinite` 가드 없음~~, ~~`won(-0.4)` → `"-0원"`~~ — ✅ 해결. 포맷 함수 전체에 -0·무한대 가드.
+  (`Math.round(-0.4)` 는 `-0`, `(-0.001).toFixed(2)` 는 `"-0.00"` 이다 — 화면엔 오작동으로 보인다.)
+- ~~`computeFeePct` 의 조건이 `CalcTab.jsx` 에 재구현~~ — ✅ 해결. `hasFeeBenefit` 하나가 진실 원천이고
+  `computeFeePct` 와 `CalcTab` 이 함께 쓴다.
 - `MVP_GRADES[0] = "무등급 (15만 미만)"` 이 `TIERS[0].amt` 를 문자열로 복제. `"무등급"` 리터럴이 4곳.
 - `ui.jsx`(576줄) 분할 권장: inputs / pickers / Sparkline / labels + `usePopover` 추출(5곳 복붙 ~50줄).
 - 커스텀 위젯(`ItemCombo`·`DateInput`·`WeekPicker`·`YMPicker`·달력 셀)이 키보드로 조작 불가.

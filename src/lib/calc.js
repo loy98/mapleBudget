@@ -6,8 +6,12 @@ export const mesoS = (mesoRate) => (+mesoRate || 0) / 1e8;
 
 // 경매장 수수료(%): MVP 브론즈+ 또는 프리미엄 PC방이면 우대 수수료, 아니면 기본 수수료.
 // 수수료율은 넥슨이 정하는 규칙이므로 rules 로 주입받는다(app_config 로 재배포 없이 변경 가능).
+// 경매장 수수료 우대를 받는 조건. **이 판정의 진실 원천은 여기 하나뿐이다.**
+// CalcTab 이 같은 조건을 재구현하고 있었다 — 한쪽만 고치면 화면의 설명과 실제 계산이 갈라진다.
+export const hasFeeBenefit = (mvpGrade, pcRoom) => +mvpGrade >= 1 || pcRoom === "1";
+
 export function computeFeePct(mvpGrade, pcRoom, rules = DEFAULT_RULES) {
-  return +mvpGrade >= 1 || pcRoom === "1" ? rules.feeMvp : rules.feeBase;
+  return hasFeeBenefit(mvpGrade, pcRoom) ? rules.feeMvp : rules.feeBase;
 }
 
 // ===== 충전 배분 =====

@@ -5,6 +5,7 @@ import {
   getDataOwner, setDataOwner,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
+import { fitsKeepalive, setKeepalive } from "./supabaseClient.js";
 import { CHARGE_METHODS, resolveRuleHistory, rulesAt } from "./constants.js";
 import { todayStr } from "./util.js";
 
@@ -53,6 +54,11 @@ export function applyMergedSnapshot(merged, { setLedger, setMyItems }) {
   setLedger(normalizeLedger(merged.ledger));
   setMyItems(normalizeMyItems(merged.my_items));
 }
+
+// 이 요청을 keepalive 로 보낼 것인가. **요청 직전, 실제로 보낼 본문으로** 판정해야 한다 —
+// 충돌 재시도의 merged 는 서버 원장을 합쳐 처음 payload 보다 커질 수 있고,
+// 64KB 를 넘으면 브라우저가 keepalive 요청 자체를 거부한다(마지막 편집이 통째로 유실).
+export const keepaliveForBody = (flush, body) => !!flush && fitsKeepalive(body);
 
 // ============================================================
 // useCloudSync — 세션·app_config·클라우드 동기화·업로드를 한 곳에 응집(App.jsx의 SRP 회복).
@@ -262,11 +268,21 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   // 단일 in-flight 직렬화 + do-while dirty-retry + 계정 가드 + 마커 + 재예약. captured uid로 동작.
   // refs + 안정 setter(setSyncState/setSyncNonce/setLedger)만 읽으므로 안정화 → 이펙트 deps에 넣어도 재실행 없음.
   // setLedger 는 React useState 세터라 identity 가 고정이다(훅 계약).
-  const runUpload = useCallback(async (uid) => {
+  //
+  // flush=true 는 '탭이 사라지는 중'이라는 뜻이다. 이때만 keepalive 로 보낸다.
+  // keepalive 판정은 **요청 직전, 실제로 보낼 본문으로** 한다 — 충돌 재시도의 `merged` 는 서버 원장을
+  // 합쳐 처음 payload 보다 커질 수 있고, 64KB 를 넘으면 브라우저가 요청 자체를 거부한다.
+  const runUpload = useCallback(async (uid, flush = false) => {
     if (upsertingRef.current) { dirtyRef.current = true; return; } // in-flight면 dirty만 표시(러너가 소비)
     upsertingRef.current = true;
     setSyncState("syncing");
     let aborted = false;
+    // 플래그는 이 요청 하나에만 걸고 곧바로 되돌린다(다른 요청이 상한에 걸리지 않게).
+    const write = async (body, expected) => {
+      if (flush) setKeepalive(keepaliveForBody(flush, body));
+      try { return await writeUserData(uid, body, expected); }
+      finally { if (flush) setKeepalive(false); }
+    };
     try {
       do {
         dirtyRef.current = false;
@@ -277,7 +293,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         dirtyForFlushRef.current = false;
 
         // 조건부 쓰기: 내가 마지막으로 본 버전일 때만 성립. 그 사이 다른 탭/기기가 썼으면 conflict.
-        let res = await writeUserData(uid, payload, lastSeenRef.current);
+        let res = await write(payload, lastSeenRef.current);
         for (let tries = 0; res.conflict && tries < 5; tries++) {
           if (liveUserIdRef.current !== uid) { aborted = true; break; }
           // 서버 최신본을 읽어 병합한다. 거래는 합집합 + tombstone 차감,
@@ -289,7 +305,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
           // 병합 결과를 반드시 화면(상태)에도 반영한다(applyMergedSnapshot 주석 참고).
           // 항목 '개수'만 비교해 건너뛰면 안 된다 — 한 건이 지워지고 한 건이 추가된 경우 개수가 같다.
           applyMergedSnapshot(merged, { setLedger, setMyItems });
-          res = await writeUserData(uid, merged, lastSeenRef.current);
+          res = await write(merged, lastSeenRef.current);
         }
         if (aborted) break;
         if (res.conflict) throw new Error("write-conflict"); // 5회 재시도에도 실패 → 백오프로 넘긴다
@@ -358,15 +374,24 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
 
   // 마지막 편집 유실 방지: 탭 숨김 시 대기 중 변경을 즉시 업로드(같은 runUpload → dirty-retry 공유).
   useEffect(() => {
-    const onHide = () => {
-      if (document.visibilityState !== "hidden") return;
+    // 탭이 사라지는 순간의 마지막 업로드. 평범한 fetch 는 문서와 함께 취소되므로 keepalive 로 보낸다.
+    // 64KB 를 넘는 원장은 keepalive 가 거부하므로 평범한 요청으로 보낸다 — 취소될 수 있지만
+    // 로컬에는 이미 저장돼 있어 다음 접속에 동기화된다.
+    const flush = () => {
       if (!userId || !cloudReady || upsertingRef.current || !dirtyForFlushRef.current) return;
       if (liveUserIdRef.current !== userId) return;
       clearTimeout(upsertTimer.current);
-      runUpload(userId);
+      // keepalive 판정·해제는 runUpload 가 요청 단위로 한다(본문이 병합으로 커질 수 있으므로).
+      runUpload(userId, true);
     };
+    const onHide = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onHide);
-    return () => document.removeEventListener("visibilitychange", onHide);
+    // pagehide 는 탭 닫기·bfcache 진입에서 더 확실히 불린다(iOS Safari 는 visibilitychange 를 거르기도 한다).
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flush);
+    };
   }, [userId, cloudReady, runUpload]);
 
   return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory };

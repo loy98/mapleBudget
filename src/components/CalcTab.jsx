@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS } from "../lib/constants.js";
 import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
+import { hasFeeBenefit } from "../lib/calc.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
 
 const tierOptionsOf = (tiers) =>
@@ -19,7 +20,8 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   const presetOptions = validCharges.map((m, i) => ({ value: i, label: m.name + (m.rate ? ` (${m.rate}%)` : "") }));
 
   const c = calc;
-  const feeBenefit = +settings.mvpGrade >= 1 || settings.pcRoom === "1";
+  // 조건을 여기서 다시 쓰지 않는다 — 화면 설명과 실제 계산이 갈라지지 않게 calc.js 의 판정을 그대로 쓴다.
+  const feeBenefit = hasFeeBenefit(settings.mvpGrade, settings.pcRoom);
   const basicName = c.giftBest ? "선물식" : "메소마켓";
 
   // ----- 히어로/방식비교 파생값 -----
