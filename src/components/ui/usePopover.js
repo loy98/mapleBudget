@@ -55,10 +55,19 @@ export function usePopover() {
       if (isOutsideClick(e.target, [popRef.current, anchorRef.current])) close(false);
     };
     const onKeyCapture = (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation(); // 바깥 모달이 같은 Esc 로 닫히지 않게 여기서 소비
-      close(true); // Esc 로 닫으면 트리거로 돌아간다
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation(); // 바깥 모달이 같은 Esc 로 닫히지 않게 여기서 소비
+        close(true); // Esc 로 닫으면 트리거로 돌아간다
+        return;
+      }
+      // 팝오버는 portal 로 <body> 끝에 붙는다. 그 안에서 Tab 을 누르면 포커스가 문서의 엉뚱한 끝으로
+      // 새어 나가고 팝오버는 열린 채 남는다. 포커스 트랩 대신 **닫고 트리거로 돌아간다** —
+      // 사용자는 Tab 을 한 번 더 눌러 자연스럽게 다음 요소로 간다.
+      if (e.key === "Tab" && popRef.current && popRef.current.contains(e.target)) {
+        e.preventDefault();
+        close(true);
+      }
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyCapture, true);

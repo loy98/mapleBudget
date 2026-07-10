@@ -171,3 +171,38 @@ describe("팝오버를 닫으면 트리거로 포커스가 돌아온다", () => 
     expect(document.activeElement).toBe(btn);
   });
 });
+
+// Codex: 팝오버 안에서 Tab 을 누르면 포커스가 문서 끝(포털)으로 새고 팝오버는 열린 채 남았다.
+describe("팝오버 안에서 Tab 은 닫고 트리거로 돌아간다", () => {
+  it("DateInput: 날짜 셀에서 Tab", () => {
+    mount(<DateInput value="2026-07-09" onChange={() => {}} />);
+    const inp = container.querySelector(".datep");
+    focus(inp);
+    key(inp, "ArrowDown");
+    expect(document.querySelector(".dppop")).toBeTruthy();
+    key(document.activeElement, "Tab");
+    expect(document.querySelector(".dppop")).toBeNull(); // 닫혔다
+    expect(document.activeElement).toBe(inp);            // 트리거로 돌아왔다
+  });
+
+  it("WeekPicker: 목록에서 Tab", () => {
+    const weeks = [{ key: "a", label: "A" }, { key: "b", label: "B" }];
+    mount(<WeekPicker value="b" onChange={() => {}} weeks={weeks} />);
+    const btn = container.querySelector("button");
+    click(btn);
+    key(document.activeElement, "Tab");
+    expect(document.querySelector(".wkpop")).toBeNull();
+    expect(document.activeElement).toBe(btn);
+  });
+});
+
+// aria-hidden 은 포커스 가능한 요소에 쓰면 안 된다(접근성 트리에서만 사라진 유령 컨트롤).
+describe("ItemCombo 토글 버튼의 접근성", () => {
+  it("aria-hidden 이 아니고 이름을 갖는다", () => {
+    mount(<ItemCombo value="" onChange={() => {}} options={[{ name: "가" }]} />);
+    const tgl = container.querySelector(".icombo-tgl");
+    expect(tgl.getAttribute("aria-hidden")).toBeNull();
+    expect(tgl.getAttribute("aria-label")).toBeTruthy();
+    expect(tgl.tabIndex).toBe(-1); // Tab 순서에서는 빠진다(입력이 combobox 라 경로가 있다)
+  });
+});

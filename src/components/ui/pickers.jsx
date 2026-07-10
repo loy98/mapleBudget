@@ -63,7 +63,9 @@ export function ItemCombo({ value, onChange, options, width, placeholder }) {
         onFocus={openPop}
         onKeyDown={onKeyDown}
       />
-      <button type="button" className="icombo-tgl" tabIndex={-1} aria-hidden="true" onClick={() => (open ? close() : openPop())}>▾</button>
+      {/* aria-hidden 을 쓰면 안 된다 — 포커스 가능한 요소를 접근성 트리에서 숨기는 것은 금지다.
+          Tab 순서에서만 빼고(입력이 combobox 라 키보드 경로가 이미 있다) 이름은 준다. */}
+      <button type="button" className="icombo-tgl" tabIndex={-1} aria-label="목록 열기" onClick={() => (open ? close() : openPop())}>▾</button>
       {open && opts.length > 0 &&
         createPortal(
           <div ref={popRef} id={listId} role="listbox" className="icombo-pop" style={{ left: pos.left, top: pos.top, minWidth: pos.width || 160 }}>

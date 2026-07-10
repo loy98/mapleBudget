@@ -1,8 +1,10 @@
+import { useRef } from "react";
 import { WD_MVP, WD_SUN } from "../../lib/constants.js";
 import { won, eok, mmdd, fmtD, todayStr, addDays, start13, weekStartThu, weekStartSun, manW, nowD } from "../../lib/util.js";
 import { weeklyAch, cashWonOf } from "../../lib/ledger.js";
 import { DateInput, ItemCombo, NumInput } from "../ui.jsx";
 import { useRovingFocus } from "../ui/useRovingFocus.js";
+import { useFocusRescue } from "../ui/useFocusRescue.js";
 
 // ===== 월력 =====
 function MonthCal({ cursor, days, selectedDate, onSelect }) {
@@ -127,8 +129,13 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
   const spends = ledger.spends.filter((x) => x.date === date);
   const cnt = buys.length + sells.length + cashes.length + spends.length;
 
+  // 거래의 날짜를 다른 날로 바꾸면 그 행이 이 목록에서 빠진다 → 포커스가 있던 입력이 사라진다.
+  // 포커스를 살아 있는 조상(이 컨테이너)으로 되돌린다. 안 그러면 body 로 떨어진다.
+  const wrapRef = useRef(null);
+  useFocusRescue(wrapRef, [cnt, date, buys.length, sells.length, cashes.length, spends.length]);
+
   return (
-    <div style={{ marginTop: 16 }}>
+    <div style={{ marginTop: 16 }} ref={wrapRef} tabIndex={-1}>
       <div className="subhead">
         {date} 내역 {cnt ? `(${cnt}건)` : <span className="muted" style={{ fontWeight: 400 }}>· 기록 없음, 아래 버튼으로 추가</span>}
       </div>
