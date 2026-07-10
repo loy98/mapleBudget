@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import { fmtD, todayStr, addDays, nowD, dateOf } from "../lib/util.js";
+import { isAllowedIconUrl } from "../lib/constants.js";
 import { WD_SUN } from "../lib/constants.js";
 
 // ===== 숫자 입력 (테마 스테퍼) =====
@@ -623,9 +624,11 @@ export const IconView = ({ icon }) => {
   // 문자열만 렌더. app_config(DB)에서 온 malformed 아이콘(객체/배열/숫자)이 오면
   // {icon} 을 그대로 렌더할 때 "Objects are not valid as a React child" 크래시가 나므로 여기서 차단.
   if (typeof icon !== "string" || !icon) return null;
-  // http(s) URL만 이미지로. referrerPolicy=no-referrer 로 트래킹 리퍼러 유출 차단, lazy 로딩.
-  // (data:/javascript: 는 여기서 자동 제외 → 이모지 span 으로 폴백, img 스크립트 벡터 없음.)
-  return /^https?:\/\//.test(icon) ? (
+  // URL 처럼 보이는데 신뢰 호스트가 아니면 **아무것도 렌더하지 않는다**.
+  // 그대로 span 에 넣으면 화면에 긴 URL 문자열이 그대로 찍히고, img 로 로드하면 임의 호스트로 요청이 나간다.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(icon) && !isAllowedIconUrl(icon)) return null;
+  // 신뢰 호스트의 https 이미지만. referrerPolicy=no-referrer 로 리퍼러 유출 차단, lazy 로딩.
+  return isAllowedIconUrl(icon) ? (
     <img
       className="iic"
       src={icon}

@@ -296,7 +296,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   </tbody>
                 </table>
                 <div className="hint" style={{ marginTop: 4 }}>
-                  아이콘은 이모지(🫐) 또는 이미지 URL을 넣을 수 있어요. 실제 메이플 아이콘 URL(예: maplestory.io)을 붙여넣으면 그대로 표시됩니다.
+                  아이콘은 이모지(🫐) 또는 <b>maplestory.io</b> 의 https 이미지 URL을 넣을 수 있어요. 다른 주소는 안전을 위해 표시하지 않습니다.
                 </div>
                 <div className="row-actions">
                   {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다.
