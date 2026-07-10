@@ -1,5 +1,5 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
-import { clearAccountData, mergeDeleted, isDeleted } from "./storage.js";
+import { clearAccountData, mergeDeleted, isDeleted, canonicalizeRows } from "./storage.js";
 import { LEDGER_BUCKETS } from "./constants.js";
 import { hasSnapshot } from "./util.js";
 
@@ -183,16 +183,20 @@ function keepSnapshots(prev, next) {
 
 export function mergeLedger(a = {}, b = {}, now = null, ceiling = now) {
   const out = {};
-  // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
-  const arr = (v) => (Array.isArray(v) ? v : []);
+  // 양쪽 행을 먼저 **정규 형태**로 만든다(날짜 zero-pad → 파생값 → id 부여).
+  //  · 클라우드 행은 정규화를 거치지 않고 여기로 들어온다. 예전에는 id 없는 행이 `if (x && x.id)` 에
+  //    걸려 **조용히 사라졌다** — 구버전 클라이언트가 올린 pre-id 원장이 병합 한 번에 소실된다.
+  //  · id 는 내용에서 유도되므로(B-7), 양쪽을 같은 규칙으로 정규화해야 같은 거래가 같은 id 를 얻어
+  //    합집합에서 하나로 합쳐진다. 그러지 않으면 중복된다.
+  // canonicalizeRows 는 멱등이라 이미 정규화된 로컬 원장에 다시 적용해도 결과가 같다.
   const deleted = mergeDeleted(a && a.deleted, b && b.deleted, now, ceiling);
   LEDGER_BUCKETS.forEach((k) => {
     const map = new Map();
-    arr(a[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
+    // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
+    canonicalizeRows(k, a && a[k]).forEach((x) => { map.set(x.id, x); });
     // 같은 id면 클라우드(b) 우선. 항목별 타임스탬프가 없어 정밀 비교는 불가(알려진 한계).
     // 서로 다른 id는 모두 보존되므로 '거래가 사라지는' 손실은 없음.
-    arr(b[k]).forEach((x) => {
-      if (!x || !x.id) return;
+    canonicalizeRows(k, b && b[k]).forEach((x) => {
       // 예외: 요율 스냅샷(_fee/_effD)은 '그때 그랬다'는 불변의 사실이다. 한쪽에만 있으면 살린다.
       // (스냅샷 없이 만든 구버전 클라이언트의 행이 스냅샷 있는 행을 덮어써 요율이 소실되는 것을 막는다.)
       const prev = map.get(x.id);

@@ -40,6 +40,19 @@ export const WINDOW_WEEKS = 13;
 // 거래 원장의 4개 버킷. 한 곳에서 정의해 병합·정규화·통계가 같은 목록을 쓴다.
 export const LEDGER_BUCKETS = ["buys", "sells", "cashes", "spends"];
 
+// 구버전(id 없는) 원장 행의 **결정적 id** 를 만들 때 쓰는 필드 (B-7).
+// 로드 시점에 랜덤 id 를 주면, 같은 백업을 두 기기에서 열었을 때 같은 거래가 서로 다른 id 를 얻고
+// 합집합 병합이 둘 다 보존해 통계가 2배가 된다. 내용에서 id 를 유도하면 두 기기가 같은 답을 낸다.
+//
+// 요율 스냅샷(_fee/_effD)은 넣지 않는다 — 구 데이터에는 없고, 나중에 붙어도 id 가 흔들리면 안 된다.
+// 타입은 아래 표로 정규화한다("3" 과 3 이 다른 id 를 만들지 않게).
+export const LEDGER_ID_FIELDS = {
+  buys: [["date", "s"], ["item", "s"], ["qty", "n"], ["price", "n"], ["mil", "b"]],
+  sells: [["date", "s"], ["item", "s"], ["qty", "n"], ["meso", "n"]],
+  cashes: [["date", "s"], ["meso", "n"], ["rate", "n"], ["won", "n"]],
+  spends: [["date", "s"], ["amount", "n"], ["memo", "s"]],
+};
+
 // 삭제 표식(tombstone) 보존 기간(일).
 // 삭제는 '없음'이라서 id 합집합 병합으로는 표현할 수 없다 → 삭제된 id 를 명시적으로 기록해 전파한다.
 // 영구 보존하면 원장 blob 이 무한히 커지므로 만료시킨다. 대가: 이 기간보다 오래 오프라인이던 기기가

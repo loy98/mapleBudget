@@ -51,6 +51,51 @@ export function padDate(v) {
 export const hasSnapshot = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1;
 
 export const curMonth = () => todayStr().slice(0, 7);
+
+// ===== 구버전 원장 행의 결정적 id (B-7) =====
+// `uid()` 는 로드 시점의 시각·난수를 쓴다. 구 데이터(id 없는 행)에 그걸 붙이면 같은 백업을 연 두 기기가
+// 같은 거래에 다른 id 를 만들고, 원장 병합이 id 합집합이라 **거래가 두 배로 불어난다**(B-7).
+// 그래서 행의 내용에서 id 를 유도한다 — 두 기기가 같은 입력에서 같은 답을 낸다.
+//
+// ⚠️ 내용만으로는 부족하다. "같은 날 같은 아이템을 같은 값에 두 번 산 것"은 **서로 다른 두 거래**인데
+// 내용 해시가 같으면 하나로 합쳐진다(중복보다 나쁜 소실). 그래서 같은 내용의 **몇 번째 등장인지**를 함께 넣는다.
+// 같은 원장을 가진 두 기기는 같은 다중집합을 같은 순서로 가지므로 순번도 같다.
+const fnv1a = (str, seed) => {
+  let h = seed >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+};
+
+// "3" 과 3, true 와 1 이 다른 id 를 만들지 않게 타입별로 정규화한다.
+const normField = (v, kind) => {
+  if (kind === "n") return v == null || v === "" || !Number.isFinite(+v) ? "" : String(+v);
+  if (kind === "b") return v ? "1" : "0";
+  return v == null ? "" : String(v).trim();
+};
+
+// 필드 구분자는 값에 등장할 수 없는 제어문자다("a|b" 와 "a" + "|b" 가 같은 키가 되는 것을 막는다).
+const SEP = "\u0001";
+export const rowContentKey = (fields, row) => fields.map(([name, kind]) => normField(row[name], kind)).join(SEP);
+
+// 내용 + 등장 순번(0-based) → 결정적 id. `uid()` 결과("<시각36>-<난수>")와 겹치지 않게 "L" 로 시작한다.
+// 32비트 해시 두 개(다른 seed)를 이어 붙여 사실상 64비트 — 원장 규모에서 충돌은 무시할 수 있다.
+export const legacyRowId = (fields, row, occurrence) => {
+  const s = rowContentKey(fields, row) + SEP + occurrence;
+  return "L" + fnv1a(s, 0x811c9dc5).toString(36) + fnv1a(s, 0x7f4a7c15).toString(36);
+};
+
+// 같은 내용이 몇 번째로 등장했는지 세어 준다. 버킷 하나당 하나 만든다.
+export function occurrenceCounter() {
+  const seen = new Map();
+  return (key) => {
+    const n = seen.get(key) || 0;
+    seen.set(key, n + 1);
+    return n;
+  };
+}
 export const mmdd = (dt) => ("0" + (dt.getMonth() + 1)).slice(-2) + "/" + ("0" + dt.getDate()).slice(-2);
 
 // MVP 주 = 목요일 시작 ~ 수요일 마감.

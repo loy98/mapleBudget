@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
-  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY,
+  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows,
   loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
-import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth } from "./util.js";
+import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth, legacyRowId } from "./util.js";
 import { tzDateStr, dateOf, nowD, APP_TZ } from "./tz.js";
 import { computeForecast, cumNow } from "./ledger.js";
 import { computeCalc, computeFeePct } from "./calc.js";
@@ -1688,5 +1688,167 @@ describe("B-4 · 주차 경계 타임존 (KST 고정)", () => {
 
   it("알 수 없는 시간대는 로컬로 폴백하고 던지지 않는다", () => {
     expect(tzDateStr(INSTANT, "Not/AZone")).toBe(fmtD(INSTANT));
+  });
+});
+
+// ===== B-7: 구버전 원장 행의 id 재발급 → 동기화 후 중복 =====
+// `if (!x.id) x.id = uid()` 는 로드 시점의 시각·난수를 쓴다. 같은 백업을 두 기기에서 열면
+// 같은 거래가 서로 다른 id 를 얻고, 병합이 id 합집합이라 통계·13주 누적이 2배가 된다.
+describe("B-7 · 구버전 행은 결정적 id 를 받는다", () => {
+  // 단일 HTML 시절 원장: id 가 없다.
+  const LEGACY = () => ({
+    buys: [
+      { date: "2026-07-01", item: "선택 캐시템", qty: 2, price: 5900, mil: true },
+      { date: "2026-07-02", item: "펫", qty: 1, price: 22000, mil: false },
+    ],
+    sells: [{ date: "2026-07-03", item: "펫", qty: 1, meso: 12.5 }],
+    cashes: [{ date: "2026-07-04", meso: 10, rate: 3000 }],
+    spends: [{ date: "2026-07-05", amount: 3000, memo: "기타" }],
+  });
+
+  it("같은 원장을 두 기기에서 로드하면 같은 id 를 만든다", () => {
+    const a = normalizeLedger(LEGACY());
+    const b = normalizeLedger(LEGACY());
+    expect(a.buys.map((x) => x.id)).toEqual(b.buys.map((x) => x.id));
+    expect(a.sells[0].id).toBe(b.sells[0].id);
+    expect(a.cashes[0].id).toBe(b.cashes[0].id);
+    expect(a.spends[0].id).toBe(b.spends[0].id);
+  });
+
+  it("그래서 병합해도 거래가 두 배로 불어나지 않는다 (B-7 의 실제 증상)", () => {
+    const a = normalizeLedger(LEGACY());
+    const b = normalizeLedger(LEGACY());
+    const merged = mergeLedger(a, b);
+    expect(merged.buys).toHaveLength(2);
+    expect(merged.sells).toHaveLength(1);
+    expect(merged.cashes).toHaveLength(1);
+    expect(merged.spends).toHaveLength(1);
+  });
+
+  it("uid() 와 구분된다 — 결정적 id 는 'L' 로 시작", () => {
+    const n = normalizeLedger(LEGACY());
+    expect(n.buys[0].id.startsWith("L")).toBe(true);
+    expect(uid().startsWith("L")).toBe(false);
+  });
+
+  // ★ 가장 위험한 경계: 내용만 해시하면 '같은 날 같은 값에 두 번 산 것'이 하나로 합쳐진다(중복보다 나쁜 소실).
+  it("내용이 완전히 같은 두 거래는 서로 다른 id 를 갖는다 (소실 방지)", () => {
+    const dup = { buys: [
+      { date: "2026-07-01", item: "펫", qty: 1, price: 22000, mil: false },
+      { date: "2026-07-01", item: "펫", qty: 1, price: 22000, mil: false },
+    ], sells: [], cashes: [], spends: [] };
+    const a = normalizeLedger(dup);
+    expect(a.buys).toHaveLength(2);
+    expect(a.buys[0].id).not.toBe(a.buys[1].id);
+    // 그러면서도 두 기기가 같은 답을 낸다.
+    const b = normalizeLedger(dup);
+    expect(a.buys.map((x) => x.id)).toEqual(b.buys.map((x) => x.id));
+    expect(mergeLedger(a, b).buys).toHaveLength(2);
+  });
+
+  it("날짜 정규화가 id 유도보다 먼저다 — '2026-7-2' 와 '2026-07-02' 는 같은 거래", () => {
+    const loose = normalizeLedger({ buys: [{ date: "2026-7-2", item: "펫", qty: 1, price: 100 }] });
+    const strict = normalizeLedger({ buys: [{ date: "2026-07-02", item: "펫", qty: 1, price: 100 }] });
+    expect(loose.buys[0].id).toBe(strict.buys[0].id);
+    expect(mergeLedger(loose, strict).buys).toHaveLength(1);
+  });
+
+  it("숫자가 문자열로 저장돼 있어도 같은 id (\"3\" 과 3)", () => {
+    const asStr = normalizeLedger({ buys: [{ date: "2026-07-01", item: "펫", qty: "3", price: "100", mil: false }] });
+    const asNum = normalizeLedger({ buys: [{ date: "2026-07-01", item: "펫", qty: 3, price: 100, mil: false }] });
+    expect(asStr.buys[0].id).toBe(asNum.buys[0].id);
+  });
+
+  it("이미 id 가 있는 행은 건드리지 않고, 순번도 그 행 때문에 어긋나지 않는다", () => {
+    const withId = { buys: [
+      { id: "keep-me", date: "2026-07-01", item: "펫", qty: 1, price: 100 },
+      { date: "2026-07-01", item: "펫", qty: 1, price: 100 },
+    ], sells: [], cashes: [], spends: [] };
+    const onlyLegacy = { buys: [{ date: "2026-07-01", item: "펫", qty: 1, price: 100 }], sells: [], cashes: [], spends: [] };
+    const a = normalizeLedger(withId);
+    expect(a.buys[0].id).toBe("keep-me");
+    // id 없는 행은 '첫 번째 등장'이어야 한다 — 있는 id 를 셈에 넣었다면 두 번째 순번이 되어 어긋난다.
+    expect(a.buys[1].id).toBe(normalizeLedger(onlyLegacy).buys[0].id);
+  });
+
+  it("요율 스냅샷은 id 에 들어가지 않는다 (나중에 붙어도 id 가 흔들리면 안 된다)", () => {
+    const F = [["date", "s"], ["item", "s"], ["qty", "n"], ["price", "n"], ["mil", "b"]];
+    const bare = { date: "2026-07-01", item: "펫", qty: 1, price: 100, mil: false };
+    expect(legacyRowId(F, bare, 0)).toBe(legacyRowId(F, { ...bare, _effD: 0.1 }, 0));
+  });
+
+  it("필드 경계가 뭉개지지 않는다 (\"ab\"+\"c\" 와 \"a\"+\"bc\" 가 다른 id)", () => {
+    const F = [["item", "s"], ["memo", "s"]];
+    expect(legacyRowId(F, { item: "ab", memo: "c" }, 0)).not.toBe(legacyRowId(F, { item: "a", memo: "bc" }, 0));
+  });
+});
+
+// ===== Codex 재검수 반영 (B-7 2차) =====
+describe("B-7 · 정규화는 병합 경로에도 적용된다 (Codex F1)", () => {
+  const preId = () => ({ buys: [{ date: "2026-07-01", item: "펫", qty: 1, price: 22000, mil: false }] });
+
+  it("id 없는 클라우드 행이 병합에서 조용히 사라지지 않는다", () => {
+    // 예전엔 `if (x && x.id)` 에 걸려 통째로 소실됐다 — 구버전 클라이언트가 올린 원장이 병합 한 번에 증발.
+    const merged = mergeLedger({ buys: [] }, preId());
+    expect(merged.buys).toHaveLength(1);
+    expect(merged.buys[0].item).toBe("펫");
+    expect(merged.buys[0].id.startsWith("L")).toBe(true);
+  });
+
+  it("정규화된 로컬 행과 pre-id 클라우드 행이 같은 거래면 하나로 합쳐진다", () => {
+    const local = normalizeLedger(preId());
+    const merged = mergeLedger(local, preId());
+    expect(merged.buys).toHaveLength(1); // 중복 아님 — 양쪽이 같은 결정적 id 를 얻는다
+  });
+
+  it("병합이 입력 객체를 변형하지 않는다", () => {
+    const cloud = preId();
+    const before = JSON.parse(JSON.stringify(cloud));
+    mergeLedger({ buys: [] }, cloud);
+    expect(cloud).toEqual(before); // id 가 원본에 심기지 않는다
+  });
+
+  it("tombstone 은 유도된 id 에도 그대로 적용된다", () => {
+    const local = normalizeLedger(preId());
+    const id = local.buys[0].id;
+    const merged = mergeLedger({ buys: [], deleted: { [id]: 1000 } }, preId());
+    expect(merged.buys).toHaveLength(0); // 삭제 우선 — pre-id 행이 부활하지 않는다
+  });
+});
+
+describe("B-7 · 파생값은 id 유도보다 먼저 (Codex F2)", () => {
+  it("현금화의 rate 를 won 에서 유도한 뒤 id 를 만든다", () => {
+    // 한 기기는 won 만(구 데이터), 다른 기기는 rate 까지 가진 같은 거래.
+    const a = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, won: 1000 }] });
+    const b = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, won: 1000, rate: 500 }] });
+    expect(a.cashes[0].rate).toBe(500);
+    expect(a.cashes[0].id).toBe(b.cashes[0].id);
+    expect(mergeLedger(a, b).cashes).toHaveLength(1); // 같은 현금화가 2건이 되지 않는다
+  });
+
+  it("rate 가 다르면 다른 거래다 (뭉개지 않는다)", () => {
+    const a = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, won: 1000 }] });      // rate 500
+    const b = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 2, rate: 999 }] });
+    expect(a.cashes[0].id).not.toBe(b.cashes[0].id);
+  });
+
+  it("meso 가 0 이면 rate 를 만들지 않는다 (won 폴백 유지) — 그래도 결정적", () => {
+    const a = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 0, won: 1000 }] });
+    const b = normalizeLedger({ cashes: [{ date: "2026-07-04", meso: 0, won: 1000 }] });
+    expect(a.cashes[0].rate).toBeUndefined();
+    expect(a.cashes[0].id).toBe(b.cashes[0].id);
+  });
+});
+
+describe("canonicalizeRows 는 멱등이다", () => {
+  it("이미 정규화된 행에 다시 적용해도 결과가 같다 (mergeLedger 가 무조건 적용한다)", () => {
+    const once = canonicalizeRows("buys", [{ date: "2026-7-2", item: "펫", qty: 1, price: 100 }]);
+    const twice = canonicalizeRows("buys", once);
+    expect(twice).toEqual(once);
+  });
+
+  it("cashes 도 멱등 (rate 유도가 두 번 돌아도 같다)", () => {
+    const once = canonicalizeRows("cashes", [{ date: "2026-07-04", meso: 2, won: 1000 }]);
+    expect(canonicalizeRows("cashes", once)).toEqual(once);
   });
 });
