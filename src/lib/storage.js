@@ -468,11 +468,16 @@ const CAL_MODES = ["month", "mvp"];
 // 주차 집계·규칙 선택이 전부 사전식 문자열 비교다 → 이 형태가 아니면 어느 주에도 잡히지 않는다.
 // 형태만 보면 "2026-99-99" 나 "2026-02-30" 같은 **달력에 없는 날짜**를 통과시킨다. 그런 행은
 // 어떤 주에도 잡히지 않으면서 경고도 못 받는다 → 실제 날짜인지 왕복 검사한다.
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const isLeapYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
 const isValidDate = (v) => {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
   const [y, m, d] = v.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+  if (m < 1 || m > 12) return false;
+  // Date 를 쓰지 않는다: `new Date(99, 0, 1)` 은 0099년이 아니라 1999년이고, 로컬 타임존/DST 도 끼어든다.
+  // 민간 날짜는 산술로 검사하는 것이 옳다(B-4 와 같은 원칙).
+  const max = m === 2 && isLeapYear(y) ? 29 : DAYS_IN_MONTH[m - 1];
+  return d >= 1 && d <= max;
 };
 
 export function validateBackup(data) {
@@ -578,10 +583,16 @@ export function importAll(text) {
   // 앞쪽 키는 이미 새 값으로 덮인 채 "복원하지 못했습니다"를 돌려주게 된다 —
   // 사용자는 아무 일도 없었다고 믿지만 계산기 설정은 바뀌어 있다.
   // 그래서 쓰기 전에 원본 문자열을 잡아 두고, 하나라도 실패하면 되돌린다.
+  //
+  // 캡처 실패(getItem 예외)를 `null`(원래 없던 키)과 같은 값으로 뭉개면 안 된다 —
+  // 롤백이 그 키를 **지워버린다**. 읽지 못한 원본은 되돌릴 수 없으므로, 그 경우엔 아무것도 쓰지 않는다.
   const prior = new Map();
-  writes.forEach(([k]) => { try { prior.set(k, localStorage.getItem(k)); } catch { prior.set(k, null); } });
+  for (const [k] of writes) {
+    try { prior.set(k, localStorage.getItem(k)); }
+    catch { return { ok: false, error: "브라우저 저장소를 읽을 수 없어 복원하지 못했습니다." }; }
+  }
   const restore = (k) => {
-    const raw = prior.get(k);
+    const raw = prior.get(k); // null = 복원 전에 그 키가 없었다(캡처 실패와 구분됨)
     try {
       if (raw == null) localStorage.removeItem(k);
       else localStorage.setItem(k, raw);

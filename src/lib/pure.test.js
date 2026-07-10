@@ -2075,3 +2075,42 @@ describe("B-6 · Codex 지적 반영", () => {
     expect(JSON.parse(store.get(KEY)).mesoRate).toBe(2222);
   });
 });
+
+// ===== Codex 재검수 반영 (B-6 3차) =====
+describe("B-6 · 롤백 안전성과 날짜 검사 (Codex 2차)", () => {
+  let store;
+  beforeEach(() => {
+    store = new Map();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  });
+
+  // 가장 위험한 경로: 원본을 읽지 못했는데 '원래 없던 키'로 오해하면 롤백이 그 키를 지운다.
+  it("원본을 읽지 못하면 아무것도 쓰지 않는다 (롤백을 보장할 수 없으므로)", () => {
+    store.set(KEY, '{"mesoRate":1111}');
+    globalThis.localStorage.getItem = (k) => { if (k === KEY) throw new Error("읽기 불가"); return store.has(k) ? store.get(k) : null; };
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", calc: { mesoRate: 2222 } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("읽을 수 없어");
+    expect(store.get(KEY)).toBe('{"mesoRate":1111}'); // 지워지지 않았다
+  });
+
+  it("두 자리 연도를 오판하지 않는다 (new Date(99,0,1) 은 1999년이다)", () => {
+    const w = (d) => validateBackup({ app: "mvp-calculator", ledger: { buys: [{ id: "a", date: d }] } }).warnings.join(" ");
+    expect(w("0099-01-01")).toBe("");
+    expect(w("0001-01-01")).toBe("");
+  });
+
+  it("윤년 규칙을 100/400 년까지 지킨다", () => {
+    const w = (d) => validateBackup({ app: "mvp-calculator", ledger: { buys: [{ id: "a", date: d }] } }).warnings.join(" ");
+    expect(w("2000-02-29")).toBe("");                      // 400 으로 나뉘면 윤년
+    expect(w("1900-02-29")).toContain("집계에서 빠집니다"); // 100 으로 나뉘면 평년
+    expect(w("2026-13-01")).toContain("집계에서 빠집니다"); // 13월은 없다
+    expect(w("2026-00-10")).toContain("집계에서 빠집니다"); // 0월도 없다
+    expect(w("2026-01-00")).toContain("집계에서 빠집니다"); // 0일도 없다
+  });
+});
