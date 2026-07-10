@@ -27,6 +27,7 @@ export function ItemCombo({ value, onChange, options, width, placeholder }) {
     setPos(rectBelow(inpRef.current, 4));
     setOpen(true);
   };
+  // 포커스는 계속 입력에 있으므로 되돌릴 것이 없다(앵커 span 은 포커스 대상이 아니다).
   const pick = (o) => { onChange(o.name); setActive(-1); close(); };
   // 입력을 타이핑해 목록이 줄면 active 가 범위를 벗어난다 → opts[active] 가 undefined.
   useEffect(() => { if (active >= opts.length) setActive(opts.length ? opts.length - 1 : -1); }, [opts.length, active]);
@@ -92,7 +93,8 @@ export function WeekPicker({ value, onChange, weeks }) {
   const { open, setOpen, close, pos, setPos, anchorRef, popRef } = usePopover();
   const sel = weeks.find((w) => w.key === value);
   const selIdx = Math.max(0, weeks.findIndex((w) => w.key === value));
-  const activate = (i) => { if (weeks[i]) { onChange(weeks[i].key); close(); } };
+  // 선택하면 목록이 사라진다 → 포커스를 트리거 버튼으로 되돌린다(안 그러면 body 로 떨어진다).
+  const activate = (i) => { if (weeks[i]) { onChange(weeks[i].key); close(true); } };
   // 1열 목록 — 위/아래로 이동, Enter/Space 로 선택.
   const roving = useRovingFocus({ count: weeks.length, cols: 1, initial: selIdx, activate });
   // 팝오버가 열리면 목록으로 포커스를 옮긴다. 안 그러면 포커스가 버튼에 남아 방향키가 목록에 닿지 않는다.
@@ -153,7 +155,7 @@ export function DateInput({ value, onChange, width }) {
   const keys = Array.from({ length: 42 }, (_, i) => fmtD(addDays(gs, i)));
   // 처음 Tab 으로 들어오면 선택된 날(없으면 오늘, 그것도 없으면 이 달 1일)에 포커스가 간다.
   const initial = Math.max(0, [value, tdy, fmtD(first)].map((k) => keys.indexOf(k)).find((i) => i >= 0) ?? 0);
-  const activate = (i) => { onChange(keys[i]); close(); };
+  const activate = (i) => { onChange(keys[i]); close(true); };
   // 7열 격자(.dpgrid) — 좌우로 하루, 상하로 한 주.
   const roving = useRovingFocus({ count: 42, cols: 7, initial, activate });
   useEffect(() => { if (open) roving.focusActive(initial); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -223,7 +225,7 @@ export function YMPicker({ value, onChange, anchorLabel }) {
   const selY = +(value || "").split("-")[0],
     selM = +(value || "").split("-")[1];
   const [year, setYear] = useState(() => +(value || "").split("-")[0] || nowD().getFullYear());
-  const pickMonth = (i) => { onChange(year + "-" + ("0" + (i + 1)).slice(-2)); close(); };
+  const pickMonth = (i) => { onChange(year + "-" + ("0" + (i + 1)).slice(-2)); close(true); };
   // 3열 격자(.ymgrid) — 좌우로 한 칸, 상하로 세 칸 이동.
   const roving = useRovingFocus({ count: 12, cols: 3, initial: Math.max(0, (selM || 1) - 1), activate: pickMonth });
   useEffect(() => { if (open) roving.focusActive(Math.max(0, (selM || 1) - 1)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
