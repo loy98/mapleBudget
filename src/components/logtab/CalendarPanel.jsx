@@ -112,7 +112,7 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
           <thead><tr><th>날짜</th><th>아이템</th><th>수량</th><th>개당 캐시가</th><th className="milh">마일</th><th>실적</th><th></th></tr></thead>
           <tbody>
             {buys.map((b) => {
-              const ach = (+b.qty || 0) * (+b.price || 0) * (1 - (b.mil ? env.mileageR : 0));
+              const ach = (+b.qty || 0) * (+b.price || 0) * (1 - (b.mil ? env.mileageR(b) : 0));
               return (
                 <tr key={b.id}>
                   <td><DateInput value={b.date} width={140} onChange={(v) => patchEntry("buys", b.id, { date: v })} /></td>
@@ -138,7 +138,7 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
                 <td><ItemCombo value={sl.item || ""} width={120} options={soldNames} onChange={(v) => patchEntry("sells", sl.id, { item: v })} /></td>
                 <td><NumInput noStepper width={54} value={sl.qty != null ? sl.qty : 1} onChange={(v) => patchEntry("sells", sl.id, { qty: v })} /></td>
                 <td><NumInput noStepper width={88} step={0.01} value={sl.meso != null ? sl.meso : ""} onChange={(v) => patchEntry("sells", sl.id, { meso: v })} /></td>
-                <td className="num">{eok((+sl.qty || 0) * (+sl.meso || 0) * (1 - env.fee))}</td>
+                <td className="num">{eok((+sl.qty || 0) * (+sl.meso || 0) * (1 - env.fee(sl)))}</td>
                 <td><button className="del" onClick={() => delEntry("sells", sl.id)}>×</button></td>
               </tr>
             ))}
@@ -215,7 +215,7 @@ export default function CalendarPanel({
       {calMode === "month" ? (
         <MonthCal cursor={calCursor} days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
       ) : (
-        <MvpCal ledger={ledger} days={days} mileageR={calc.mileageR} selectedDate={selectedDate} onSelect={setSelectedDate} />
+        <MvpCal ledger={ledger} days={days} mileageR={env.mileageR} selectedDate={selectedDate} onSelect={setSelectedDate} />
       )}
       <div className="legend">
         <span><i className="sw" style={{ background: "var(--accent2)" }}></i>오늘</span>

@@ -90,7 +90,15 @@ export default function StatsPanel({
       </div>
       <div className="note">
         구매 {st.buys}건 · 판매 {st.sells}건 · 현금화 {st.cashes}건 · 기타 캐시사용 {st.spends}건({won(st.extra)}).
-        실지출은 계산기 평균 충전 할인({pct(calc.effD * 100)}) 반영.
+        {" "}거래는 <b>기록 당시의 수수료·충전 할인</b>으로 계산합니다.
+        {d.hasLegacyRows && (
+          <>
+            {" "}
+            <b>이 기능이 생기기 전에 입력한 거래</b>는 그때의 요율이 남아 있지 않아
+            현재 설정(수수료 {pct(calc.feePct)}, 충전 할인 {pct(calc.effD * 100)}) 기준 <b>추정치</b>입니다 —
+            계산기 설정을 바꾸면 그 거래들의 숫자가 함께 바뀝니다.
+          </>
+        )}
       </div>
 
       <button

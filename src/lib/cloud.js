@@ -1,6 +1,7 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
 import { clearAccountData, mergeDeleted, isDeleted } from "./storage.js";
 import { LEDGER_BUCKETS } from "./constants.js";
+import { hasSnapshot } from "./util.js";
 
 export { cloudEnabled };
 
@@ -168,6 +169,18 @@ export function mergeSnapshots(local, cloud, opts = {}) {
 // 이제 양쪽 tombstone 을 먼저 합치고, 그 id 는 어느 쪽 버킷에 있든 결과에서 제거한다.
 // now     : TTL 만료 기준(서버 updated_at). null 이면 만료 정리를 하지 않는다.
 // ceiling : 미래 시각 clamp 상한('정상적인 지금'). 기본은 now 지만 호출측이 max(서버, 로컬)을 넘긴다.
+// 거래 생성 시점의 요율. 한 번 정해지면 바뀌지 않는 사실이므로, 병합에서 절대 잃지 않는다.
+const SNAPSHOT_KEYS = ["_fee", "_effD"];
+function keepSnapshots(prev, next) {
+  let out = next;
+  SNAPSHOT_KEYS.forEach((k) => {
+    // `next[k] == null` 이 아니라 hasSnapshot 으로 판정한다. malformed 값(문자열·NaN·범위 밖)은
+    // '존재'하지만 계산부가 거부하고 현재 설정으로 폴백하므로, 살아 있는 prev 스냅샷을 덮으면 요율이 소실된다.
+    if (!hasSnapshot(next[k]) && hasSnapshot(prev[k])) out = { ...out, [k]: prev[k] };
+  });
+  return out;
+}
+
 export function mergeLedger(a = {}, b = {}, now = null, ceiling = now) {
   const out = {};
   // 클라우드 행이 malformed(버킷이 배열 아님)여도 병합이 던지지 않아야 한다 — 던지면 로그인 자체가 실패한다.
@@ -178,7 +191,13 @@ export function mergeLedger(a = {}, b = {}, now = null, ceiling = now) {
     arr(a[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
     // 같은 id면 클라우드(b) 우선. 항목별 타임스탬프가 없어 정밀 비교는 불가(알려진 한계).
     // 서로 다른 id는 모두 보존되므로 '거래가 사라지는' 손실은 없음.
-    arr(b[k]).forEach((x) => { if (x && x.id) map.set(x.id, x); });
+    arr(b[k]).forEach((x) => {
+      if (!x || !x.id) return;
+      // 예외: 요율 스냅샷(_fee/_effD)은 '그때 그랬다'는 불변의 사실이다. 한쪽에만 있으면 살린다.
+      // (스냅샷 없이 만든 구버전 클라이언트의 행이 스냅샷 있는 행을 덮어써 요율이 소실되는 것을 막는다.)
+      const prev = map.get(x.id);
+      map.set(x.id, prev ? keepSnapshots(prev, x) : x);
+    });
     // 삭제 우선: 한쪽이 지우고 다른 쪽이 수정했어도 되살리지 않는다.
     out[k] = [...map.values()].filter((x) => !isDeleted(deleted, x.id));
   });

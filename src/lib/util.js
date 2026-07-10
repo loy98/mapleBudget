@@ -27,6 +27,24 @@ export function fmtD(dt) {
   );
 }
 export const todayStr = () => fmtD(new Date());
+
+// 원장의 날짜는 zero-padded "YYYY-MM-DD" 여야 한다 — 주차 필터·규칙 선택이 모두 사전식 문자열 비교이기 때문.
+// "2026-7-2" 같은 값은 `"2026-7-2" >= "2026-07-02"` 가 true, `<= "2026-07-08"` 이 false 라
+// **모든 주에서 조용히 누락**된다. 앱이 만드는 날짜는 항상 fmtD 지만 가져오기·클라우드 행은 임의 문자열일 수 있다.
+// 패딩만 하면 되는 형태는 고쳐주고, 그 외에는 원본을 그대로 둔다(임의로 해석해 다른 날로 바꾸지 않는다).
+export function padDate(v) {
+  if (typeof v !== "string") return v;
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v.trim());
+  if (!m) return v;
+  return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+}
+
+// 거래 행에 남긴 요율 스냅샷(sells._fee, buys._effD)으로 인정할 값인가.
+// 수수료·충전 할인은 0 이상 1 미만의 비율이고, 우리가 기록하는 값은 항상 number 다(JSONB 왕복에서도 number).
+// 문자열("", "0.05")은 신뢰하지 않는다 — `+""` 가 0 이라 '수수료 0%' 로 조용히 샌다.
+// null/undefined(구 데이터)뿐 아니라 malformed 값도 '없음'으로 보고 현재 설정으로 폴백한다.
+export const hasSnapshot = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1;
+
 export function curMonth() {
   const d = new Date();
   return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);

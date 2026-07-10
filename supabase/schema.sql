@@ -75,12 +75,24 @@ create trigger app_config_touch
 --
 -- rules: 넥슨이 정하는 규칙(사용자가 편집하지 않음) → force 와 무관하게 항상 모든 유저에게 적용.
 --   feeMvp/feeBase = 경매장 수수료(%), mileageAccrual = 마일리지 적립률(0~1),
+--   mileageRate    = 아이템 가격 중 마일리지로 결제 가능한 비율(%). 100 미만이어야 한다.
 --   tiers = MVP 등급별 13주 누적 기준액(오름차순 필수 — 깨지면 클라이언트가 통째로 무시하고 폴백).
 --   클라이언트 src/lib/constants.js resolveRules 가 항목별로 검증한다.
+--
+-- ★ 규칙이 바뀌면 값을 '고치지 말고' 발효일 이력으로 바꿀 것. 값을 고치면 과거 거래까지 소급해서 변한다.
+--   rules 는 객체(단일 규칙) 또는 발효일 오름차순 배열을 모두 받는다:
+--     "rules": [
+--       {"effectiveFrom":"2000-01-01", "feeMvp":5, "feeBase":8, "mileageRate":40, ...},
+--       {"effectiveFrom":"2026-03-01", "feeMvp":3, "feeBase":5, "mileageRate":30, ...}
+--     ]
+--   거래는 그 날짜에 유효한 규칙으로 계산된다(src/lib/constants.js rulesAt).
+--   가장 이른 항목이 **이미 발효했다면** 그 이전 거래에도 적용된다(빈 구간 없음).
+--   아직 발효하지 않은 규칙(미래 발효일)은 지금·과거에 소급되지 않는다 → 그 구간은 코드 기본값.
+--   각 항목은 독립적으로 검증되며 누락 키는 코드 기본값으로 채워진다.
 insert into public.app_config (id, config) values (1, '{
   "mesoRate": 3000, "giftRatio": 8000, "marketRatio": 7500, "force": [],
   "rules": {
-    "feeMvp": 3, "feeBase": 5, "mileageAccrual": 0.05,
+    "feeMvp": 3, "feeBase": 5, "mileageAccrual": 0.05, "mileageRate": 30,
     "tiers": [
       {"name":"브론즈","amt":150000},
       {"name":"실버","amt":300000},

@@ -1,6 +1,19 @@
 import { fmtD, start13, addDays, weekStartThu, estGrade } from "./util.js";
 import { TIERS, WINDOW_WEEKS } from "./constants.js";
 
+// ===== 거래별 요율 =====
+// 과거 거래를 '현재 설정'으로 계산하면, 사용자가 설정을 바꾸는 순간 과거 기록이 조용히 변한다(B-5).
+// 그래서 요율은 스칼라가 아니라 **거래 행을 받는 함수**로도 넘길 수 있다:
+//   · 마일리지 결제 비율 = 거래일에 유효한 넥슨 규칙 (rulesAt)
+//   · 경매장 수수료 / 충전 할인 = 거래 행의 스냅샷(_fee/_effD), 없으면 현재 설정으로 폴백
+// 숫자도 그대로 받는다(구 호출부·테스트 호환). 이 헬퍼가 둘을 흡수한다.
+// 유한하지 않은 값은 0으로 떨어뜨린다. malformed 스냅샷을 '수수료 0%'로 조용히 바꾸지 않으려면
+// **호출측(env)이 먼저** 유효성을 검사해 현재 설정으로 폴백해야 한다(useLedgerDerived 참고).
+const rate = (r, row) => {
+  const n = +(typeof r === "function" ? r(row) : r);
+  return Number.isFinite(n) ? n : 0;
+};
+
 // ===== 주간 과금 (MVP 주: 목~수) =====
 export function weeklyAch(ledger, ws, mileageR) {
   const e = addDays(ws, 6);
@@ -11,7 +24,7 @@ export function weeklyAch(ledger, ws, mileageR) {
     if (b.date >= ss && b.date <= es) {
       const q = +b.qty || 0,
         p = +b.price || 0,
-        mf = b.mil ? mileageR : 0;
+        mf = b.mil ? rate(mileageR, b) : 0;
       tot += q * p * (1 - mf);
     }
   });
@@ -48,7 +61,7 @@ export function weeklyMeso(ledger, ws, fee) {
   ledger.sells.forEach((sl) => {
     if (sl.date >= ss && sl.date <= es) {
       sellQty += +sl.qty || 0;
-      sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+      sold += (+sl.qty || 0) * (+sl.meso || 0) * (1 - rate(fee, sl));
     }
   });
   ledger.cashes.forEach((c) => {
@@ -87,7 +100,7 @@ export function weeklyItems(ledger, ws, fee) {
       const q = +sl.qty || 0, m = +sl.meso || 0, r = row(itemKey(sl.item));
       r.sellQty += q;
       r.gross += q * m;
-      r.sold += q * m * (1 - fee);
+      r.sold += q * m * (1 - rate(fee, sl));
     }
   });
   return [...map.values()]
@@ -116,17 +129,17 @@ export function itemSummary(ledger, match, { fee, effD, mileageR }, rateWon) {
 
   ledger.buys.forEach((b) => {
     if (!match(b.date)) return;
-    const q = +b.qty || 0, p = +b.price || 0, mf = b.mil ? mileageR : 0;
+    const q = +b.qty || 0, p = +b.price || 0, mf = b.mil ? rate(mileageR, b) : 0;
     const t = row(itemKey(b.item));
     t.buyQty += q;
-    t.spend += q * p * (1 - mf) * (1 - effD);
+    t.spend += q * p * (1 - mf) * (1 - rate(effD, b));
   });
   ledger.sells.forEach((sl) => {
     if (!match(sl.date)) return;
     const q = +sl.qty || 0, m = +sl.meso || 0, t = row(itemKey(sl.item));
     t.sellQty += q;
     t.gross += q * m;
-    t.sold += q * m * (1 - fee);
+    t.sold += q * m * (1 - rate(fee, sl));
   });
   return [...map.values()]
     .filter((x) => x.buyQty || x.sellQty)
@@ -156,16 +169,16 @@ export function ledgerStats(ledger, match, { fee, effD, mileageR }) {
     if (match(b.date)) {
       const q = +b.qty || 0,
         p = +b.price || 0,
-        mf = b.mil ? mileageR : 0;
+        mf = b.mil ? rate(mileageR, b) : 0;
       st.ach += q * p * (1 - mf);
       st.mil += q * p * mf;
-      st.spend += q * p * (1 - mf) * (1 - effD);
+      st.spend += q * p * (1 - mf) * (1 - rate(effD, b));
       st.buys++;
     }
   });
   ledger.sells.forEach((sl) => {
     if (match(sl.date)) {
-      st.meso += (+sl.qty || 0) * (+sl.meso || 0) * (1 - fee);
+      st.meso += (+sl.qty || 0) * (+sl.meso || 0) * (1 - rate(fee, sl));
       st.sells++;
     }
   });
@@ -200,7 +213,7 @@ export function dayInfo(ledger, mileageR) {
   ledger.buys.forEach((b) => {
     const q = +b.qty || 0,
       p = +b.price || 0,
-      mf = b.mil ? mileageR : 0;
+      mf = b.mil ? rate(mileageR, b) : 0;
     add(b.date, q * p * (1 - mf));
   });
   ledger.spends.forEach((s) => add(s.date, +s.amount || 0));

@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
   getDataOwner, setDataOwner,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
-import { CHARGE_METHODS, DEFAULT_RULES, resolveRules } from "./constants.js";
+import { CHARGE_METHODS, resolveRuleHistory, rulesAt } from "./constants.js";
+import { todayStr } from "./util.js";
 
 // app_config에서 settings로 반영하는 시세 스칼라 키(기본값 적용·force가 공유 → 새 키 추가 시 한 곳만 수정).
 const CONFIG_RATE_KEYS = ["mesoRate", "giftRatio", "marketRatio"];
@@ -20,6 +21,26 @@ const validItems = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof 
 // 다른 계정 소유의 로컬 데이터를 병합에서 배제할 때 쓰는 '아무것도 없음' 스냅샷.
 // deleted 도 비운다 — 남의 계정 tombstone 이 내 계정 거래를 지우면 안 된다.
 const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [], deleted: {} } };
+
+// 오늘 날짜("YYYY-MM-DD"). 날짜가 실제로 바뀔 때만 새 문자열을 돌려주므로 리렌더는 하루 한 번뿐이다.
+// 규칙 발효일과 13주 창 경계가 모두 오늘 기준이라, 탭을 열어둔 채 자정을 넘겨도 갱신돼야 한다.
+// 탭 복귀(visibilitychange/focus)에 더해 분 단위 폴링을 두는 이유: 자정에 탭이 계속 떠 있을 수 있다.
+function useToday() {
+  const [today, setToday] = useState(todayStr);
+  useEffect(() => {
+    const tick = () => setToday((prev) => { const now = todayStr(); return now === prev ? prev : now; });
+    const onVisible = () => { if (!document.hidden) tick(); };
+    const id = setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", tick);
+    };
+  }, []);
+  return today;
+}
 
 // ============================================================
 // useCloudSync — 세션·app_config·클라우드 동기화·업로드를 한 곳에 응집(App.jsx의 SRP 회복).
@@ -42,9 +63,16 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const [syncState, setSyncState] = useState("idle"); // idle|syncing|saved|error
   const [syncNonce, setSyncNonce] = useState(0);       // 계정 전환 후 새 계정 업로드 재예약 트리거
   const [chargeOptions, setChargeOptions] = useState(CHARGE_METHODS);
-  // 게임 규칙(수수료·마일리지 적립률·등급 기준). settings 와 달리 사용자 소유가 아니라 전역이므로
+  // 게임 규칙(수수료·마일리지 결제 비율·적립률·등급 기준). settings 와 달리 사용자 소유가 아니라 전역이므로
   // 저장 이력·로그인 여부와 무관하게 '모든 유저'에게 즉시 적용한다(force 대상이 아님).
-  const [rules, setRules] = useState(DEFAULT_RULES);
+  // cfgRules 는 app_config 원본(객체 또는 발효일 배열)을 그대로 들고 있고,
+  // ruleHistory(발효일 오름차순 이력)와 rules(지금 유효한 규칙)는 today 와 함께 파생한다.
+  // 파생으로 두는 이유: 규칙 발효일이 오늘 자정을 넘는데 탭이 열려 있으면, state 로 굳혀 둔 rules 는
+  // 영영 옛 규칙을 쓴다(계산기가 잘못된 수수료·마일리지 비율로 계산).
+  const [cfgRules, setCfgRules] = useState(null);
+  const today = useToday();
+  const ruleHistory = useMemo(() => resolveRuleHistory(cfgRules, today), [cfgRules, today]);
+  const rules = useMemo(() => rulesAt(ruleHistory, today), [ruleHistory, today]);
   const [appConfig, setAppConfig] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [conflictPrompt, setConflictPrompt] = useState(null); // 최초 로그인 병합 충돌 시 { onChoose } — App이 모달 렌더
@@ -85,8 +113,9 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         const valid = cfg.chargeMethods.filter((m) => m && typeof m.name === "string");
         if (valid.length) setChargeOptions(valid);
       }
-      // resolveRules 가 항목별로 검증 → malformed 키는 버리고 기본값 유지(전체 폐기 아님).
-      setRules(resolveRules(cfg.rules));
+      // 원본을 그대로 담는다. 검증(resolveOne)은 파생 시점의 resolveRuleHistory 가 항목별로 하므로
+      // malformed 키는 버리고 기본값이 유지된다(전체 폐기 아님).
+      setCfgRules(cfg.rules ?? null);
       setAppConfig(cfg);
     });
     return () => { cancelled = true; };
@@ -329,5 +358,5 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     return () => document.removeEventListener("visibilitychange", onHide);
   }, [userId, cloudReady, runUpload]);
 
-  return { session, syncState, chargeOptions, conflictPrompt, rules };
+  return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory };
 }

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { TIERS } from "../lib/constants.js";
+import { TIERS, rulesAt } from "../lib/constants.js";
 import { won, mmdd, estGrade } from "../lib/util.js";
 import { cumNow, computeForecast } from "../lib/ledger.js";
 import { CSelect, CostLabel } from "./ui.jsx";
@@ -14,14 +14,19 @@ const timingOptions = [
 ];
 const timingTxt = { weekly: "매주", biweekly: "격주", month1: "매월 1일", monthLast: "매월 말주" };
 
-export default function ForecastTab({ ledger, calc, tiers = TIERS }) {
+export default function ForecastTab({ ledger, calc, tiers = TIERS, ruleHistory }) {
   const [tier, setTier] = useState("4");
   const [timing, setTiming] = useState("weekly");
   const [includeThis, setIncludeThis] = useState(false);
 
   const tierOptions = useMemo(() => tierOptionsOf(tiers), [tiers]);
-  const C = cumNow(ledger, calc.mileageR);
-  const fc = computeForecast(ledger, calc.mileageR, +tier, timing, includeThis, calc.optPer10k, tiers);
+  // 거래일에 유효한 마일리지 결제 비율(넥슨 규칙). 거래기록 탭과 같은 기준이라야 두 탭의 13주 누적이 일치한다.
+  const mileageROf = useMemo(
+    () => (b) => (rulesAt(ruleHistory, b && b.date).mileageRate || 0) / 100,
+    [ruleHistory]
+  );
+  const C = cumNow(ledger, mileageROf);
+  const fc = computeForecast(ledger, mileageROf, +tier, timing, includeThis, calc.optPer10k, tiers);
   // 저장된 선택값이 DB에서 줄어든 tiers 범위를 벗어날 수 있다 → 마지막 등급으로 클램프(computeForecast 와 동일 규칙).
   const tn = (tiers[+tier] || tiers[tiers.length - 1]).name;
 
