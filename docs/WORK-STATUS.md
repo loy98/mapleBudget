@@ -18,7 +18,7 @@
   전 항목 Codex PASS. 테스트 359건 · 빌드 통과 · `npm audit` 0건.
 - **남은 것은 B-9 하나**: feedback rate limit 의 IP 버킷은 프로덕션에 요청을 보내야 판단할 수 있다.
 
-**배포하려면 §5의 세 가지를 먼저 해야 한다.**
+**§5 배포 전 세 항목 모두 충족 확인됨(2026-07-11) — 배포 가능 상태.**
 
 ---
 
@@ -148,14 +148,24 @@ malformed 값이 **유효한 스냅샷을 덮어쓰던** 병합 결함, 미래 �
 
 ---
 
-## 5. 배포 전 반드시 해야 할 것 (사람이 해야 함)
+## 5. 배포 전 반드시 해야 할 것
 
-1. **`PRIVACY_CONTACT_EMAIL` 치환** — `public/privacy.html`, `public/terms.html`.
-   개인정보 보호책임자 연락처는 법상 필수. 개인 이메일 공개 여부는 사용자 결정이라 플레이스홀더로 뒀다.
-2. **`supabase/schema.sql`을 Supabase 대시보드에서 적용** — rate limit 트리거와 `app_config.rules`는
-   적용해야 반영된다. **프로덕션 DB에는 아무것도 쓰지 않았다**(CLAUDE.md 금지사항).
-3. **광고 도입 시 CSP 개방** — `public/_headers`의 `script-src 'self'`가 애드센스를 전부 차단한다.
-   광고 종류가 정해지면 해당 도메인만 추가할 것.
+> 2026-07-11 갱신: 세 항목 전부 확인 완료. 아래는 검증 근거.
+
+1. ✅ **`PRIVACY_CONTACT_EMAIL` 치환** — `public/privacy.html`·`public/terms.html` 에 실제 연락처
+   (`yesfine13@gmail.com`) 반영됨(커밋 `f451769`).
+2. ✅ **`supabase/schema.sql` 프로덕션 적용 — 이미 완료(확인함)**. 이전 세션에서 이미 적용돼 있었고,
+   2026-07-11 Chrome 으로 프로덕션 Supabase(`maplebudget/main`)를 **읽기 전용** 전수 검사해 확인했다:
+   - 테이블 4종(`user_data`·`app_config`·`feedback`·`feedback_throttle`), 함수 2종, 트리거 3종(rate-limit 포함) 존재.
+   - `feedback_rate_limit` 함수 본문이 **현재 hardened 버전**과 일치: cf-connecting-ip · XFF 마지막 항목 ·
+     전역 백스톱(`anon:__all__`) · 솔트 해시 · `search_path` 가드 · `security definer` · 상한 100/5 전부 반영.
+   - 정책 최신판 확인: `feedback` = 역할 분리 위조방지(`anon→user_id null / authenticated→본인`),
+     `own_data` using/check = `auth.uid()=user_id`.
+   - `app_config` 1행에 `rules`(발효 규칙)와 **라이브 시세값**(mesoRate 등)이 이미 있음 — schema 시드의
+     `on conflict do nothing` 이 이 값을 덮지 않으므로 재적용해도 안전(하지만 재적용 자체가 불필요).
+   - ⚠️ 위 검사는 전부 SELECT/카탈로그 조회였고 **프로덕션 DB에 아무것도 쓰지 않았다**.
+3. ⏸️ **광고 CSP 개방 — 해당 없음(광고 계획 없음)**. `public/_headers` 의 `script-src 'self'` 유지.
+   광고 도입이 정해지면 그때 해당 도메인만 추가할 것(비차단 항목).
 
 ---
 
