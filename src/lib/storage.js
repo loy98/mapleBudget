@@ -215,13 +215,33 @@ export function canonicalizeMyItems(rows) {
 // id 를 이름에서 유도하기 때문에, 표식이 있으면 **같은 이름을 다시 추가해도 곧바로 다시 지워진다.**
 // 그래서 시각을 비교한다: 표식보다 나중에 추가된 아이템은 살아남는다("지웠다가 다시 넣었다").
 // `at` 이 없는 구 데이터는 표식보다 이전으로 취급한다 — 삭제가 유지되는 쪽이 안전하다.
-export function isItemDeleted(deleted, item) {
+// 동시각(at === ts)도 삭제가 이긴다. 삭제는 언제나 표식을 `at` 보다 **뒤로** 찍기 때문에(deleteMyItem),
+// 같은 값이 나오는 것은 아래 clamp 로 끌어내려졌을 때뿐이다.
+//
+// `ceiling` = '정상적인 지금'의 상한. 표식 시각은 `normalizeDeleted` 가 여기로 clamp 한다.
+// **`at` 도 같은 상한으로 clamp 해야 한다.** 안 그러면 시계가 틀어진 기기(또는 가공된 백업)의
+// 미래 `at` 이 clamp 된 표식을 이겨, 지운 아이템이 되살아난다.
+export function isItemDeleted(deleted, item, ceiling = null) {
   if (!deleted || !item) return false;
   const key = itemTombstoneKey(item.id);
   if (!hasOwn(deleted, key)) return false;
   const ts = +deleted[key];
-  const at = +item.at;
+  let at = +item.at;
+  if (Number.isFinite(at) && Number.isFinite(ceiling) && at > ceiling) at = ceiling;
   return !(Number.isFinite(at) && Number.isFinite(ts) && at > ts);
+}
+
+// 아이템을 목록에 넣을 때 찍을 `at`. 남아 있는 아이템 삭제 표식보다 반드시 뒤여야 한다 —
+// 같은 밀리초에 지우고 복원하면(테스트·빠른 클릭) `at === ts` 가 되어 복원이 삭제에 진다.
+export function nextItemAt(deleted, now = Date.now()) {
+  let max = -Infinity;
+  const d = deleted && typeof deleted === "object" && !Array.isArray(deleted) ? deleted : {};
+  Object.keys(d).forEach((k) => {
+    if (!isItemTombstone(k) || !hasOwn(d, k)) return;
+    const t = Number(d[k]);
+    if (Number.isFinite(t) && t > max) max = t;
+  });
+  return Number.isFinite(max) ? Math.max(now, max + 1) : now;
 }
 
 // `[]` 는 '사용자가 목록을 비웠다'는 뜻이고, `null`/배열 아님은 '저장된 데이터가 없다'는 뜻이다.
@@ -257,9 +277,16 @@ export function deleteMyItem(myItems, ledger, id, now = Date.now()) {
 
 // '기본 목록 복원' — 지금 목록을 기본값으로 바꾼다.
 // 지운 기본 아이템의 표식이 클라우드에 남아 있으면(표식은 합집합이라 로컬에서 지워도 되살아난다)
-// 복원해도 병합에서 다시 빠진다. 그래서 복원 시각을 `at` 으로 찍어 표식을 이기게 한다.
-export function restoreDefaultMyItems(now = Date.now()) {
-  return canonicalizeMyItems(DEFAULT_ITEMS.map((x) => ({ ...x, at: now })));
+// 복원해도 병합에서 다시 빠진다. 그래서 남아 있는 표식보다 **뒤인** 시각을 `at` 으로 찍는다.
+export function restoreDefaultMyItems(deleted, now = Date.now()) {
+  const at = nextItemAt(deleted, now);
+  return canonicalizeMyItems(DEFAULT_ITEMS.map((x) => ({ ...x, at })));
+}
+
+// 사용자가 목록에 새 아이템을 넣을 때 쓴다. 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.
+export function addMyItems(myItems, deleted, rows, now = Date.now()) {
+  const at = nextItemAt(deleted, now);
+  return canonicalizeMyItems([...asArray(myItems), ...asArray(rows).map((r) => ({ ...r, at }))]);
 }
 
 // ===== 거래 원장 · 삭제 표식(tombstone) =====

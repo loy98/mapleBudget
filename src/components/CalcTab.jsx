@@ -8,7 +8,7 @@ const tierOptionsOf = (tiers) =>
 const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
 const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
 
-export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
+export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, onAddMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
   // 등급 기준은 app_config(rules.tiers)에서 올 수 있다 → 목록 길이가 바뀌어도 인덱스가 깨지지 않게 방어.
@@ -59,8 +59,8 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
     const add = items.filter(
       (r) => r.name && r.name.trim() && !myItems.some((m) => m.name === r.name && "" + m.cash === "" + r.cash)
     );
-    // at = 목록에 들어온 시각. 예전에 지운 같은 이름의 아이템이 남긴 삭제 표식을 이겨야 다시 추가된다.
-    if (add.length) setMyItems([...myItems, ...add.map((r) => ({ name: r.name, cash: +r.cash, mAllowed: r.mAllowed !== false, at: Date.now() }))]);
+    // 추가 시각(at)은 App 이 찍는다 — 예전에 지운 같은 이름의 삭제 표식보다 뒤여야 살아남는다.
+    if (add.length) onAddMyItems(add.map((r) => ({ name: r.name, cash: +r.cash, mAllowed: r.mAllowed !== false })));
   };
 
   const resetAll = () => {
@@ -297,8 +297,10 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   아이콘은 이모지(🫐) 또는 이미지 URL을 넣을 수 있어요. 실제 메이플 아이콘 URL(예: maplestory.io)을 붙여넣으면 그대로 표시됩니다.
                 </div>
                 <div className="row-actions">
-                  {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다. */}
-                  <button className="btn sm" onClick={() => setMyItems([...myItems, { id: uid(), at: Date.now(), name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
+                  {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다.
+                      (id 는 한 번 정해지면 바뀌지 않는다. 이름을 입력할 때 id 를 다시 계산하면 React key 가 바뀌어
+                       입력 도중 리마운트로 포커스를 잃는다.) */}
+                  <button className="btn sm" onClick={() => onAddMyItems([{ id: uid(), name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
                   <button className="btn ghost sm" onClick={addTableRowsToList}>아래 표를 목록에 추가</button>
                   {/* 기본 목록 복원 = '지금 목록을 기본값으로 바꾼다'. 지운 기본 아이템의 삭제 표식이 남아 있으면
                       복원해도 병합에서 다시 빠지므로, 표식까지 걷어 주는 App 핸들러가 필요하다. */}

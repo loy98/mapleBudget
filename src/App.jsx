@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { computeCalc } from "./lib/calc.js";
 import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
-  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched, normalizeMyItems, deleteMyItem, restoreDefaultMyItems,
+  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched, normalizeMyItems, deleteMyItem, restoreDefaultMyItems, addMyItems,
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
 import { useCloudSync } from "./lib/useCloudSync.js";
@@ -97,8 +97,10 @@ export default function App() {
     setLedger(next.ledger);
   };
   // '기본 목록 복원'. 지운 기본 아이템의 삭제 표식은 합집합이라 로컬에서 지워도 클라우드에서 되살아난다.
-  // 그래서 복원 시각을 아이템에 찍어 표식을 이기게 한다(restoreDefaultMyItems).
-  const restoreDefaultItems = () => { markUserTouched(); setMyItems(restoreDefaultMyItems()); };
+  // 그래서 남아 있는 표식보다 뒤인 시각을 아이템에 찍어 표식을 이기게 한다.
+  const restoreDefaultItems = () => { markUserTouched(); setMyItems(restoreDefaultMyItems(ledger.deleted)); };
+  // 새 아이템 추가도 같은 이유로 App 을 거친다 — 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.
+  const addItemsToMyList = (rows) => { markUserTouched(); setMyItems(addMyItems(myItems, ledger.deleted, rows)); };
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
@@ -150,7 +152,7 @@ export default function App() {
           settings={settings} setSettings={setSettings}
           charges={charges} setCharges={setCharges}
           items={items} setItems={setItems}
-          myItems={myItems} setMyItems={applyMyItems} onRemoveMyItem={removeMyItem} onRestoreDefaultItems={restoreDefaultItems}
+          myItems={myItems} setMyItems={applyMyItems} onRemoveMyItem={removeMyItem} onRestoreDefaultItems={restoreDefaultItems} onAddMyItems={addItemsToMyList}
           chargeMethods={chargeOptions}
           calc={calc}
           tiers={rules.tiers}

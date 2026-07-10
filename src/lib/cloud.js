@@ -131,12 +131,12 @@ export async function writeUserData(userId, snap, expectedUpdatedAt) {
 //  · 업로드 충돌 → 이 탭(사용자가 방금 편집한 값을 잃으면 안 된다)
 //  · 최초 로그인 → 클라우드(calc 와 같은 기준)
 // 순서는 loser 를 먼저 깔고 winner 로 덮는다 → 양쪽 추가분이 모두 남고, 표시 순서도 안정적이다.
-export function mergeMyItems(loser, winner, deleted) {
+export function mergeMyItems(loser, winner, deleted, ceiling = null) {
   const map = new Map();
   canonicalizeMyItems(loser).forEach((x) => map.set(x.id, x));
   canonicalizeMyItems(winner).forEach((x) => map.set(x.id, x));
   // 표식보다 나중에 추가된 아이템은 살아남는다 — 지웠다가 다시 넣은 것이다(isItemDeleted 참고).
-  return [...map.values()].filter((x) => !isItemDeleted(deleted, x));
+  return [...map.values()].filter((x) => !isItemDeleted(deleted, x, ceiling));
 }
 
 // 업로드 충돌 시의 병합 규칙.
@@ -148,7 +148,7 @@ export function mergeForUpload(localSnap, cloud, clientNow = Date.now()) {
   return {
     calc: localSnap.calc,
     // 같은 id 면 이 탭이 이긴다 — 방금 고친 캐시가·아이콘을 서버의 옛 값으로 되돌리지 않는다.
-    my_items: mergeMyItems(cloud ? cloud.my_items : [], localSnap.my_items, ledger.deleted),
+    my_items: mergeMyItems(cloud ? cloud.my_items : [], localSnap.my_items, ledger.deleted, t.ceiling),
     ledger,
   };
 }
@@ -180,7 +180,7 @@ export function mergeSnapshots(local, cloud, opts = {}) {
   const cloudHasItems = cloudItems && cloud.my_items.length > 0;
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
   // 아이템은 합집합 + 표식 차감. 같은 id 면 클라우드가 이긴다(calc 와 같은 기준).
-  const my_items = cloudItems ? mergeMyItems(local.my_items, cloud.my_items, ledger.deleted) : local.my_items;
+  const my_items = cloudItems ? mergeMyItems(local.my_items, cloud.my_items, ledger.deleted, opts.ceiling) : local.my_items;
   const calc = cloudHasCalc ? cloud.calc : local.calc;
   const ledgerActive = ["buys", "sells", "cashes", "spends"].some(
     (k) => local.ledger && local.ledger[k] && local.ledger[k].length > 0
