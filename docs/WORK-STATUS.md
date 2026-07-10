@@ -8,12 +8,15 @@
 ## 0. 30초 요약
 
 전체 검수(분야별 에이전트 5종 + Codex) → 발견 → 수정 → Codex 재검수를 반복했다.
-테스트 **52건 → 276건**, `npm audit` **5건(critical 1·high 1) → 0건**.
+테스트 **52건 → 359건**(12파일), `npm audit` **5건(critical 1·high 1) → 0건**.
 
-- `main`: 프로덕션. **`dev`가 48커밋 앞서 있다. 아직 배포 안 함.**
-- `dev`: 미병합 브랜치 **없음**. MEDIUM 이상 데이터 정합 항목을 전부 해결했다 —
-  B-3(저장소 손상) · B-5(거래별 요율) · B-4(주 경계 KST) · B-7(결정적 행 id) · B-6(백업 검증) · B-2b(아이템 병합).
-  전 항목 Codex PASS. 테스트 276건 · 빌드 통과 · `npm audit` 0건.
+- `main`: 프로덕션. **`dev`가 65커밋 앞서 있다. 아직 배포 안 함.**
+- `dev`: 미병합 브랜치 **없음**. 하드닝 백로그를 **B-9 하나 빼고 전부** 해결했다 —
+  B-3(저장소 손상) · B-5(거래별 요율) · B-4(주 경계 KST) · B-7(결정적 행 id) · B-6(백업 검증) ·
+  B-2b(아이템 병합) · B-8 LOW 전부(keepalive 플러시 · 포맷 -0 · 수수료 판정 단일화 · 아이콘 allowlist ·
+  오류 기록 · ui.jsx 분할 · 키보드 접근성).
+  전 항목 Codex PASS. 테스트 359건 · 빌드 통과 · `npm audit` 0건.
+- **남은 것은 B-9 하나**: feedback rate limit 의 IP 버킷은 프로덕션에 요청을 보내야 판단할 수 있다.
 
 **배포하려면 §5의 세 가지를 먼저 해야 한다.**
 
@@ -133,14 +136,7 @@ malformed 값이 **유효한 스냅샷을 덮어쓰던** 병합 결함, 미래 �
 
 | ID | 내용 | 심각도 | 비고 |
 |---|---|---|---|
-| **B-9** | feedback rate limit의 IP 버킷은 best-effort | MEDIUM | **프로덕션 관찰 필요** — 배포 후 `anon:__all__` 카운터를 보고 판단 |
-| B-8 잔여 | `visibilitychange` 플러시가 평범한 `fetch`(탭 종료 시 취소) | LOW | `sendBeacon`/`keepalive` |
-| B-8 잔여 | `IconView`가 임의 http(s) 호스트 이미지 로드 | LOW | allowlist 미완 |
-| B-8 잔여 | 에러 트래킹 부재 | LOW | `ErrorBoundary.componentDidCatch`에 전송 지점만 있음 |
-| B-8 잔여 | `manW`만 `isFinite` 가드 없음, `won(-0.4)` → `"-0원"` | LOW | |
-| B-8 잔여 | `computeFeePct` 조건이 `CalcTab.feeBenefit`에 재구현 | LOW | 진실 원천 이중화 |
-| B-8 잔여 | `ui.jsx`(576줄) 분할 + `usePopover` 추출(5곳 복붙) | LOW | 구조 |
-| B-8 잔여 | 커스텀 위젯 키보드 조작(`ItemCombo`/`DateInput`/`WeekPicker`/`YMPicker`/달력 셀) | LOW | a11y |
+| **B-9** | feedback rate limit의 IP 버킷은 best-effort | MEDIUM | **여기서 더 할 수 있는 게 없다.** Supabase 앞단의 XFF 정규화는 프로덕션에 요청을 보내야 확인된다. 배포 후 `feedback_throttle` 의 `anon:__all__` 카운터를 관찰해 상한을 조정할 것. 근본해법 = Turnstile + Edge Function(외부 서비스 결정) |
 
 ### 오탐으로 판단해 고치지 않은 것 (다시 제기되면 이 근거를 보라)
 
@@ -196,6 +192,17 @@ rate limit의 per-IP 5건 / XFF 위조 우회 차단 / 전역 백스톱 100건.
 B-3 작업 중 처음 쓴 속성 테스트는 가드를 통째로 제거해도 초록불이었다
 (LCG 하위 비트의 주기가 짧아 위험 분기가 실행되지 않았다).
 방어 코드를 일부러 부수고 테스트가 잡는지 확인할 것.
+
+**`npm test` 의 "Tests passed" 줄만 보면 안 된다.** 테스트 파일이 **파싱 에러로 통째로 수집되지 않아도**
+그 줄은 초록불이다(실제로 `ui.test.jsx` 가 그렇게 6건을 조용히 빼먹었다). **`Test Files` 줄을 함께 확인한다.**
+
+**SSR 마크업 비교는 그 코드를 실제로 렌더할 때만 의미가 있다.** `App` 의 SSR 은 계산기 탭만 그리므로
+달력 셀·팝오버는 한 번도 거치지 않는다 — "바이트 동일"이 아무것도 보장하지 않는다.
+바뀐 컴포넌트를 직접 렌더하는 테스트를 쓸 것(`CalendarPanel.test.jsx` 참고).
+
+**포커스·이벤트는 jsdom 으로 검증한다.** `jsdom` 은 devDependency 로 들어 있다(`npm audit` 0건 유지).
+`*.dom.test.jsx` 에 `// @vitest-environment jsdom` 을 붙이고 `act` 로 감싼다.
+Codex 가 잡은 a11y 결함(키보드로 연 팝오버가 격자에 도달하지 못함)은 DOM 테스트 없이는 잡히지 않았다.
 
 **타임존(B-4)도 같은 함정이다.** 개발 기계가 KST 라 로컬 기준 코드와 KST 기준 코드가 같은 답을 낸다.
 게다가 **Windows 의 Node 는 `TZ=... npm test` 셸 프리픽스를 무시한다**(실측: 여전히 GMT+0900).
