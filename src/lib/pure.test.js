@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
-  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows,
+  KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows, validateBackup,
   loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock } from "./cloud.js";
@@ -707,14 +707,30 @@ describe("tombstone — 신뢰할 수 없는 시각/키 방어", () => {
     const far = Date.now() + 100 * 365 * 86400000;
     const backup = JSON.stringify({
       app: "mvp-calculator",
-      ledger: { buys: [{ id: "keep" }, "쓰레기", null], sells: {}, deleted: { evil: far, bad: "abc" } },
+      ledger: { buys: [{ id: "keep" }, "쓰레기", null], sells: [], deleted: { evil: far, bad: "abc" } },
     });
-    expect(importAll(backup).ok).toBe(true);
+    const r = importAll(backup);
+    expect(r.ok).toBe(true);
     const written = JSON.parse(store.get(LKEY));
     expect(written.buys.map((b) => b.id)).toEqual(["keep"]); // malformed 원소 제거
-    expect(written.sells).toEqual([]);                        // 배열 아닌 버킷 강등
     expect(written.deleted.bad).toBeUndefined();              // malformed 시각 제거
     expect(written.deleted.evil).toBeLessThanOrEqual(Date.now()); // 미래 시각 clamp
+    // 버려진 행은 조용히 넘어가지 않는다(B-6).
+    expect(r.warnings.join(" ")).toContain("2건");
+  });
+
+  // B-6: 배열이 아닌 버킷을 조용히 [] 로 강등하면 판매 기록 전체가 소리 없이 사라진다 → 거절한다.
+  it("배열이 아닌 버킷은 강등하지 않고 거절한다", () => {
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [], sells: {} } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("sells");
+    expect(store.get(LKEY)).toBeUndefined(); // 아무것도 쓰지 않았다
   });
 });
 
@@ -1046,7 +1062,7 @@ describe("저장소 손상 방어 (B-3)", () => {
 
     const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [{ id: "new" }] } }));
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/백업할 공간/);
+    expect(r.error).toMatch(/백업하지 못해/);
     expect(store.get(LKEY)).toBe(CORRUPT); // 원본 보존
   });
 
@@ -1850,5 +1866,278 @@ describe("canonicalizeRows 는 멱등이다", () => {
   it("cashes 도 멱등 (rate 유도가 두 번 돌아도 같다)", () => {
     const once = canonicalizeRows("cashes", [{ date: "2026-07-04", meso: 2, won: 1000 }]);
     expect(canonicalizeRows("cashes", once)).toEqual(once);
+  });
+});
+
+// ===== B-6: 백업 파일 검증 =====
+// 예전에는 `data.app` 문자열 하나만 보고 파일 내용을 그대로 localStorage 에 썼다.
+// 형태가 깨진 값은 크래시하진 않았지만 다음 로드에서 조용히 기본값으로 떨어졌다 —
+// 사용자는 "복원 완료"를 보고 데이터가 사라진 것을 나중에야 안다.
+describe("B-6 · 백업 파일 검증 (validateBackup)", () => {
+  const ok = (extra) => validateBackup({ app: "mvp-calculator", version: 1, ...extra });
+
+  it("이 앱의 파일이 아니면 거절", () => {
+    expect(validateBackup(null).ok).toBe(false);
+    expect(validateBackup([]).ok).toBe(false);
+    expect(validateBackup({ app: "다른앱" }).ok).toBe(false);
+  });
+
+  it("version 이 없으면 v1 로 본다 (초기 내보내기 호환)", () => {
+    expect(validateBackup({ app: "mvp-calculator", ledger: { buys: [] } }).ok).toBe(true);
+  });
+
+  it("모르는 미래 버전은 거절한다 — '최선을 다해' 쓰면 조용히 잃는다", () => {
+    const r = validateBackup({ app: "mvp-calculator", version: 2, ledger: { buys: [] } });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("v2");
+  });
+
+  it("버전이 정수가 아니면 거절", () => {
+    expect(validateBackup({ app: "mvp-calculator", version: "1", ledger: {} }).ok).toBe(false);
+    expect(validateBackup({ app: "mvp-calculator", version: 1.5, ledger: {} }).ok).toBe(false);
+    expect(validateBackup({ app: "mvp-calculator", version: 0, ledger: {} }).ok).toBe(false);
+  });
+
+  it("복원할 데이터가 하나도 없으면 거절", () => {
+    expect(ok({}).ok).toBe(false);
+  });
+
+  it("최상위 형태가 틀리면 거절한다 (조용히 기본값으로 떨어지지 않게)", () => {
+    expect(ok({ calc: [] }).ok).toBe(false);
+    expect(ok({ calc: "x" }).ok).toBe(false);
+    expect(ok({ myItems: {} }).ok).toBe(false);
+    expect(ok({ ledger: [] }).ok).toBe(false);
+    expect(ok({ ledger: { buys: {} } }).ok).toBe(false);
+    expect(ok({ ledger: { buys: [], deleted: [] } }).ok).toBe(false);
+  });
+
+  it("정상 파일은 통과하고 경고가 없다", () => {
+    const r = ok({
+      calc: { mesoRate: 3000 },
+      myItems: [{ name: "펫" }],
+      ledger: { buys: [{ id: "a", date: "2026-07-01" }] },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("깨진 행·읽을 수 없는 날짜는 거절이 아니라 경고다 (복원은 진행)", () => {
+    const r = ok({ ledger: { buys: [{ id: "a", date: "2026-07-01" }, null, { id: "b", date: "2026/07/02" }] } });
+    expect(r.ok).toBe(true);
+    expect(r.warnings.join(" ")).toContain("1건은 형태가 깨져");
+    expect(r.warnings.join(" ")).toContain("집계에서 빠집니다");
+  });
+
+  it("zero-pad 만 하면 되는 날짜는 경고하지 않는다 (padDate 가 고친다)", () => {
+    const r = ok({ ledger: { buys: [{ id: "a", date: "2026-7-2" }] } });
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("날짜가 아예 없는 행도 경고한다", () => {
+    const r = ok({ ledger: { spends: [{ id: "a", amount: 100 }] } });
+    expect(r.warnings.join(" ")).toContain("집계에서 빠집니다");
+  });
+
+  it("malformed 아이템과 알 수 없는 calMode 는 경고", () => {
+    const r = ok({ myItems: [{ name: "펫" }, { name: 3 }, null], calMode: "이상한값" });
+    expect(r.warnings.join(" ")).toContain("아이템 2개");
+    expect(r.warnings.join(" ")).toContain("달력 보기");
+  });
+});
+
+describe("B-6 · importAll 은 정규 형태로 쓴다", () => {
+  let store;
+  beforeEach(() => {
+    store = new Map();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  });
+
+  it("계산기 설정을 정규화해 쓴다 (모르는 키는 버리고 빠진 키는 기본값)", () => {
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", calc: { mesoRate: 4321, 쓰레기키: 1 } }));
+    expect(r.ok).toBe(true);
+    const written = JSON.parse(store.get(KEY));
+    expect(written.mesoRate).toBe(4321);
+    expect(written.쓰레기키).toBeUndefined();
+    expect(written.mvpGrade).toBe(DEFAULT_SETTINGS.mvpGrade); // 빠진 키는 기본값
+    expect(Array.isArray(written.charge)).toBe(true);
+  });
+
+  it("malformed 아이템은 걸러서 쓴다 (IconView 크래시 방지)", () => {
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", myItems: [{ name: "펫" }, { name: 3 }, null] }));
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(store.get(ITEMS_KEY))).toEqual([{ name: "펫" }]);
+  });
+
+  it("알 수 없는 calMode 는 쓰지 않는다", () => {
+    importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [] }, calMode: "javascript:evil" }));
+    expect(store.get(CALMODE_KEY)).toBeUndefined();
+    importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [] }, calMode: "mvp" }));
+    expect(store.get(CALMODE_KEY)).toBe("mvp");
+  });
+
+  it("거절된 파일은 아무 키도 건드리지 않는다", () => {
+    store.set(KEY, '{"mesoRate":1}');
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", version: 99, calc: { mesoRate: 2 } }));
+    expect(r.ok).toBe(false);
+    expect(store.get(KEY)).toBe('{"mesoRate":1}'); // 원본 그대로
+  });
+
+  it("경고는 복원 결과에 실려 온다", () => {
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [null] } }));
+    expect(r.ok).toBe(true);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+// ===== Codex 재검수 반영 (B-6 2차) =====
+describe("B-6 · Codex 지적 반영", () => {
+  let store, failKeys;
+  const mount = () => {
+    store = new Map();
+    failKeys = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => { if (failKeys.has(k)) { const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; } store.set(k, String(v)); },
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  };
+  beforeEach(mount);
+
+  // F1: 검증은 배열 행을 '제외했다'고 경고하는데 저장은 제외하지 않아, {"0":1,"1":2,id:...} 가 남았다.
+  it("배열 행은 경고대로 실제로 제외된다 (경고와 동작의 일치)", () => {
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", ledger: { buys: [[1, 2], { id: "keep", date: "2026-07-01" }] } }));
+    expect(r.ok).toBe(true);
+    expect(r.warnings.join(" ")).toContain("1건은 형태가 깨져");
+    expect(JSON.parse(store.get(LKEY)).buys.map((b) => b.id)).toEqual(["keep"]);
+  });
+
+  // F3: 정규식만 보면 달력에 없는 날짜가 통과해, 경고 없이 모든 집계에서 빠진다.
+  it("달력에 없는 날짜를 경고한다 (2026-99-99, 2026-02-30)", () => {
+    const w = (d) => validateBackup({ app: "mvp-calculator", ledger: { buys: [{ id: "a", date: d }] } }).warnings.join(" ");
+    expect(w("2026-99-99")).toContain("집계에서 빠집니다");
+    expect(w("2026-02-30")).toContain("집계에서 빠집니다");
+    expect(w("2026-02-28")).toBe("");
+    expect(w("2028-02-29")).toBe(""); // 윤년은 실재한다
+    expect(w("2026-02-29")).toContain("집계에서 빠집니다"); // 평년엔 없다
+  });
+
+  // F4: "version": null 은 '버전 없음'이 아니라 '형태를 모르는 파일'이다.
+  it("version 이 null 이면 거절한다 (키가 아예 없는 것과 다르다)", () => {
+    expect(validateBackup({ app: "mvp-calculator", version: null, ledger: { buys: [] } }).ok).toBe(false);
+    expect(validateBackup({ app: "mvp-calculator", ledger: { buys: [] } }).ok).toBe(true);
+  });
+
+  // F2: 순서대로 쓰다 뒤에서 실패하면 앞 키는 이미 덮인 채 "복원 못 했습니다"가 나왔다.
+  it("쓰기가 중간에 실패하면 앞서 쓴 키를 되돌린다 (전부 아니면 전무)", () => {
+    store.set(KEY, '{"mesoRate":1111}');
+    store.set(CALMODE_KEY, "month");
+    failKeys.add(LKEY);
+    const r = importAll(JSON.stringify({
+      app: "mvp-calculator",
+      calc: { mesoRate: 2222 },
+      ledger: { buys: [{ id: "a", date: "2026-07-01" }] },
+      calMode: "mvp",
+    }));
+    expect(r.ok).toBe(false);
+    expect(store.get(KEY)).toBe('{"mesoRate":1111}'); // 되돌아왔다
+    expect(store.get(CALMODE_KEY)).toBe("month");     // 부수 설정도 안 건드렸다
+    expect(store.has(LKEY)).toBe(false);
+  });
+
+  it("원래 없던 키는 되돌릴 때 지운다", () => {
+    failKeys.add(LKEY);
+    const r = importAll(JSON.stringify({
+      app: "mvp-calculator",
+      calc: { mesoRate: 2222 },
+      ledger: { buys: [] },
+    }));
+    expect(r.ok).toBe(false);
+    expect(store.has(KEY)).toBe(false); // 복원 전에 없었으므로 남기지 않는다
+  });
+
+  it("되돌리기까지 실패하면 그 사실을 사용자에게 알린다", () => {
+    store.set(KEY, '{"mesoRate":1111}');
+    // LKEY 쓰기가 실패하는 그 순간부터 저장소 전체가 쓰기 불가가 된다 → 롤백도 실패한다.
+    globalThis.localStorage.setItem = (k, v) => {
+      if (k === LKEY || failKeys.has(k)) { failKeys.add(KEY); const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; }
+      store.set(k, String(v));
+    };
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", calc: { mesoRate: 2222 }, ledger: { buys: [] } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("되돌리지 못했");
+    // 되돌리지 못한 게 사실이다 — 문구가 진실이어야 한다(원본 1111 이 아니라 새 값이 남아 있다).
+    expect(JSON.parse(store.get(KEY)).mesoRate).toBe(2222);
+  });
+});
+
+// ===== Codex 재검수 반영 (B-6 3차) =====
+describe("B-6 · 롤백 안전성과 날짜 검사 (Codex 2차)", () => {
+  let store;
+  beforeEach(() => {
+    store = new Map();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+  });
+
+  // 가장 위험한 경로: 원본을 읽지 못했는데 '원래 없던 키'로 오해하면 롤백이 그 키를 지운다.
+  it("원본을 읽지 못하면 아무것도 쓰지 않는다 (롤백을 보장할 수 없으므로)", () => {
+    store.set(KEY, '{"mesoRate":1111}');
+    globalThis.localStorage.getItem = (k) => { if (k === KEY) throw new Error("읽기 불가"); return store.has(k) ? store.get(k) : null; };
+    const r = importAll(JSON.stringify({ app: "mvp-calculator", calc: { mesoRate: 2222 } }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("읽을 수 없어");
+    expect(store.get(KEY)).toBe('{"mesoRate":1111}'); // 지워지지 않았다
+  });
+
+  it("두 자리 연도를 오판하지 않는다 (new Date(99,0,1) 은 1999년이다)", () => {
+    const w = (d) => validateBackup({ app: "mvp-calculator", ledger: { buys: [{ id: "a", date: d }] } }).warnings.join(" ");
+    expect(w("0099-01-01")).toBe("");
+    expect(w("0001-01-01")).toBe("");
+  });
+
+  it("윤년 규칙을 100/400 년까지 지킨다", () => {
+    const w = (d) => validateBackup({ app: "mvp-calculator", ledger: { buys: [{ id: "a", date: d }] } }).warnings.join(" ");
+    expect(w("2000-02-29")).toBe("");                      // 400 으로 나뉘면 윤년
+    expect(w("1900-02-29")).toContain("집계에서 빠집니다"); // 100 으로 나뉘면 평년
+    expect(w("2026-13-01")).toContain("집계에서 빠집니다"); // 13월은 없다
+    expect(w("2026-00-10")).toContain("집계에서 빠집니다"); // 0월도 없다
+    expect(w("2026-01-00")).toContain("집계에서 빠집니다"); // 0일도 없다
+  });
+});
+
+describe("B-6 · 롤백은 되돌릴 수 있는 키를 모두 되돌린다 (Codex 3차 LOW)", () => {
+  it("한 키의 복원이 실패해도 나머지 키는 되돌린다", () => {
+    const store = new Map([[KEY, '{"mesoRate":1111}'], [ITEMS_KEY, '[{"name":"원본"}]']]);
+    const unrestorable = new Set();
+    globalThis.localStorage = {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => {
+        if (k === LKEY) { unrestorable.add(KEY); const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        if (unrestorable.has(k)) { const e = new Error("q"); e.name = "QuotaExceededError"; throw e; }
+        store.set(k, String(v));
+      },
+      removeItem: (k) => store.delete(k),
+    };
+    __resetStorageIssues();
+    const r = importAll(JSON.stringify({
+      app: "mvp-calculator",
+      calc: { mesoRate: 2222 },
+      myItems: [{ name: "새것" }],
+      ledger: { buys: [] },
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("되돌리지 못했");
+    // KEY 는 되돌리지 못했지만(그래서 문구가 맞다), ITEMS_KEY 는 단락 없이 되돌아왔다.
+    expect(JSON.parse(store.get(ITEMS_KEY))).toEqual([{ name: "원본" }]);
   });
 });
