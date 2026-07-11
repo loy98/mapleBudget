@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { IconChevron } from "./icons.jsx";
 
 // ===== 숫자 입력 (테마 스테퍼) =====
 // 편집 중에는 자유롭게 지울 수 있고(완전 삭제 가능), 다 지운 채 포커스를 벗어나면 0으로,
@@ -44,8 +45,12 @@ export function NumInput({ value, onChange, step = 1, width, noStepper, placehol
     <span className="numwrap">
       {inp}
       <span className="stepbtns">
-        <button type="button" className="stbtn up" onClick={() => bump(1)}>▲</button>
-        <button type="button" className="stbtn dn" onClick={() => bump(-1)}>▼</button>
+        <button type="button" className="stbtn up" aria-label={`${step} 증가`} onClick={() => bump(1)}>
+          <IconChevron className="stico" />
+        </button>
+        <button type="button" className="stbtn dn" aria-label={`${step} 감소`} onClick={() => bump(-1)}>
+          <IconChevron className="stico" />
+        </button>
       </span>
     </span>
   );

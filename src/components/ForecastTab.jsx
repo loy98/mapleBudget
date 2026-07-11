@@ -3,6 +3,7 @@ import { TIERS, rulesAt } from "../lib/constants.js";
 import { won, mmdd, estGrade } from "../lib/util.js";
 import { cumNow, computeForecast } from "../lib/ledger.js";
 import { CSelect, CostLabel } from "./ui.jsx";
+import { IconTrendUp, IconTarget } from "./ui/icons.jsx";
 
 const tierOptionsOf = (tiers) =>
   tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
@@ -37,7 +38,7 @@ export default function ForecastTab({ ledger, calc, tiers = TIERS, ruleHistory }
   return (
     <div>
       <div className="card">
-        <h2><span className="n">📈</span>등급별 필요 과금</h2>
+        <h2><span className="n ico"><IconTrendUp /></span>등급별 필요 과금</h2>
         <p className="desc">
           MVP는 최근 13주 누적 넥슨캐시 사용액 기준. 각 등급의 누적 기준과 유지에 필요한 주당 과금입니다.
           현재 누적: <b>{won(C)} · 추정 {estGrade(C, tiers)}</b>
@@ -74,7 +75,7 @@ export default function ForecastTab({ ledger, calc, tiers = TIERS, ruleHistory }
       </div>
 
       <div className="card">
-        <h2><span className="n">🎯</span>추천 과금 방안</h2>
+        <h2><span className="n ico"><IconTarget /></span>추천 과금 방안</h2>
         <p className="desc">
           목표 등급을 고르면 다음 주부터 13주간 롤링 창(13주)을 목표 이상으로 유지하는 <b>최소 비용 과금 스케줄</b>을 계산합니다.
           창이 부족한 주에만 과금을 배정해 낭비를 없앱니다. 실비용은 계산기의 최적 방식 단가를 적용합니다.

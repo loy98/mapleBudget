@@ -60,4 +60,28 @@ describe("rectBelow — 앵커 아래 문서 좌표", () => {
     expect(rectBelow(null)).toEqual({ left: 0, top: 0, width: 0 });
     expect(rectBelow({})).toEqual({ left: 0, top: 0, width: 0 });
   });
+
+  it("offsetWidth 가 없으면 zoom=1 로 보고 기존과 동일하게 동작한다", () => {
+    globalThis.window = { scrollX: 10, scrollY: 100 };
+    // offsetWidth 미제공(구식 mock) → 보정 없이 기존 좌표
+    const el = { getBoundingClientRect: () => ({ left: 5, bottom: 20, width: 80 }) };
+    expect(rectBelow(el, 6)).toEqual({ left: 15, top: 126, width: 80 });
+  });
+
+  it("소수 픽셀 폭(등배)에서는 보정하지 않는다 — offsetWidth 정수 반올림 잡음 무시", () => {
+    globalThis.window = { scrollX: 0, scrollY: 1000 };
+    // 등배지만 rect.width 는 소수, offsetWidth 는 정수 → 배율 ≈ 1.001 (잡음). 보정하면 top 이 밀린다.
+    const el = { offsetWidth: 333, getBoundingClientRect: () => ({ left: 20, bottom: 40, width: 333.33 }) };
+    expect(rectBelow(el, 6)).toEqual({ left: 20, top: 1046, width: 333.33 });
+  });
+
+  it("CSS zoom(브라우저 확대) 이면 배율로 나눠 보정한다", () => {
+    globalThis.window = { scrollX: 0, scrollY: 0 };
+    // 1.4배 확대: rect 는 확대된 값(width 140), offsetWidth 는 레이아웃 폭(100)
+    const el = { offsetWidth: 100, getBoundingClientRect: () => ({ left: 280, bottom: 420, width: 140 }) };
+    const out = rectBelow(el, 4);
+    expect(out.left).toBeCloseTo(200, 3); // 280 / 1.4
+    expect(out.top).toBeCloseTo(302.857, 2); // (420 + 4) / 1.4
+    expect(out.width).toBeCloseTo(100, 3); // 140 / 1.4
+  });
 });

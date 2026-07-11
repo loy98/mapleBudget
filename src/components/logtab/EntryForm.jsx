@@ -1,6 +1,7 @@
 import { won, todayStr, uid } from "../../lib/util.js";
 import { cashWonOf } from "../../lib/ledger.js";
 import { DateInput, ItemCombo, NumInput } from "../ui.jsx";
+import { IconEdit, IconCart, IconTag, IconBanknote, IconCard } from "../ui/icons.jsx";
 
 export const EMPTY_DRAFT = { buys: [], sells: [], cashes: [], spends: [] };
 
@@ -36,13 +37,13 @@ export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, my
 
   return (
     <div className="card">
-      <h2><span className="n">✎</span>새 거래 입력</h2>
+      <h2><span className="n ico"><IconEdit /></span>새 거래 입력</h2>
       <p className="desc">한 날짜의 거래를 입력하고 저장하면 달력의 해당 날짜에 기록됩니다. 저장 후 수정·삭제는 '달력 &amp; 통계'에서 날짜를 눌러서 하세요.</p>
       <label style={{ maxWidth: 220 }}>날짜</label>
       <DateInput value={entryDate} width={220} onChange={setEntryDate} />
 
       <div className="draftblock" style={{ marginTop: 12 }}>
-        <div className="bt">🛒 구매 (아이템 → 캐시 사용)</div>
+        <div className="bt"><IconCart />구매 (아이템 → 캐시 사용)</div>
         <div className="tblx"><table>
           <thead><tr><th>아이템</th><th>수량</th><th>개당 캐시가(원)</th><th className="milh">마일</th><th></th></tr></thead>
           <tbody>
@@ -64,7 +65,7 @@ export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, my
       </div>
 
       <div className="draftblock">
-        <div className="bt">💰 판매 (경매장 → 메소)</div>
+        <div className="bt"><IconTag />판매 (경매장 → 메소)</div>
         <div className="tblx"><table>
           <thead><tr><th>아이템</th><th>수량</th><th>개당 판매가(억)</th><th></th></tr></thead>
           <tbody>
@@ -82,7 +83,7 @@ export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, my
       </div>
 
       <div className="draftblock">
-        <div className="bt">🏦 현금화 (메소 → 현금)</div>
+        <div className="bt"><IconBanknote />현금화 (메소 → 현금)</div>
         <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 8 }}>
           현금화한 메소(억)와 억당 판매 비율(원/억)을 입력하면 판매 현금이 자동 계산됩니다.
         </div>
@@ -103,7 +104,7 @@ export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, my
       </div>
 
       <div className="draftblock">
-        <div className="bt">💳 기타 캐시 사용 (엠작 외 · MVP 과금에 포함)</div>
+        <div className="bt"><IconCard />기타 캐시 사용 (엠작 외 · MVP 과금에 포함)</div>
         <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 8 }}>
           충전은 많이 했어도 엠작 외 다른 데 쓴 넥슨캐시. 사용액이 MVP 과금(실적)에 잡히므로 여기에 기입하면 주차별 과금이 정확해집니다.
         </div>

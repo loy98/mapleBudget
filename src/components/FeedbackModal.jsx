@@ -4,13 +4,14 @@ import { useState } from "react";
 import { submitFeedback, cloudEnabled } from "../lib/cloud.js";
 import { getRecentErrors, formatErrorsForFeedback } from "../lib/errorLog.js";
 import { CSelect } from "./ui.jsx";
+import { IconChat } from "./ui/icons.jsx";
 import Modal from "./Modal.jsx";
 
 const CATEGORIES = [
-  { value: "suggestion", label: "💡 건의 · 개선" },
-  { value: "bug", label: "🐞 버그 신고" },
-  { value: "question", label: "❔ 질문" },
-  { value: "etc", label: "✏️ 기타" },
+  { value: "suggestion", label: "건의 · 개선" },
+  { value: "bug", label: "버그 신고" },
+  { value: "question", label: "질문" },
+  { value: "etc", label: "기타" },
 ];
 const MAX = 4000;
 
@@ -51,7 +52,7 @@ export default function FeedbackModal({ onClose, session }) {
     <Modal onClose={onClose} label="피드백 보내기" cardClass="feedback">
       <>
         <div className="modal-head">
-          <div className="modal-title">💬 피드백 보내기</div>
+          <div className="modal-title"><IconChat />피드백 보내기</div>
           <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
         </div>
 

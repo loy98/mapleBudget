@@ -2,13 +2,14 @@
 // 모듈 스코프 컴포넌트(리마운트로 포커스 유실 방지 규칙 준수).
 // Esc 닫기·포커스 트랩은 Modal 껍데기가 담당.
 import Modal from "./Modal.jsx";
+import { IconHelp, IconCalculator, IconBook, IconTarget, IconInfo, IconCloud } from "./ui/icons.jsx";
 
 export default function HelpModal({ onClose }) {
   return (
     <Modal onClose={onClose} label="도움말" cardClass="help">
       <>
         <div className="modal-head">
-          <div className="modal-title">❓ 도움말</div>
+          <div className="modal-title"><IconHelp />도움말</div>
           <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
         </div>
 
@@ -19,7 +20,7 @@ export default function HelpModal({ onClose }) {
           </p>
 
           <div className="help-sec">
-            <h4>🧮 계산기 탭</h4>
+            <h4><IconCalculator />계산기 탭</h4>
             <ul>
               <li><b>충전 방식·비율</b>: 상품권/카드 등 충전 할인과 선물식·메소마켓 비율을 넣으면 순비용률을 계산해요.</li>
               <li><b>목표 등급까지 총비용</b>: 현재 13주 누적 실적에서 목표 등급까지 채우는 최소 실비용을 알려줘요.</li>
@@ -30,7 +31,7 @@ export default function HelpModal({ onClose }) {
           </div>
 
           <div className="help-sec">
-            <h4>📒 거래 기록 탭</h4>
+            <h4><IconBook />거래 기록 탭</h4>
             <ul>
               <li><b>통계 · 달력 · 입력</b> 3개 화면으로 구성돼요.</li>
               <li>구매/판매/현금화/지출을 기록하면 주차별·13주 누적으로 자동 집계됩니다.</li>
@@ -40,7 +41,7 @@ export default function HelpModal({ onClose }) {
           </div>
 
           <div className="help-sec">
-            <h4>🔮 예상 &amp; 추천 탭</h4>
+            <h4><IconTarget />예상 &amp; 추천 탭</h4>
             <ul>
               <li>지금까지의 실적 추세로 이번 주/이번 달 예상 실적과 등급 유지 여부를 보여줘요.</li>
               <li>목표 등급을 유지하려면 얼마를 더 채워야 하는지 추천해줍니다.</li>
@@ -48,7 +49,7 @@ export default function HelpModal({ onClose }) {
           </div>
 
           <div className="help-sec">
-            <h4>📖 용어</h4>
+            <h4><IconInfo />용어</h4>
             <ul>
               <li><b>선물식</b>: 캐시를 선물해 메소로 바꾸는 방식(메소 : 1메포 비율).</li>
               <li><b>메소마켓</b>: 메포를 메소로 환전(메소 / 1메포 비율).</li>
@@ -59,7 +60,7 @@ export default function HelpModal({ onClose }) {
           </div>
 
           <div className="help-sec">
-            <h4>💾 데이터 &amp; 동기화</h4>
+            <h4><IconCloud />데이터 &amp; 동기화</h4>
             <ul>
               <li>모든 데이터는 기본적으로 <b>이 브라우저</b>에 저장돼요(게스트 모드).</li>
               <li><b>로그인</b>(Google·이메일 링크)하면 여러 기기에서 자동 동기화됩니다.</li>
@@ -68,7 +69,7 @@ export default function HelpModal({ onClose }) {
           </div>
 
           <p className="hint" style={{ marginTop: 4 }}>
-            더 궁금하거나 개선 아이디어가 있으면 상단 <b>💬 피드백</b> 버튼으로 알려주세요.
+            더 궁금하거나 개선 아이디어가 있으면 상단 <b>피드백</b> 버튼으로 알려주세요.
           </p>
         </div>
 

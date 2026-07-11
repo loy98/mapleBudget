@@ -25,10 +25,24 @@ export function isOutsideClick(target, nodes) {
 }
 
 // 앵커 바로 아래의 문서 좌표. 팝오버는 portal 로 body 에 absolute 로 뜬다.
+// ⚠ CSS zoom(브라우저 확대/축소 — 최신 Chrome 의 페이지 줌이 이렇게 동작)에서는
+//   getBoundingClientRect 는 '확대된' 좌표를 주지만 position:absolute 는 '확대 전' 좌표로 해석한다.
+//   그대로 두면 팝오버가 엉뚱한 곳(오른쪽 아래로 밀려)에 뜬다 → zoom 배율로 나눠 보정한다.
+//   zoom = 확대된 폭(rect.width) / 레이아웃 폭(offsetWidth). 확대 안 했으면 1 이라 기존과 동일.
 export function rectBelow(el, gap = 4) {
   if (!el || typeof el.getBoundingClientRect !== "function") return { left: 0, top: 0, width: 0 };
   const r = el.getBoundingClientRect();
-  return { left: window.scrollX + r.left, top: window.scrollY + r.bottom + gap, width: r.width };
+  // zoom 배율 추정: 확대폭(rect.width) / 레이아웃폭(offsetWidth).
+  // offsetWidth 는 정수로 반올림되므로 소수 픽셀 폭에선 1 근처의 '잡음' 배율이 나온다
+  // (예: 333.33/333≈1.001). 실제 브라우저 줌은 100% 에서 최소 10% 이상 벌어지므로,
+  // 1 에 아주 가까우면 보정하지 않는다 → 등배(zoom=1)에서 미세한 위치 틀어짐 방지.
+  let zoom = el.offsetWidth ? r.width / el.offsetWidth : 1;
+  if (!(zoom > 0) || Math.abs(zoom - 1) < 0.02) zoom = 1;
+  return {
+    left: (window.scrollX + r.left) / zoom,
+    top: (window.scrollY + r.bottom + gap) / zoom,
+    width: r.width / zoom,
+  };
 }
 
 // anchorRef = 토글 버튼/입력을 감싸는 요소(바깥 클릭 판정 기준). popRef = 떠 있는 패널.

@@ -3,6 +3,7 @@ import { WD_MVP, WD_SUN } from "../../lib/constants.js";
 import { won, eok, mmdd, fmtD, todayStr, addDays, start13, weekStartThu, weekStartSun, manW, nowD } from "../../lib/util.js";
 import { weeklyAch, cashWonOf } from "../../lib/ledger.js";
 import { DateInput, ItemCombo, NumInput } from "../ui.jsx";
+import { IconCalendar, IconCart, IconTag, IconBanknote, IconCard } from "../ui/icons.jsx";
 import { useRovingFocus } from "../ui/useRovingFocus.js";
 import { useFocusRescue } from "../ui/useFocusRescue.js";
 
@@ -112,10 +113,10 @@ function MvpCal({ ledger, days, mileageR, selectedDate, onSelect }) {
 }
 
 // 상세 섹션 래퍼 — DayDetail 밖(모듈 스코프)에 두어 리렌더 시 입력 포커스가 유지되도록 한다.
-function Sec({ label, n, children }) {
+function Sec({ icon, label, n, children }) {
   return (
     <>
-      <div className="ddsec">{label}{n > 0 && <span className="muted" style={{ fontWeight: 400 }}> · {n}건</span>}</div>
+      <div className="ddsec">{icon}{label}{n > 0 && <span className="muted" style={{ fontWeight: 400 }}> · {n}건</span>}</div>
       {n > 0 ? children : <div className="ddnone">내역 없음</div>}
     </>
   );
@@ -141,7 +142,7 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
       <div className="subhead">
         {date} 내역 {cnt ? `(${cnt}건)` : <span className="muted" style={{ fontWeight: 400 }}>· 기록 없음, 아래 버튼으로 추가</span>}
       </div>
-      <Sec label="🛒 구매" n={buys.length}>
+      <Sec icon={<IconCart />} label="구매" n={buys.length}>
         <div className="tblx"><table>
           <thead><tr><th>날짜</th><th>아이템</th><th>수량</th><th>개당 캐시가</th><th className="milh">마일</th><th>실적</th><th></th></tr></thead>
           <tbody>
@@ -162,7 +163,7 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
           </tbody>
         </table></div>
       </Sec>
-      <Sec label="💰 판매" n={sells.length}>
+      <Sec icon={<IconTag />} label="판매" n={sells.length}>
         <div className="tblx"><table>
           <thead><tr><th>날짜</th><th>아이템</th><th>수량</th><th>개당 판매가(억)</th><th>실수령 메소</th><th></th></tr></thead>
           <tbody>
@@ -179,7 +180,7 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
           </tbody>
         </table></div>
       </Sec>
-      <Sec label="🏦 현금화" n={cashes.length}>
+      <Sec icon={<IconBanknote />} label="현금화" n={cashes.length}>
         <div className="tblx"><table>
           <thead><tr><th>날짜</th><th>메소(억)</th><th>억당(원)</th><th>판매 현금(자동)</th><th></th></tr></thead>
           <tbody>
@@ -195,7 +196,7 @@ function DayDetail({ date, ledger, env, myItems, soldNames, patchEntry, delEntry
           </tbody>
         </table></div>
       </Sec>
-      <Sec label="💳 기타 캐시 사용" n={spends.length}>
+      <Sec icon={<IconCard />} label="기타 캐시 사용" n={spends.length}>
         <div className="tblx"><table>
           <thead><tr><th>날짜</th><th>사용액</th><th>메모</th><th></th></tr></thead>
           <tbody>
@@ -230,7 +231,7 @@ export default function CalendarPanel({
   const { days, env, soldNames } = d;
   return (
     <div className="card">
-      <h2><span className="n">📅</span>달력</h2>
+      <h2><span className="n ico"><IconCalendar /></span>달력</h2>
       <p className="desc">월력(실제 달력)과 MVP 주간(목~수, 누적 창) 두 모드. 과금 있는 날은 금액 칩으로, 오늘은 원형으로 강조됩니다. 날짜를 누르면 그 날 내역을 아래에서 보고 편집할 수 있어요.</p>
       <div className="calbar">
         <div className="calmodes">
@@ -255,7 +256,7 @@ export default function CalendarPanel({
         <span><i className="sw" style={{ background: "var(--accent2)" }}></i>오늘</span>
         <span><i className="sw" style={{ background: "var(--accent)" }}></i>과금 있는 날</span>
         <span><i className="sw" style={{ background: "var(--accent-weak)", boxShadow: "inset 0 0 0 1.5px var(--accent)" }}></i>선택</span>
-        <span style={{ color: "var(--accent2)" }}>■ 이번 주 하이라이트</span>
+        <span><i className="sw" style={{ background: "var(--accent2)" }}></i>이번 주 하이라이트</span>
       </div>
       {selectedDate && (
         <DayDetail
