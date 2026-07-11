@@ -5,6 +5,7 @@ import { WD_SUN } from "../../lib/constants.js";
 import { usePopover, rectBelow } from "./usePopover.js";
 import { useRovingFocus, cycleIndex } from "./useRovingFocus.js";
 import { IconView } from "./IconView.jsx";
+import { IconChevron, IconCalendar } from "./icons.jsx";
 
 // 네 피커는 모두 같은 팝오버 동작을 쓴다(usePopover): pointerdown 바깥 클릭 + Esc 닫기.
 // 예전에는 각자 복붙한 데다 이벤트 종류(mousedown/click)와 바깥 판정 방식이 달랐다.
@@ -68,7 +69,7 @@ export function ItemCombo({ value, onChange, options, width, placeholder }) {
       />
       {/* aria-hidden 을 쓰면 안 된다 — 포커스 가능한 요소를 접근성 트리에서 숨기는 것은 금지다.
           Tab 순서에서만 빼고(입력이 combobox 라 키보드 경로가 이미 있다) 이름은 준다. */}
-      <button type="button" className="icombo-tgl" tabIndex={-1} aria-label="목록 열기" onClick={() => (open ? close() : openPop())}>▾</button>
+      <button type="button" className="icombo-tgl" tabIndex={-1} aria-label="목록 열기" onClick={() => (open ? close() : openPop())}><IconChevron className="icombo-chev" /></button>
       {open && opts.length > 0 &&
         createPortal(
           <div ref={popRef} id={listId} role="listbox" className="icombo-pop" style={{ left: pos.left, top: pos.top, minWidth: pos.width || 160 }}>
@@ -108,7 +109,7 @@ export function WeekPicker({ value, onChange, weeks }) {
     <>
       <button
         ref={anchorRef}
-        className="btn ghost sm"
+        className="btn ghost sm pickbtn"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => {
@@ -117,7 +118,7 @@ export function WeekPicker({ value, onChange, weeks }) {
           setOpen(true);
         }}
       >
-        {sel ? sel.label : "주 선택"} ▾
+        {sel ? sel.label : "주 선택"}<IconChevron className="pick-chev" />
       </button>
       {open &&
         createPortal(
@@ -189,20 +190,25 @@ export function DateInput({ value, onChange, width }) {
   });
   return (
     <>
-      <input
-        ref={anchorRef}
-        className="datep"
-        readOnly
-        value={value || ""}
-        style={width ? { width } : undefined}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={openPop}
-        onKeyDown={(e) => {
-          // readOnly 입력이라 Enter/Space/↓ 로 열 수 있어야 한다(클릭 말고는 여는 길이 없었다).
-          if (!open && (e.key === "Enter" || e.key === " " || e.key === "ArrowDown")) { e.preventDefault(); openPop(); }
-        }}
-      />
+      <span className={"datewrap" + (open ? " open" : "")} style={width ? { width } : undefined}>
+        <input
+          ref={anchorRef}
+          className="datep"
+          readOnly
+          value={value || ""}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          // 다른 커스텀 드롭다운(CSelect)과 동일한 토글: 열려 있으면 클릭으로 닫힌다.
+          // (열려 있을 때 앵커를 눌러도 usePopover 의 바깥클릭 판정은 anchor 안이라 닫지 않으므로 여기서 닫는다.)
+          onClick={() => (open ? close(false) : openPop())}
+          onKeyDown={(e) => {
+            // readOnly 입력이라 Enter/Space/↓ 로 열 수 있어야 한다(클릭 말고는 여는 길이 없었다).
+            if (!open && (e.key === "Enter" || e.key === " " || e.key === "ArrowDown")) { e.preventDefault(); openPop(); }
+          }}
+        />
+        {/* 달력 아이콘 — pointer-events:none 라 클릭은 입력으로 전달되어 피커가 열린다 */}
+        <IconCalendar className="date-ico" />
+      </span>
       {open &&
         createPortal(
           <div ref={popRef} role="dialog" aria-label="날짜 선택" className="dppop" style={{ left: pos.left, top: pos.top }}>
@@ -238,7 +244,7 @@ export function YMPicker({ value, onChange, anchorLabel }) {
     <>
       <button
         ref={anchorRef}
-        className="btn ghost sm"
+        className="btn ghost sm pickbtn"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => {
@@ -248,7 +254,7 @@ export function YMPicker({ value, onChange, anchorLabel }) {
           setOpen(true);
         }}
       >
-        {anchorLabel}
+        {anchorLabel}<IconChevron className="pick-chev" />
       </button>
       {open &&
         createPortal(

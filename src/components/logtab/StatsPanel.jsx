@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { TIERS } from "../../lib/constants.js";
 import { won, pct, eok, mlN, mmdd, fmtD, weekStartThu, estGrade, nowD } from "../../lib/util.js";
 import { YMPicker, WeekPicker, StatGroup, CostLabel, PlLabel, Sparkline } from "../ui.jsx";
+import { IconChart, IconTrendUp, IconWallet, IconCoins, IconChevron } from "../ui/icons.jsx";
 import { ItemSubRow, ItemSummary, Qty } from "./ItemTables.jsx";
 
 // 통계 카드 — 기간 선택, 추세 차트, 지표 3종, 품목별 누적 요약, 주차별 거래 현황.
@@ -21,7 +22,7 @@ export default function StatsPanel({
 
   return (
     <div className="card">
-      <h2><span className="n">📊</span>통계</h2>
+      <h2><span className="n ico"><IconChart /></span>통계</h2>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div className="pseg">
           {[["w13", "최근 13주"], ["all", "전체"], ["month", "특정 월"], ["week", "특정 주차"]].map(([p, l]) => (
@@ -29,7 +30,7 @@ export default function StatsPanel({
           ))}
         </div>
         {periodMode === "month" && (
-          <YMPicker value={statMonth} anchorLabel={mvLabel.split("-")[0] + "년 " + +mvLabel.split("-")[1] + "월 ▾"}
+          <YMPicker value={statMonth} anchorLabel={mvLabel.split("-")[0] + "년 " + +mvLabel.split("-")[1] + "월"}
             onChange={(v) => { setStatMonth(v); setCalCursor(new Date(+v.split("-")[0], +v.split("-")[1] - 1, 1)); setCalMode("month"); }} />
         )}
         {periodMode === "week" && (
@@ -61,7 +62,7 @@ export default function StatsPanel({
       </div>
       <div className="sgrid">
         <StatGroup
-          icon="📈" title="과금 & 등급" best
+          icon={<IconTrendUp />} title="과금 & 등급" best
           primary={{ label: "13주 누적 과금", value: won(cum) }}
           badge={<>추정 등급 <b>{estGrade(cum, tiers)}</b></>}
           items={[
@@ -70,7 +71,7 @@ export default function StatsPanel({
           ]}
         />
         <StatGroup
-          icon="💸" title="지출 & 손익"
+          icon={<IconWallet />} title="지출 & 손익"
           primary={{ label: "엠작 손익 (현금화−구매)", value: <PlLabel p={st.profit} /> }}
           items={[
             { label: "엠작 구매 실지출", value: <CostLabel n={st.spend} /> },
@@ -78,7 +79,7 @@ export default function StatsPanel({
           ]}
         />
         <StatGroup
-          icon="💰" title="메소 & 현금화"
+          icon={<IconCoins />} title="메소 & 현금화"
           primary={{ label: "현금화 필요 메소 (판매−현금화)", value: <>{eok(Math.max(0, uncashed))} <span className="muted u">메소</span></> }}
           items={[
             { label: "판매 메소 (실수령)", value: <>{eok(st.meso)} <span className="muted u">메소</span></> },
@@ -106,7 +107,7 @@ export default function StatsPanel({
         aria-expanded={showItemSum}
         onClick={() => setShowItemSum((v) => !v)}
       >
-        <span className="caret" aria-hidden="true">▶</span>품목별 누적 요약
+        <IconChevron className="caret" />품목별 누적 요약
       </button>
       {showItemSum && (
         <ItemSummary rows={itemRows} iconOf={iconOf} rateWon={rateWon} measuredRate={measuredRate} />
@@ -142,7 +143,7 @@ export default function StatsPanel({
                           aria-label={range + " 품목별 내역 " + (open ? "접기" : "펼치기")}
                           onClick={() => toggleWeek(wk)}
                         >
-                          <span className="caret" aria-hidden="true">▶</span>
+                          <IconChevron className="caret" />
                         </button>
                       )}
                     </td>
@@ -179,7 +180,7 @@ export default function StatsPanel({
         </table>
       </div>
       <div className="hint" style={{ marginTop: 4 }}>
-        ▶를 누르면 그 주에 어떤 품목을 몇 개 사고 팔았는지 펼쳐집니다(판매한 품목만 '판매 메소·개당 평균가'가 나옵니다).
+        펼치기 버튼을 누르면 그 주에 어떤 품목을 몇 개 사고 팔았는지 펼쳐집니다(판매한 품목만 '판매 메소·개당 평균가'가 나옵니다).
         주차 날짜를 누르면 위 통계가 그 주 기준으로 바뀝니다. '구매/판매'는 그 주에 입력한 아이템 수량 합이에요
         (산 주와 판 주가 다르면 각각 그 주에 잡힙니다). '현금화 필요'는 판매 실수령 메소에서 현금화한 메소를 뺀 값이에요.
       </div>

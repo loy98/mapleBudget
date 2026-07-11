@@ -3,6 +3,7 @@ import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS } from "../
 import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
 import { hasFeeBenefit } from "../lib/calc.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
+import { IconSliders } from "./ui/icons.jsx";
 
 const tierOptionsOf = (tiers) =>
   tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
@@ -109,7 +110,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
         {/* ===== 사이드바: 시세 & 조건 ===== */}
         <div className="sticky">
           <div className="card">
-            <h2><span className="n">＊</span>시세 &amp; 조건</h2>
+            <h2><span className="n ico"><IconSliders /></span>시세 &amp; 조건</h2>
             <div className="subhead">거래 시세</div>
             <label>메소 시세 (원 / 1억 메소)</label>
             <NumInput value={settings.mesoRate} step={1} onChange={(v) => setSettings({ mesoRate: v })} />

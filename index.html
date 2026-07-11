@@ -6,8 +6,8 @@
   <title>메이플 MVP작 효율 계산기</title>
   <meta name="description" content="메이플스토리 MVP 등급작(엠작) 최적 비용 계산기. 선물식·메소마켓·경매장 되팔기 비교, 마일리지, 거래 기록, 13주 달력, 등급 유지 스케줄까지." />
   <meta name="theme-color" content="#0a0b0e" />
-  <!-- 기본 진입 = 일반(라이트) 모드. 저장값이 'dark'일 때만 다크. 렌더 전 선반영으로 flash 방지 -->
-  <script>try{if(localStorage.getItem('mvpTheme')!=='dark'){document.documentElement.setAttribute('data-theme','light');var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content','#f4efe4');}}catch(e){}</script>
+  <!-- 테마 선반영(flash 방지). 기본 = 시스템(OS 설정) 추종. 저장값 'dark'/'light' 는 고정, 'system'/없음 은 OS 를 따른다. -->
+  <script>try{var t=localStorage.getItem('mvpTheme');var d=t==='dark'||((!t||t==='system')&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(!d){document.documentElement.setAttribute('data-theme','light');var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content','#f4efe4');}}catch(e){}</script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="canonical" href="https://maplemvpcalculator.com/" />

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { IconChevron } from "./icons.jsx";
 
 // ===== 커스텀 셀렉트 =====
 // 키보드로 완전히 조작 가능해야 한다: Enter/Space/↓ 로 열고, ↑↓ 로 이동, Enter 로 선택, Esc 로 닫기.
@@ -79,6 +80,7 @@ export function CSelect({ value, onChange, options, style, ariaLabel }) {
         onKeyDown={onBtnKey}
       >
         {sel ? sel.label : ""}
+        <IconChevron className="csel-caret" />
       </button>
       <div className="csel-pop" role="listbox" aria-label={ariaLabel}>
         {open &&

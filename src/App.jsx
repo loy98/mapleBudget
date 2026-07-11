@@ -10,6 +10,8 @@ import CalcTab from "./components/CalcTab.jsx";
 import LogTab from "./components/LogTab.jsx";
 import ForecastTab from "./components/ForecastTab.jsx";
 import AuthBar from "./components/AuthBar.jsx";
+import ThemeMenu from "./components/ThemeMenu.jsx";
+import { IconHelp, IconChat } from "./components/ui/icons.jsx";
 import HelpModal from "./components/HelpModal.jsx";
 import FeedbackModal from "./components/FeedbackModal.jsx";
 import Modal from "./components/Modal.jsx";
@@ -48,21 +50,45 @@ export default function App() {
   const [myItems, setMyItems] = useState(loadMyItems);
   const [ledger, setLedger] = useState(loadLedger);
   const [modal, setModal] = useState(null); // null | "help" | "feedback"
-  // 테마: "dark"(기본) | "light". index.html 인라인 스크립트가 최초 flash 없이 data-theme를 선반영.
-  const [theme, setTheme] = useState(() =>
-    typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"
-  );
+  // 테마 모드: "system"(기본) | "light" | "dark". index.html 인라인 스크립트가 최초 flash 없이 선반영.
+  // "system" 은 OS 설정(prefers-color-scheme)을 따르고, OS 가 바뀌면 실시간으로 따라간다.
+  const [themeMode, setThemeMode] = useState(() => {
+    try {
+      const v = localStorage.getItem("mvpTheme");
+      if (v === "light" || v === "dark" || v === "system") return v;
+    } catch {}
+    return "system";
+  });
   const fileRef = useRef(null);
 
-  // 테마 적용 + 저장 + 모바일 주소창 색(theme-color) 동기화
+  // 테마 적용 + 저장 + 모바일 주소창 색(theme-color) 동기화.
+  // 다크가 기본(:root), 라이트는 data-theme="light" 로 켠다. 실제 다크 여부는 모드+OS 로 계산한다.
   useEffect(() => {
     const el = document.documentElement;
-    if (theme === "light") el.setAttribute("data-theme", "light");
-    else el.removeAttribute("data-theme");
-    try { localStorage.setItem("mvpTheme", theme); } catch {}
-    const m = document.querySelector('meta[name="theme-color"]');
-    if (m) m.setAttribute("content", theme === "light" ? "#f4efe4" : "#0a0b0e");
-  }, [theme]);
+    // matchMedia 가 없는 환경(구형 웹뷰·jsdom 등)에서도 안전하게 — index.html 인라인 스크립트와 같은 가드.
+    const mq = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    const apply = () => {
+      const dark = themeMode === "dark" || (themeMode === "system" && !!mq?.matches);
+      if (dark) el.removeAttribute("data-theme");
+      else el.setAttribute("data-theme", "light");
+      const m = document.querySelector('meta[name="theme-color"]');
+      if (m) m.setAttribute("content", dark ? "#0a0b0e" : "#f4efe4");
+    };
+    apply();
+    try { localStorage.setItem("mvpTheme", themeMode); } catch {}
+    // 시스템 모드일 때만 OS 변경을 구독한다(라이트/다크 고정 시엔 불필요).
+    // 구형 Safari(<14)는 addEventListener 대신 addListener 만 있으므로 폴백을 둔다.
+    if (themeMode === "system" && mq) {
+      if (mq.addEventListener) {
+        mq.addEventListener("change", apply);
+        return () => mq.removeEventListener("change", apply);
+      }
+      if (mq.addListener) {
+        mq.addListener(apply);
+        return () => mq.removeListener(apply);
+      }
+    }
+  }, [themeMode]);
 
   // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
   // 파생 계산보다 먼저 호출해야 rules(게임 규칙)를 computeCalc 에 넘길 수 있다.
@@ -124,15 +150,17 @@ export default function App() {
   return (
     <div className="wrap">
       <header>
-        <span className="logo">M</span>
+        <span className="logo" aria-hidden="true">M</span>
         <h1>메이플 MVP작 효율 계산기</h1>
         <span className="sub">엠작 최적화 · 계산기 + 거래 기록/13주 달력</span>
         <div className="headright">
-          <button className="btn ghost sm" onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))} title="테마 전환" aria-label="테마 전환">
-            {theme === "light" ? "🌙 다크" : "☀️ 라이트"}
+          <ThemeMenu mode={themeMode} setMode={setThemeMode} />
+          <button className="hbtn" onClick={() => setModal("help")} aria-label="도움말" title="도움말">
+            <IconHelp className="hbtn-ico" /><span className="hbtn-lbl">도움말</span>
           </button>
-          <button className="btn ghost sm" onClick={() => setModal("help")}>❓ 도움말</button>
-          <button className="btn ghost sm" onClick={() => setModal("feedback")}>💬 피드백</button>
+          <button className="hbtn" onClick={() => setModal("feedback")} aria-label="피드백" title="피드백">
+            <IconChat className="hbtn-ico" /><span className="hbtn-lbl">피드백</span>
+          </button>
           <AuthBar session={session} syncState={syncState} />
         </div>
       </header>

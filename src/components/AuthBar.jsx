@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { cloudEnabled, signInWithGoogle, signInWithEmail, signOut } from "../lib/cloud.js";
+import { IconCloud } from "./ui/icons.jsx";
 
 export default function AuthBar({ session, syncState }) {
   const [open, setOpen] = useState(false);
@@ -25,7 +26,7 @@ export default function AuthBar({ session, syncState }) {
     const cls = syncState === "error" ? "bad" : syncState === "syncing" ? "muted" : "good";
     return (
       <div className="authbar">
-        <span className={"sync " + cls}>☁ {sync}</span>
+        <span className={"sync " + cls}><IconCloud />{sync}</span>
         <span className="muted" style={{ fontSize: 12 }}>{label}</span>
         <button className="btn ghost sm" onClick={logout}>로그아웃</button>
       </div>
