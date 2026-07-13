@@ -50,11 +50,11 @@ export const itemCat = (v) => (ITEM_CAT_IDS.includes(v) ? v : "etc");
 //   [커뮤니티] 플래티넘 카르마의 가위 5,900 — 사용자가 게임 내 캐시샵에서 확인
 //   [커뮤니티] 컬러링 프리즘 5,900 · 체인지 로얄 헤어/성형 5,500/3,500 · 로얄 스타일 쿠폰 개당 2,200
 //
-// 랜덤박스류(원더베리·루나 크리스탈·로얄 스타일)는 마일리지를 쓸 수 없다 → mAllowed: false.
+// 랜덤박스류(원더베리·루나 크리스탈·로얄 스타일·플래티넘 애플)는 마일리지를 쓸 수 없다 → mAllowed: false.
 // 이걸 true 로 두면 계산기가 있지도 않은 30% 절감을 반영해 실비용을 과소평가한다.
 //
-// 뺀 것: 미라클 서큘레이터·확성기·프리미엄 생명의 물·골드 애플 — 가격은 알아냈지만 **경매장에 올라가는지**를
-// 확인하지 못했다. 되팔 수 없는 아이템을 되팔기 목록에 넣으면 계산기가 성립하지 않는다.
+// 아래 목록의 아이템은 모두 **경매장에 올라간다**(사용자 확인). 되팔 수 없는 아이템은 넣지 않는다 —
+// 되팔기를 전제로 한 계산이 성립하지 않는다. 골드 애플은 사용자 요청으로 제외.
 //
 // `name` 은 아이템의 정체성이다(id 가 이름에서 유도되고, 거래 원장의 품목 통계도 이름으로 매칭한다)
 // → **함부로 바꾸지 말 것.** 이름을 바꾸면 과거 거래와의 연결이 끊긴다.
@@ -70,15 +70,24 @@ export const DEFAULT_ITEMS = [
   { name: "체인지 로얄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇", cat: "beauty" },
   { name: "체인지 로얄 성형외과 쿠폰", cash: 3500, mAllowed: true, icon: "💄", cat: "beauty" },
   { name: "컬러링 프리즘", cash: 5900, mAllowed: true, icon: "🎨", cat: "beauty" },
-  // --- 펫(랜덤박스라 마일리지 불가) ---
+  { name: "커스텀 믹스 염색 쿠폰", cash: 48000, mAllowed: true, icon: "🎨", cat: "beauty" },
+  { name: "밸런스 믹스 염색 쿠폰", cash: 24000, mAllowed: true, icon: "🎨", cat: "beauty" },
+  { name: "커스텀 믹스 컬러렌즈", cash: 24000, mAllowed: true, icon: "👁️", cat: "beauty" },
+  { name: "밸런스 믹스 컬러렌즈", cash: 12000, mAllowed: true, icon: "👁️", cat: "beauty" },
+  // --- 펫 ---
   { name: "원더베리", cash: 5400, mAllowed: false, icon: "🫐", cat: "pet" },
   { name: "루나 크리스탈", cash: 3900, mAllowed: false, icon: "🌙", cat: "pet" },
+  { name: "프리미엄 생명의 물", cash: 1800, mAllowed: true, icon: "💧", cat: "pet" },
   // --- 코디·스타일(랜덤박스라 마일리지 불가) ---
-  // 판매 단위는 1 / 10 / 20 / 45개. 45개는 묶음가를 확인하지 못해 넣지 않았다 —
-  // 묶음 할인이 있는지 알 수 없어 개당가의 배수로 추정하면 계산기가 틀린 답을 낸다.
   { name: "로얄 스타일 쿠폰", cash: 2200, mAllowed: false, icon: "🎀", cat: "style" },
   { name: "로얄 스타일 쿠폰 10개", cash: 22000, mAllowed: false, icon: "🎀", cat: "style" },
   { name: "로얄 스타일 쿠폰 20개", cash: 44000, mAllowed: false, icon: "🎀", cat: "style" },
+  { name: "로얄 스타일 쿠폰 45개", cash: 99000, mAllowed: false, icon: "🎀", cat: "style" },
+  { name: "플래티넘 애플", cash: 3500, mAllowed: false, icon: "🍎", cat: "style" },
+  { name: "플래티넘 애플 33개", cash: 99000, mAllowed: false, icon: "🍎", cat: "style" },
+  // --- 기타 ---
+  { name: "미라클 서큘레이터", cash: 1900, mAllowed: true, icon: "🔄", cat: "etc" },
+  { name: "확성기", cash: 990, mAllowed: true, icon: "📢", cat: "etc" },
 ];
 
 // ===== 아이콘 이미지 호스트 allowlist (B-8) =====

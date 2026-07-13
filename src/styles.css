@@ -109,11 +109,19 @@
   .chips{display:flex;gap:7px;flex-wrap:wrap}
   /* 아이템 카테고리 필터 탭. 칩(.chip)과 시각적으로 구분돼야 한다 — 이건 '고르는 것'이 아니라 '거르는 것'. */
   .catpills{display:flex;gap:6px;flex-wrap:wrap;flex:1}
-  .catpill{background:none;border:1px solid transparent;color:var(--sub);font-size:12px;font-weight:700;padding:5px 10px;border-radius:14px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  /* 라벨과 개수 배지의 세로 정렬:
+     둘의 font-size 가 다르면 각자의 line-height(normal)가 달라져 baseline 이 어긋난다.
+     → 양쪽 line-height 를 1 로 고정하고 flex 로 가운데 맞춘다. 높이는 padding 이 만든다. */
+  .catpill{background:none;border:1px solid transparent;color:var(--sub);font-size:12px;font-weight:700;line-height:1;padding:6px 8px 6px 10px;border-radius:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
   .catpill:hover{color:var(--accent);border-color:var(--line)}
   .catpill.on{background:var(--panel2);border-color:var(--accent);color:var(--accent)}
-  .catpill .cnt{font-size:10.5px;font-weight:600;color:var(--hint)}
-  .catpill.on .cnt{color:var(--accent)}
+  /* 개수는 배지로. 한 자리(1)와 두 자리(13)가 섞여도 폭이 튀지 않게 min-width + tabular-nums. */
+  .catpill .cnt{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+    min-width:18px;height:16px;padding:0 5px;border-radius:8px;
+    background:var(--panel2);border:1px solid var(--line);
+    font-size:10px;font-weight:700;line-height:1;color:var(--hint);
+    font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+  .catpill.on .cnt{background:color-mix(in srgb,var(--accent) 16%,transparent);border-color:transparent;color:var(--accent)}
   .itemchips{margin-bottom:12px;min-height:30px}
   .chip{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:6px 11px;border-radius:16px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:6px}
   .chip:hover{border-color:var(--accent);color:var(--accent)}
