@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
-  getDataOwner, setDataOwner, clearAccountData, emptyLedger,
+  getDataOwner, setDataOwner, clearAccountData, emptyLedger, isRestorePending, getRestorePending, clearRestorePending, lockAccountWrites, RESTORE_KEY,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { fitsKeepalive, setKeepalive } from "./supabaseClient.js";
@@ -99,6 +99,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const [appConfig, setAppConfig] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [conflictPrompt, setConflictPrompt] = useState(null); // 최초 로그인 병합 충돌 시 { onChoose } — App이 모달 렌더
+  // 다른 탭이 백업을 복원했다. 이 탭의 메모리는 복원 전 값이라 무엇이든 저장/업로드하면 복원본을 덮는다.
+  const [otherTabRestore, setOtherTabRestore] = useState(false);
   const conflictResolveRef = useRef(null);                    // 대기 중 프로미스 resolver(cleanup에서 정리)
 
   const freshRef = useRef({ calc: !hasStoredCalc(), items: !hasStoredItems() });
@@ -109,6 +111,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const dirtyRef = useRef(false);
   const dataRef = useRef(null);
   const pendingCloudSyncMarkRef = useRef(null);
+  const pendingRestoreClearRef = useRef(null); // 복원 마커를 지울 uid — 그 계정 업로드가 성공한 뒤에만 지운다
   const liveUserIdRef = useRef(null);
   const syncedUserRef = useRef(null);
   const dirtyForFlushRef = useRef(false);
@@ -130,10 +133,26 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   // 이펙트 가드만으로는 부족하다: **이미 시작된 업로드**는 suspended 로 바뀌어도 계속 돌며
   // 옛 dataRef 를 클라우드에 쓴다(로컬 잠금은 클라우드 쓰기를 막지 못한다).
   // 그래서 러너가 await 를 건널 때마다 이 ref 를 확인해 즉시 중단한다 — liveUserIdRef 가드와 같은 방식.
-  suspendedRef.current = suspended;
+  // 이 탭이 복원 대기(suspended)이거나, **다른 탭이 복원**했으면(otherTabRestore) 똑같이 멈춘다.
+  const halted = suspended || otherTabRestore;
+  suspendedRef.current = halted;
 
   // 세션 구독. 첫 콜백(세션 null이어도) = auth 해석 완료.
   useEffect(() => onAuthChange((s) => { setSession(s); setAuthResolved(true); }), []);
+
+  // **다른 탭이 백업을 복원했다.** storage 이벤트는 '다른 탭'에서만 온다(복원한 탭 자신은 받지 않는다).
+  // 이 탭의 React 메모리는 복원 전 값이다 — 여기서 무엇이든 저장하거나 업로드하면
+  // 방금 복원된 데이터를 옛 값으로 덮는다(업로드는 mergeForUpload 에서 '이 탭의 calc'가 이기므로 특히 위험하다).
+  // → 저장소를 잠그고 이 훅을 멈춘다. App 이 새로고침 모달을 띄운다. 나갈 길은 새로고침뿐이다.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== RESTORE_KEY || !e.newValue) return;
+      lockAccountWrites();
+      setOtherTabRestore(true);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // 로그아웃 = 이 기기에서 계정 데이터를 떼어내는 것. **localStorage 를 지우는 것만으로는 부족하다** —
   // React 메모리에는 여전히 그 계정의 settings/charges/items/ledger 가 있고, 이후 어떤 이유로든
@@ -146,7 +165,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   // → 세션이 사라지는 전이에서 메모리 상태까지 기본값으로 되돌린다. 데이터는 클라우드에 있으므로 안전하다.
   const prevUserIdRef = useRef(null);
   useEffect(() => {
-    if (suspended) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
+    if (halted) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
     const prev = prevUserIdRef.current;
     prevUserIdRef.current = userId;
     if (!prev || userId) return; // 로그인 상태 → 게스트로의 전이일 때만
@@ -158,7 +177,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     freshRef.current = { calc: true, items: true };
     configAppliedRef.current = false;
     forceAppliedForRef.current = undefined;
-  }, [userId, suspended, setCalcState, setMyItems, setLedger]);
+  }, [userId, halted, setCalcState, setMyItems, setLedger]);
 
   // app_config 로드. 충전 프리셋은 즉시 반영, 시세/기본아이템은 아래 적용 이펙트가 담당. 실패/오프라인은 constants 폴백.
   useEffect(() => {
@@ -179,7 +198,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
 
   // 시세/기본아이템 기본값: auth 해석 후 '저장 이력 없는 게스트'에게만 1회 적용.
   useEffect(() => {
-    if (suspended) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
+    if (halted) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
     if (!appConfig || !authResolved || configAppliedRef.current) return;
     if (userId) return; // 로그인 유저는 동기화가 상태 관리
     if (!freshRef.current.calc && !freshRef.current.items) return;
@@ -192,12 +211,12 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       const its = validItems(appConfig.defaultItems);
       if (its.length) setMyItems(normalizeMyItems(its));
     }
-  }, [appConfig, authResolved, userId, suspended]);
+  }, [appConfig, authResolved, userId, halted]);
 
   // 강제 반영(force): force 배열의 키를 모든 유저에게 덮어씀. 컨텍스트별 '데이터 정착 후' 1회.
   // 정착 신호: 게스트=authResolved, 로그인=syncedUserRef.current===userId(실제 데이터 로드). cloudReady는 재평가 트리거 dep.
   useEffect(() => {
-    if (suspended) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
+    if (halted) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
     if (!appConfig) return;
     const settled = userId ? (syncedUserRef.current === userId) : authResolved;
     if (!settled) return;
@@ -212,11 +231,11 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       const its = validItems(appConfig.defaultItems);
       if (its.length) setMyItems(normalizeMyItems(its));
     }
-  }, [appConfig, authResolved, userId, cloudReady, suspended]);
+  }, [appConfig, authResolved, userId, cloudReady, halted]);
 
   // 최초 로그인 동기화: 클라우드 fetch → 로컬 병합 → 상태 반영. userId 키잉으로 로그인 1회만.
   useEffect(() => {
-    if (suspended) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
+    if (halted) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
     syncedUserRef.current = null; // 새 컨텍스트 진입 → 이 유저 데이터 로드 완료 전까지 force 미정착(재로그인 stale 방지)
     // uid → 다른 uid 로 바뀔 때도 반드시 내린다. 그러지 않으면 새 유저 fetch 가 진행 중인데
     // 디바운스 이펙트가 cloudReady=true 로 재무장해 '이전 유저의 dataRef' 를 새 유저 행에 올릴 수 있다
@@ -225,6 +244,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     lastSeenRef.current = null; // 새 컨텍스트 → 이 계정 행의 버전을 아직 모른다(첫 쓰기는 INSERT 시도)
     if (!userId) {
       pendingCloudSyncMarkRef.current = null;
+      pendingRestoreClearRef.current = null; // 게스트에겐 올릴 곳이 없다 → 마커는 그대로 두고 다음 로그인을 기다린다
       return;
     }
     let cancelled = false;
@@ -247,11 +267,21 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         // tombstone 만료 기준은 서버 updated_at, 미래 clamp 상한은 max(서버, 내 시계).
         // 둘을 겸용하면 오래 접속하지 않은 유저의 새 표식이 과거로 되감겨 조기 만료된다.
         const clock = tombstoneClock(cloud);
+        // 백업을 방금 복원했다면 로컬이 권위다 — 그러지 않으면 복원한 설정이 클라우드 옛값으로 조용히 되돌아간다.
+        // 소유자가 다른 계정이면 켜지 않는다(그때 local 은 EMPTY_SNAPSHOT 이라 '복원본'이라 부를 것이 없다).
+        // 실질적인 방어는 mergeSnapshots 쪽의 "로컬 calc 가 비면 클라우드를 쓴다" 이고 — 빈 {} 로 남의
+        // 클라우드 설정을 날리는 것을 그쪽이 막는다 — 여기 조건은 의도를 드러내는 두 번째 줄이다.
+        const restorePending = localUsable ? getRestorePending() : null;
         const { snapshot, conflict } = mergeSnapshots(local, cloud, {
           localTouched: localUsable && isUserTouched(),
           now: clock.now,
           ceiling: clock.ceiling,
+          localWinsCalc: !!restorePending?.calc,
+          localWinsItems: !!restorePending?.my_items,
         });
+        // 마커는 **복원본이 클라우드에 올라간 뒤에** 지운다. 지금 지우면 업로드가 실패했을 때
+        // 마커만 사라지고, 다음 로드에서 클라우드가 다시 이겨 복원본을 잃는다.
+        pendingRestoreClearRef.current = restorePending ? userId : null;
         let finalSnap = snapshot;
         if (conflict && firstLogin) {
           // 네이티브 confirm 대신 App이 렌더하는 테마 모달로 선택을 받는다(테스트 가능·UI 일관성).
@@ -289,7 +319,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         r(true);
       }
     };
-  }, [userId, suspended]);
+  }, [userId, halted]);
 
   // ===== 업로드 실패 재시도(지수 백오프) =====
   // 오프라인·일시 장애로 실패한 업로드를 다시 시도한다. 성공하면 retryAtRef 를 0으로 되돌린다.
@@ -330,6 +360,10 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         dirtyRef.current = false;
         if (liveUserIdRef.current !== uid) { aborted = true; break; } // 계정 전환 → 옛 행에 쓰지 않고 중단
         if (suspendedRef.current) { aborted = true; break; }          // 복원 대기 → 옛 메모리를 쓰지 않고 중단
+        // 복원 마커가 있는데 **이 탭이 그 복원의 주인이 아니다** = 다른 탭이 방금 복원했다.
+        // storage 이벤트로 멈추기 전의 짧은 창에서도 이 탭의 옛 calc 가 올라가면 안 된다
+        // (mergeForUpload 는 '이 탭의 calc'를 우선하므로 서버의 복원본을 그대로 덮는다).
+        if (isRestorePending() && pendingRestoreClearRef.current !== uid) { aborted = true; break; }
         const payload = dataRef.current;
         // 이 payload 에 담긴 변경은 지금 업로드된다 → 여기서 플러시 부채를 턴다.
         // (루프가 끝난 뒤에 털면, await 중 들어온 편집까지 '플러시됨'으로 오인해 탭 종료 시 유실된다.)
@@ -367,6 +401,11 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
         if (pendingCloudSyncMarkRef.current === uid) {
           if (!isCloudSynced(uid)) markCloudSynced(uid);
           pendingCloudSyncMarkRef.current = null;
+        }
+        // 복원본이 이 계정의 클라우드에 올라갔다 → 이제 마커를 지운다(다음 로드부터는 평소 정책).
+        if (pendingRestoreClearRef.current === uid) {
+          clearRestorePending();
+          pendingRestoreClearRef.current = null;
         }
         setSyncState("saved");
       }
@@ -417,7 +456,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
 
   // 데이터 변경 → 디바운스 후 업로드.
   useEffect(() => {
-    if (suspended || !userId || !cloudReady) return; // suspended: 복원본이 아닌 옛 메모리를 클라우드에 올리면 안 된다
+    if (halted || !userId || !cloudReady) return; // 복원 대기: 복원본이 아닌 옛 메모리를 클라우드에 올리면 안 된다
     dirtyForFlushRef.current = true; // 대기 중 미반영 변경(탭 숨김 시 즉시 플러시 대상)
     // 업로드가 in-flight 라면 러너의 do-while 이 이 변경을 소비하게 표시한다.
     // (이전에는 재진입 runUpload 호출에서만 세워져, await 중 들어온 편집을 재시도 루프가 보지 못했다.)
@@ -428,11 +467,11 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       runUpload(userId);
     }, 800);
     return () => clearTimeout(upsertTimer.current);
-  }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce, suspended, runUpload]);
+  }, [settings, charges, items, myItems, ledger, userId, cloudReady, syncNonce, halted, runUpload]);
 
   // 오프라인에서 실패한 업로드를 온라인 복귀 즉시 재시도. 백오프 타이머는 계정 전환·언마운트 시 정리.
   useEffect(() => {
-    if (suspended || !userId) return;
+    if (halted || !userId) return;
     const onOnline = () => {
       if (dirtyForFlushRef.current && liveUserIdRef.current === userId) {
         retryAtRef.current = 0;
@@ -444,7 +483,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       window.removeEventListener("online", onOnline);
       clearTimeout(retryTimer.current);
     };
-  }, [userId, suspended, runUpload]);
+  }, [userId, halted, runUpload]);
 
   // 마지막 편집 유실 방지: 탭 숨김 시 대기 중 변경을 즉시 업로드(같은 runUpload → dirty-retry 공유).
   useEffect(() => {
@@ -452,7 +491,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     // 64KB 를 넘는 원장은 keepalive 가 거부하므로 평범한 요청으로 보낸다 — 취소될 수 있지만
     // 로컬에는 이미 저장돼 있어 다음 접속에 동기화된다.
     const flush = () => {
-      if (suspended || !userId || !cloudReady || upsertingRef.current || !dirtyForFlushRef.current) return;
+      if (halted || !userId || !cloudReady || upsertingRef.current || !dirtyForFlushRef.current) return;
       if (liveUserIdRef.current !== userId) return;
       clearTimeout(upsertTimer.current);
       // keepalive 판정·해제는 runUpload 가 요청 단위로 한다(본문이 병합으로 커질 수 있으므로).
@@ -466,7 +505,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", flush);
     };
-  }, [userId, cloudReady, suspended, runUpload]);
+  }, [userId, cloudReady, halted, runUpload]);
 
-  return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload };
+  return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab: otherTabRestore };
 }

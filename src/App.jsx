@@ -103,7 +103,7 @@ export default function App() {
   // 파생 계산보다 먼저 호출해야 rules(게임 규칙)를 computeCalc 에 넘길 수 있다.
   // 복원 후 새로고침 대기 중에는 훅을 멈춘다 — 메모리는 복원 전 옛 값이라, 이 훅이 상태를 건드리거나
   // 업로드하면 방금 복원한 데이터를 옛 값으로 덮어쓴다(로컬은 storage 잠금이, 클라우드는 이 신호가 막는다).
-  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload } = useCloudSync({
+  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab } = useCloudSync({
     settings, charges, items, myItems, ledger,
     setCalcState, setMyItems, setLedger,
     suspended: !!restoreNeedsReload,
@@ -247,8 +247,14 @@ export default function App() {
 
       <ToastHost />
 
-      {restoreNeedsReload && (
-        <RestoreReloadModal warnings={restoreNeedsReload.warnings} onReload={() => location.reload()} />
+      {/* 이 탭이 복원했는데 알림을 넘기지 못했거나(restoreNeedsReload), 다른 탭이 복원했거나(restoreFromOtherTab).
+          어느 쪽이든 이 화면의 메모리는 복원 전 값이라, 새로고침 전에는 아무것도 저장/업로드하면 안 된다. */}
+      {(restoreNeedsReload || restoreFromOtherTab) && (
+        <RestoreReloadModal
+          warnings={restoreNeedsReload?.warnings || []}
+          otherTab={!restoreNeedsReload && restoreFromOtherTab}
+          onReload={() => location.reload()}
+        />
       )}
       {conflictPrompt && <ConflictModal onChoose={conflictPrompt.onChoose} />}
       {modal === "help" && <HelpModal onClose={() => setModal(null)} />}

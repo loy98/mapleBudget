@@ -11,13 +11,15 @@ import Modal from "./Modal.jsx";
 //
 // 이 경로는 알림을 새로고침 너머로 넘길 저장소가 하나도 없을 때만 도달한다(정상적으로는 자동 새로고침).
 // 모듈 스코프 컴포넌트(렌더 함수 내부 정의 금지 규칙 준수).
-export default function RestoreReloadModal({ warnings = [], onReload }) {
+export default function RestoreReloadModal({ warnings = [], otherTab = false, onReload }) {
   return (
     <Modal label="복원 완료 — 새로고침 필요">
       <>
         <div className="modal-title">복원했습니다. 새로고침이 필요해요</div>
         <p className="modal-body">
-          백업을 이 브라우저에 복원했습니다. 다만 화면은 아직 이전 내용을 보여주고 있어요.
+          {otherTab
+            ? "다른 탭에서 백업을 복원했습니다. 이 탭은 아직 이전 내용을 보여주고 있어요."
+            : "백업을 이 브라우저에 복원했습니다. 다만 화면은 아직 이전 내용을 보여주고 있어요."}
           <br /><b>새로고침해야 복원한 내용이 반영됩니다.</b>
           {warnings.length > 0 && (
             <>

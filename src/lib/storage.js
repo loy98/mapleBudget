@@ -493,7 +493,9 @@ export function setDataOwner(userId) {
 // 데이터는 클라우드에 있으므로 재로그인하면 복원된다. calMode/theme 같은 기기별 뷰 설정은 남긴다.
 export function clearAccountData() {
   try {
-    const keys = [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY];
+    // RESTORE_KEY 도 지운다 — 이 기기의 복원본은 로그아웃으로 사라진다.
+    // 남겨 두면 다음 계정의 최초 동기화가 '로컬이 권위'라고 믿고 (이미 지워진) 로컬로 클라우드를 덮으려 한다.
+    const keys = [KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, RESTORE_KEY];
     keys.forEach((k) => localStorage.removeItem(k));
     // 손상 백업(.corrupt)에는 원장 원본이 그대로 들어 있다 → 공용 브라우저에 남기지 않는다.
     // 소유자 마커로 막으려던 바로 그 유출 경로다.
@@ -736,5 +738,54 @@ export function importAll(text) {
   // 사용자가 내보내기를 하지 않았다면 이게 복원 이전 원본의 유일한 사본이다. 지우는 쪽이 더 파괴적이다.
   // (로그아웃·저장소 정리 시에는 clearAccountData 가 함께 지운다 — 공용 브라우저 프라이버시.)
   targets.forEach(clearCorruptFlag);
+  // 복원은 **명시적인 사용자 의도**다: "이 백업이 지금부터 내 데이터다."
+  // 그 사실을 남기지 않으면 다음 동기화에서 클라우드 옛값이 복원본을 조용히 덮는다
+  // (mergeSnapshots 는 calc 에서 클라우드를 우선하고, 충돌 선택은 최초 로그인 때만 묻는다).
+  // **파일에 실제로 들어 있던 필드에만** 권위를 준다 — 복원하지 않은 옛 로컬 값이 클라우드를 이기면 안 된다.
+  // ledger 도 함께 담는다: 권위에는 안 쓰지만(합집합이므로), **다른 탭을 멈추는 신호**로는 반드시 필요하다.
+  markRestorePending({
+    calc: data.calc != null,
+    my_items: data.myItems != null,
+    ledger: data.ledger != null,
+  });
   return { ok: true, warnings: v.warnings };
+}
+
+// ===== 복원 마커 =====
+// 복원 직후부터 '그 복원본이 클라우드에 올라갈 때까지' 유지된다.
+// 이 마커가 있는 동안 최초 동기화는 **복원된 필드에 한해** 로컬을 권위로 삼는다.
+// 올리기 전에 지우면 안 된다 — 업로드가 실패한 채 마커만 사라지면 다음 로드에서 클라우드가 다시 이긴다.
+//
+// **필드 단위여야 한다.** 백업 파일에는 일부 키만 들어 있을 수 있다(예: 거래만 든 백업).
+// 전역 플래그로 두면, 거래만 복원했는데 저장소에 남아 있던 **옛 calc 가 클라우드를 덮는다** —
+// 복원하지도 않은 값이 이기는 셈이라 그게 새로운 데이터 손실이다.
+//
+// 마커는 두 가지 일을 한다. **섞으면 안 된다:**
+//  ① 병합 권위 — 어느 필드에서 로컬이 이기는가. calc/my_items 만 해당(거래는 합집합이라 권위가 필요 없다).
+//  ② 다른 탭 정지 신호 — "이 브라우저에서 방금 복원이 일어났다". **거래만 복원해도 켜져야 한다.**
+//     안 그러면 열려 있던 다른 탭이 멈추지 않고, 그 탭의 옛 원장이 자동저장으로 복원된 원장을 덮는다.
+// 그래서 ledger 도 스코프에 담되, 권위(①)에는 쓰지 않는다.
+export const RESTORE_KEY = "mvpRestorePending";
+export function markRestorePending(scope = {}) {
+  const s = { calc: !!scope.calc, my_items: !!scope.my_items, ledger: !!scope.ledger };
+  if (!s.calc && !s.my_items && !s.ledger) return; // 복원한 것이 없다 → 마커를 남기지 않는다
+  try { localStorage.setItem(RESTORE_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+}
+// { calc, my_items, ledger } 또는 null. 형태가 깨졌으면 null(= 평소 정책)로 떨어뜨린다 —
+// 알 수 없는 마커를 '로컬이 권위'로 해석하면 그게 더 위험하다.
+export function getRestorePending() {
+  try {
+    const raw = localStorage.getItem(RESTORE_KEY);
+    if (!raw) return null;
+    // 구버전 전역 마커. 어느 필드를 복원했는지 알 수 없으니 전부로 본다(복원 의도를 잃는 쪽이 더 나쁘다).
+    if (raw === "1" || raw === "true") return { calc: true, my_items: true, ledger: true };
+    const d = JSON.parse(raw);
+    if (!isPlainObject(d)) return null;
+    const s = { calc: !!d.calc, my_items: !!d.my_items, ledger: !!d.ledger };
+    return s.calc || s.my_items || s.ledger ? s : null;
+  } catch { return null; }
+}
+export const isRestorePending = () => !!getRestorePending();
+export function clearRestorePending() {
+  try { localStorage.removeItem(RESTORE_KEY); } catch { /* ignore */ }
 }
