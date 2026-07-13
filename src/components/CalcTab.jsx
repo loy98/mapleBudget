@@ -4,6 +4,8 @@ import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
 import { hasFeeBenefit } from "../lib/calc.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
 import { IconSliders } from "./ui/icons.jsx";
+import { composeItems } from "../lib/items.js";
+import ItemEditModal from "./ItemEditModal.jsx";
 
 const tierOptionsOf = (tiers) =>
   tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
@@ -11,10 +13,11 @@ const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
 const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
 const catOptions = ITEM_CATS.map((c) => ({ value: c.id, label: c.label }));
 
-export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, onAddMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS, ledgerCum = 0, hasLedger = false }) {
+export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onAddMyItems, catalog = [], onOverrideCatalogItem, onHideCatalogItem, onRevertToCatalog, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS, ledgerCum = 0, hasLedger = false }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
   const [cat, setCat] = useState("all"); // 자주 쓰는 아이템 카테고리 필터("all" = 전체)
+  const [editing, setEditing] = useState(null); // 수정 모달을 띄운 카탈로그 아이템
   // 등급 기준은 app_config(rules.tiers)에서 올 수 있다 → 목록 길이가 바뀌어도 인덱스가 깨지지 않게 방어.
   const tierOptions = useMemo(() => tierOptionsOf(tiers), [tiers]);
   // 충전 방식 프리셋 옵션 — DB 설정 목록(chargeMethods) 기반. DB에 malformed/null 원소가 섞여도
@@ -60,25 +63,33 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
     setItems([...items, data || { name: "", cash: "", sell: "", mAllowed: true, mil: false }]);
 
   // ----- 자주 쓰는 아이템 -----
+  // 화면 목록 = 카탈로그(운영자) + 내 아이템(유저). 같은 이름이면 내 것이 카탈로그를 가린다.
+  // 두 저장소를 합치는 규칙은 items.js 한 곳에만 있다 — 화면이 제 나름대로 합치기 시작하면 곧 갈라진다.
+  const { items: listItems, hidden: hiddenItems } = useMemo(
+    () => composeItems(catalog, myItems),
+    [catalog, myItems]
+  );
+
   // 카테고리별 개수. 아이템이 하나도 없는 카테고리는 탭을 만들지 않는다.
   const shownCats = useMemo(() => {
     const n = {};
-    myItems.forEach((p) => { const k = itemCat(p.cat); n[k] = (n[k] || 0) + 1; });
+    listItems.forEach((p) => { const k = itemCat(p.cat); n[k] = (n[k] || 0) + 1; });
     return ITEM_CATS.filter((k) => n[k.id]).map((k) => ({ ...k, n: n[k.id] }));
-  }, [myItems]);
+  }, [listItems]);
   // 선택한 카테고리가 사라지면(그 카테고리 아이템을 다 지우면) 빈 목록에 갇힌다 → '전체'로 되돌린다.
   // 되돌린 결과는 activeCat 하나로 표현한다. cat 만 보고 목록을 고르면 전체 아이템이 보이는데
   // '전체' 탭은 선택돼 있지 않은 상태가 된다(어느 탭도 강조되지 않음).
   const catExists = cat === "all" || shownCats.some((k) => k.id === cat);
   const activeCat = catExists ? cat : "all";
   const shownItems = useMemo(
-    () => (activeCat === "all" ? myItems : myItems.filter((p) => itemCat(p.cat) === activeCat)),
-    [myItems, activeCat]
+    () => (activeCat === "all" ? listItems : listItems.filter((p) => itemCat(p.cat) === activeCat)),
+    [listItems, activeCat]
   );
 
-  const setMyItem = (i, patch) => setMyItems(myItems.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  // 내 아이템 행만 직접 편집할 수 있다. 카탈로그 행은 수정 모달을 거쳐 사본이 된다.
+  const setMyItem = (id, patch) => setMyItems(myItems.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   // 배열에서 빼기만 하면 그 아이템을 아직 가진 기기가 다음 접속 때 되살린다 → 삭제 표식을 남기는 App 핸들러를 쓴다.
-  const delMyItem = (i) => onRemoveMyItem(myItems[i].id);
+  const delMyItem = (id) => onRemoveMyItem(id);
   const addTableRowsToList = () => {
     const add = items.filter(
       (r) => r.name && r.name.trim() && !myItems.some((m) => m.name === r.name && "" + m.cash === "" + r.cash)
@@ -320,7 +331,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
               <div className="catpills" role="tablist" aria-label="아이템 카테고리">
                 <button role="tab" aria-selected={activeCat === "all"}
                   className={"catpill" + (activeCat === "all" ? " on" : "")} onClick={() => setCat("all")}>
-                  전체 <span className="cnt">{myItems.length}</span>
+                  전체 <span className="cnt">{listItems.length}</span>
                 </button>
                 {shownCats.map((k) => (
                   <button key={k.id} role="tab" aria-selected={activeCat === k.id}
@@ -333,50 +344,102 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             </div>
             <div className="chips itemchips">
               {shownItems.map((p) => (
-                <span key={p._k} className="chip"
+                <span key={p._k} className={"chip" + (p.source === "user" ? " mine" : "")}
+                  title={p.source === "user" ? (p.overrides ? "기본 아이템을 수정한 내 아이템" : "내가 추가한 아이템") : "기본 아이템"}
                   onClick={() => addItem({ name: p.name, cash: p.cash, sell: "", mAllowed: p.mAllowed !== false, mil: p.mAllowed !== false })}>
                   <IconView icon={p.icon} />{p.name || "(무명)"}{" "}
                   <span className="fx">{p.cash ? (+p.cash).toLocaleString() + "원" : ""}{p.mAllowed === false ? " · 마일불가" : ""}</span>
+                  {p.source === "user" && <span className="own">{p.overrides ? "수정됨" : "내 것"}</span>}
                 </span>
               ))}
-              {!shownItems.length && <span className="hint">이 분류에 등록된 아이템이 없습니다.</span>}
+              {!shownItems.length && <span className="hint">이 분류에 표시할 아이템이 없습니다.</span>}
             </div>
             {editorOpen && (
               <div className="editor">
-                <div style={{ fontSize: 12, color: "var(--sub)", marginBottom: 8 }}>
-                  이름, 분류, 캐시가를 고치거나 새 아이템을 추가할 수 있습니다. 랜덤박스류처럼 마일리지가 안 되는 건 체크를 풀어 두세요. 고치는 대로 저장됩니다.
+                <div className="hint" style={{ marginBottom: 10 }}>
+                  <b>기본</b> 아이템은 모두에게 제공되는 목록이라 직접 고칠 수 없습니다. 값을 바꾸면 <b>내 아이템</b>으로 복사본이 생기고,
+                  이 계정에서는 그 복사본이 기본 아이템을 대신합니다. 안 쓰는 건 숨길 수 있고, 언제든 되돌릴 수 있습니다.
                 </div>
-                <table>
-                  <thead><tr><th>아이콘</th><th>이름</th><th>분류</th><th>캐시가(원)</th><th className="milh">마일가능</th><th></th></tr></thead>
+                <table className="itemedit">
+                  <thead><tr><th>아이콘</th><th>이름</th><th>분류</th><th>캐시가(원)</th><th className="milh">마일가능</th><th>구분</th><th></th></tr></thead>
                   <tbody>
-                    {myItems.map((it, i) => (
-                      <tr key={it._k}>
-                        <td>
-                          <span className="prev"><IconView icon={it.icon} /></span>{" "}
-                          <input value={it.icon || ""} style={{ width: 64 }} placeholder="🫐/URL" onChange={(e) => setMyItem(i, { icon: e.target.value })} />
-                        </td>
-                        <td><input value={it.name || ""} onChange={(e) => setMyItem(i, { name: e.target.value })} /></td>
-                        <td><CSelect value={itemCat(it.cat)} options={catOptions} onChange={(v) => setMyItem(i, { cat: v })} /></td>
-                        <td><NumInput noStepper width={100} step={100} value={it.cash || ""} onChange={(v) => setMyItem(i, { cash: v })} /></td>
-                        <td className="mil-cell"><input type="checkbox" checked={it.mAllowed !== false} onChange={(e) => setMyItem(i, { mAllowed: e.target.checked })} /></td>
-                        <td><button className="del" onClick={() => delMyItem(i)}>×</button></td>
-                      </tr>
-                    ))}
+                    {listItems.map((it) => {
+                      const mine = it.source === "user";
+                      return (
+                        <tr key={it._k} className={mine ? "row-mine" : "row-base"}>
+                          <td>
+                            <span className="prev"><IconView icon={it.icon} /></span>{" "}
+                            {mine
+                              ? <input value={it.icon || ""} style={{ width: 64 }} placeholder="🫐/URL" onChange={(e) => setMyItem(it.id, { icon: e.target.value })} />
+                              : <span className="ro">{it.icon || "–"}</span>}
+                          </td>
+                          <td>
+                            {mine
+                              ? <input value={it.name || ""} onChange={(e) => setMyItem(it.id, { name: e.target.value })} />
+                              : <span className="ro">{it.name}</span>}
+                          </td>
+                          <td>
+                            {mine
+                              ? <CSelect value={itemCat(it.cat)} options={catOptions} onChange={(v) => setMyItem(it.id, { cat: v })} />
+                              : <span className="ro">{(ITEM_CATS.find((k) => k.id === itemCat(it.cat)) || {}).label}</span>}
+                          </td>
+                          <td>
+                            {mine
+                              ? <NumInput noStepper width={100} step={100} value={it.cash || ""} onChange={(v) => setMyItem(it.id, { cash: v })} />
+                              : <span className="ro num">{it.cash ? (+it.cash).toLocaleString() : "–"}</span>}
+                          </td>
+                          <td className="mil-cell">
+                            {mine
+                              ? <input type="checkbox" checked={it.mAllowed !== false} onChange={(e) => setMyItem(it.id, { mAllowed: e.target.checked })} />
+                              : <span className="ro">{it.mAllowed === false ? "불가" : "가능"}</span>}
+                          </td>
+                          <td>
+                            {mine
+                              ? <span className={"tag " + (it.overrides ? "edited" : "own")}>{it.overrides ? "수정됨" : "내 아이템"}</span>
+                              : <span className="tag base">기본</span>}
+                          </td>
+                          <td className="rowbtns">
+                            {/* 수정본이면 '되돌리기'(그 행을 지우면 카탈로그 원본이 다시 보인다), 내가 만든 것이면 '삭제'. */}
+                            {mine ? (
+                              it.overrides
+                                ? <button className="mini" title="기본값으로 되돌리기" onClick={() => onRevertToCatalog(it.id)}>되돌리기</button>
+                                : <button className="del" title="삭제" onClick={() => delMyItem(it.id)}>×</button>
+                            ) : (
+                              <>
+                                <button className="mini" title="내 아이템으로 복사해서 수정" onClick={() => setEditing(it)}>수정</button>
+                                <button className="mini" title="이 목록에서 숨기기" onClick={() => onHideCatalogItem(it)}>숨기기</button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 <div className="hint" style={{ marginTop: 4 }}>
                   아이콘은 이모지(🫐)나 <b>maplestory.io</b> 의 https 이미지 주소를 넣을 수 있습니다. 다른 주소는 안전 때문에 표시하지 않습니다.
                 </div>
+
+                {hiddenItems.length > 0 && (
+                  <>
+                    <div className="subhead">숨긴 아이템 ({hiddenItems.length})</div>
+                    <div className="chips">
+                      {hiddenItems.map((h) => (
+                        <span key={h._k} className="chip ghosted">
+                          <IconView icon={h.icon} />{h.name}
+                          <button className="mini" onClick={() => onRevertToCatalog(h.userRowId)}>다시 표시</button>
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+
                 <div className="row-actions">
                   {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다.
                       (id 는 한 번 정해지면 바뀌지 않는다. 이름을 입력할 때 id 를 다시 계산하면 React key 가 바뀌어
                        입력 도중 리마운트로 포커스를 잃는다.) */}
                   <button className="btn sm" onClick={() => onAddMyItems([{ id: uid(), name: "", cash: "", mAllowed: true, icon: "", cat: "etc" }])}>+ 새 항목</button>
                   <button className="btn ghost sm" onClick={addTableRowsToList}>아래 표를 목록에 추가</button>
-                  {/* 기본 목록 복원 = '지금 목록을 기본값으로 바꾼다'. 지운 기본 아이템의 삭제 표식이 남아 있으면
-                      복원해도 병합에서 다시 빠진다. 표식은 합집합이라 지울 수 없으므로, App 핸들러가
-                      표식보다 **뒤인 at** 을 찍어 복원이 삭제를 이기게 한다. */}
-                  <button className="btn ghost sm" onClick={onRestoreDefaultItems}>기본 목록 복원</button>
                 </div>
               </div>
             )}
@@ -514,6 +577,15 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           </div>
         </div>
       </div>
+
+      {/* 기본 아이템 수정 = '내 아이템으로 복사' 안내를 거친다. 카탈로그는 운영자 소유라 직접 못 고친다. */}
+      {editing && (
+        <ItemEditModal
+          item={editing}
+          onCancel={() => setEditing(null)}
+          onConfirm={(row) => { onOverrideCatalogItem(row); setEditing(null); }}
+        />
+      )}
     </div>
   );
 }

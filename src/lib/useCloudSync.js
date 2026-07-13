@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
-  isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
+  isCloudSynced, markCloudSynced, hasStoredCalc, withRowKeys, isUserTouched,
   getDataOwner, setDataOwner, clearAccountData, emptyLedger, isRestorePending, getRestorePending, clearRestorePending, lockAccountWrites, RESTORE_KEY,
-  replaceMyItems,
+  deleteMyItem,
 } from "./storage.js";
+import { planItemMigration, applyItemStamps, validCatalog } from "./items.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { fitsKeepalive, setKeepalive } from "./supabaseClient.js";
 import { CHARGE_METHODS, resolveRuleHistory, rulesAt } from "./constants.js";
@@ -19,7 +20,6 @@ function configRatePatch(cfg, onlyKeys) {
   });
   return patch;
 }
-const validItems = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof x.name === "string") : []);
 // 다른 계정 소유의 로컬 데이터를 병합에서 배제할 때 쓰는 '아무것도 없음' 스냅샷.
 // deleted 도 비운다 — 남의 계정 tombstone 이 내 계정 거래를 지우면 안 된다.
 const EMPTY_SNAPSHOT = { calc: {}, my_items: [], ledger: { buys: [], sells: [], cashes: [], spends: [], deleted: {} } };
@@ -104,9 +104,11 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const [otherTabRestore, setOtherTabRestore] = useState(false);
   const conflictResolveRef = useRef(null);                    // 대기 중 프로미스 resolver(cleanup에서 정리)
 
-  const freshRef = useRef({ calc: !hasStoredCalc(), items: !hasStoredItems() });
+  // 아이템은 더 이상 '새 게스트에게 심어 주는' 대상이 아니다(카탈로그가 화면에서 합쳐진다) → calc 만 본다.
+  const freshRef = useRef({ calc: !hasStoredCalc() });
   const configAppliedRef = useRef(false);
   const forceAppliedForRef = useRef(undefined);
+  const migratedForRef = useRef(undefined);
   const upsertTimer = useRef(null);
   const upsertingRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -175,9 +177,10 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     setMyItems(normalizeMyItems(null));
     setLedger(emptyLedger());
     // 이 기기는 이제 '저장 이력 없는 새 게스트'다 → app_config 기본값/force 를 다시 받게 재무장한다.
-    freshRef.current = { calc: true, items: true };
+    freshRef.current = { calc: true };
     configAppliedRef.current = false;
     forceAppliedForRef.current = undefined;
+    migratedForRef.current = undefined;
   }, [userId, halted, setCalcState, setMyItems, setLedger]);
 
   // app_config 로드. 충전 프리셋은 즉시 반영, 시세/기본아이템은 아래 적용 이펙트가 담당. 실패/오프라인은 constants 폴백.
@@ -197,25 +200,26 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     return () => { cancelled = true; };
   }, []);
 
-  // 시세/기본아이템 기본값: auth 해석 후 '저장 이력 없는 게스트'에게만 1회 적용.
+  // 시세 기본값: auth 해석 후 '저장 이력 없는 게스트'에게만 1회 적용.
+  //
+  // 아이템은 여기서 다루지 않는다. 카탈로그(app_config.defaultItems)는 **유저 데이터로 복사되지 않고**
+  // 화면에서 my_items 와 합쳐 그려진다(items.js composeItems). 그래서 새 게스트에게 심어 줄 것이 없다.
   useEffect(() => {
     if (halted) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
     if (!appConfig || !authResolved || configAppliedRef.current) return;
     if (userId) return; // 로그인 유저는 동기화가 상태 관리
-    if (!freshRef.current.calc && !freshRef.current.items) return;
+    if (!freshRef.current.calc) return;
     configAppliedRef.current = true;
-    if (freshRef.current.calc) {
-      const patch = configRatePatch(appConfig);
-      if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-    }
-    if (freshRef.current.items) {
-      const its = validItems(appConfig.defaultItems);
-      if (its.length) setMyItems(normalizeMyItems(its));
-    }
+    const patch = configRatePatch(appConfig);
+    if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
   }, [appConfig, authResolved, userId, halted]);
 
   // 강제 반영(force): force 배열의 키를 모든 유저에게 덮어씀. 컨텍스트별 '데이터 정착 후' 1회.
   // 정착 신호: 게스트=authResolved, 로그인=syncedUserRef.current===userId(실제 데이터 로드). cloudReady는 재평가 트리거 dep.
+  //
+  // **아이템은 force 대상이 아니다.** 예전에는 "defaultItems" 를 force 에 넣어 모두의 my_items 를 덮어썼는데,
+  // 그 덮어쓰기가 유저가 직접 추가한 아이템을 삭제 표식도 없이 지웠다(실제 사고). 이제 카탈로그는
+  // app_config 에서 바로 읽어 그리므로 유저 데이터를 건드릴 이유가 아예 없다 — force 없이도 즉시 반영된다.
   useEffect(() => {
     if (halted) return; // 복원 후 새로고침 대기 — 상태를 건드리거나 업로드하면 복원본이 옛 값으로 덮인다
     if (!appConfig) return;
@@ -228,14 +232,37 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     if (!force.length) return;
     const patch = configRatePatch(appConfig, force);
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-    if (force.includes("defaultItems")) {
-      const its = validItems(appConfig.defaultItems);
-      // normalizeMyItems 로 그냥 넣으면 `at` 이 없어, 예전에 같은 이름을 지운 적이 있는 계정에서는
-      // 그 삭제 표식이 이겨 **강제 목록이 다음 병합에서 조용히 사라진다**. force 는 '운영자가 모두에게
-      // 덮어쓴다'는 뜻이므로 표식보다 뒤인 at 을 찍어 확실히 이기게 한다(사용자의 '기본 목록 복원'과 같은 규칙).
-      if (its.length) setMyItems(replaceMyItems(its, dataRef.current?.ledger?.deleted));
-    }
   }, [appConfig, authResolved, userId, cloudReady, halted]);
+
+  // 구 데이터 정리: my_items 에 남아 있는 **기본 아이템 복사본**을 걷어낸다(카탈로그가 그 자리를 채운다).
+  // 그대로 두면 운영자가 카탈로그 가격을 고쳐도 이 유저는 옛 복사본을 계속 보게 된다.
+  //
+  // 데이터 정착 후에 돌려야 한다 — 클라우드 병합 전에 돌리면 아직 안 받은 행을 못 보고, 병합이 되살린다.
+  // planItemMigration 은 멱등이라(남는 행은 전부 origin:"user") 매 로드 돌아도 안전하다.
+  useEffect(() => {
+    if (halted) return;
+    if (!appConfig) return;
+    const settled = userId ? (syncedUserRef.current === userId) : authResolved;
+    if (!settled) return;
+    const ctxKey = userId || "__guest__";
+    if (migratedForRef.current === ctxKey) return;
+    migratedForRef.current = ctxKey;
+
+    const cur = dataRef.current?.my_items || [];
+    const plan = planItemMigration(cur, appConfig.defaultItems);
+    if (!plan.changed) return;
+
+    // 삭제는 반드시 표식을 남긴다 — 배열에서 빼기만 하면 그 복사본을 아직 가진 다른 기기가 되살린다.
+    let items = applyItemStamps(cur, plan.stampIds);
+    let ledger = dataRef.current?.ledger;
+    plan.removeIds.forEach((id) => {
+      const r = deleteMyItem(items, ledger, id);
+      items = r.myItems;
+      ledger = r.ledger;
+    });
+    setMyItems(normalizeMyItems(items));
+    setLedger(normalizeLedger(ledger));
+  }, [appConfig, authResolved, userId, cloudReady, halted, setMyItems, setLedger]);
 
   // 최초 로그인 동기화: 클라우드 fetch → 로컬 병합 → 상태 반영. userId 키잉으로 로그인 1회만.
   useEffect(() => {
@@ -511,5 +538,10 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     };
   }, [userId, cloudReady, halted, runUpload]);
 
-  return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab: otherTabRestore };
+  // 카탈로그(운영자 소유 기본 아이템). app_config 에서 바로 읽어 화면에서 my_items 와 합친다 —
+  // 유저 데이터로 복사하지 않으므로 운영자가 고쳐도 유저가 추가한 아이템이 사라지지 않는다.
+  // fetch 실패/오프라인이면 constants 폴백(validCatalog 안에서 처리).
+  const catalog = useMemo(() => validCatalog(appConfig?.defaultItems), [appConfig]);
+
+  return { session, syncState, chargeOptions, catalog, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab: otherTabRestore };
 }

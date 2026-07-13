@@ -123,6 +123,31 @@
     font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
   .catpill.on .cnt{background:color-mix(in srgb,var(--accent) 16%,transparent);border-color:transparent;color:var(--accent)}
   .itemchips{margin-bottom:12px;min-height:30px}
+  /* 소유자 구분: 기본(카탈로그) 칩은 그대로, 내 아이템은 액센트 테두리 + 작은 배지.
+     "이건 내가 손댄 것"이 한눈에 보여야 운영자가 기본값을 고쳤을 때 왜 내 값이 그대로인지 납득된다. */
+  .chip.mine{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+  .chip .own{margin-left:2px;padding:1px 5px;border-radius:6px;font-size:9.5px;font-weight:800;line-height:1.5;
+    background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+  .chip.ghosted{opacity:.55;cursor:default}
+  .chip.ghosted:hover{border-color:var(--line);background:var(--panel2)}
+  /* 목록 편집 표 */
+  .itemedit .ro{color:var(--sub);font-size:13px}
+  .itemedit .row-base{background:color-mix(in srgb,var(--panel2) 55%,transparent)}
+  .itemedit .rowbtns{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+  .tag{display:inline-block;padding:2px 7px;border-radius:7px;font-size:10.5px;font-weight:800;line-height:1.5;white-space:nowrap}
+  .tag.base{background:var(--panel2);border:1px solid var(--line);color:var(--hint)}
+  .tag.own{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+  /* '수정됨'은 액센트(내 아이템)와 구분돼야 한다 → 테마의 보조색(--accent2, 라이트/다크 모두 정의됨). */
+  .tag.edited{background:color-mix(in srgb,var(--accent2) 18%,transparent);color:var(--accent2)}
+  .mini{background:var(--panel2);border:1px solid var(--line);color:var(--sub);font-size:11px;font-weight:700;
+    padding:4px 8px;border-radius:7px;cursor:pointer;white-space:nowrap;line-height:1}
+  .mini:hover{border-color:var(--accent);color:var(--accent)}
+  /* 수정 모달 폼 */
+  .itemform{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin:14px 0}
+  .itemform .milrow{grid-column:1 / -1}
+  .itemform .iconrow{display:flex;align-items:center;gap:8px}
+  .itemform .chk{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--txt);cursor:pointer}
+  .itemform .chk input{width:auto}
   .chip{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:6px 11px;border-radius:16px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:6px}
   .chip:hover{border-color:var(--accent);color:var(--accent)}
   .chip .fx{color:var(--hint);font-size:12px}

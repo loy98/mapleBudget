@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { computeCalc } from "./lib/calc.js";
 import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
-  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched, normalizeMyItems, deleteMyItem, restoreDefaultMyItems, addMyItems,
+  loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched, normalizeMyItems, deleteMyItem, addMyItems,
   lockAccountWrites,
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
@@ -105,7 +105,7 @@ export default function App() {
   // 파생 계산보다 먼저 호출해야 rules(게임 규칙)를 computeCalc 에 넘길 수 있다.
   // 복원 후 새로고침 대기 중에는 훅을 멈춘다 — 메모리는 복원 전 옛 값이라, 이 훅이 상태를 건드리거나
   // 업로드하면 방금 복원한 데이터를 옛 값으로 덮어쓴다(로컬은 storage 잠금이, 클라우드는 이 신호가 막는다).
-  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab } = useCloudSync({
+  const { session, syncState, chargeOptions, catalog, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab } = useCloudSync({
     settings, charges, items, myItems, ledger,
     setCalcState, setMyItems, setLedger,
     suspended: !!restoreNeedsReload,
@@ -151,11 +151,31 @@ export default function App() {
     setMyItems(next.myItems);
     setLedger(next.ledger);
   };
-  // '기본 목록 복원'. 지운 기본 아이템의 삭제 표식은 합집합이라 로컬에서 지워도 클라우드에서 되살아난다.
-  // 그래서 남아 있는 표식보다 뒤인 시각을 아이템에 찍어 표식을 이기게 한다.
-  const restoreDefaultItems = () => { markUserTouched(); setMyItems(restoreDefaultMyItems(ledger.deleted)); };
-  // 새 아이템 추가도 같은 이유로 App 을 거친다 — 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.
-  const addItemsToMyList = (rows) => { markUserTouched(); setMyItems(addMyItems(myItems, ledger.deleted, rows)); };
+  // 새 아이템 추가. 예전에 같은 이름을 지웠다면 그 삭제 표식보다 뒤인 `at` 이어야 살아남는다 → App 을 거친다.
+  // origin:"user" 를 반드시 찍는다 — 이게 없으면 구 데이터 정리(planItemMigration)가
+  // 카탈로그와 이름이 겹치는 수정본을 다음 로드에서 지워 버린다.
+  const addItemsToMyList = (rows) => {
+    markUserTouched();
+    setMyItems(addMyItems(myItems, ledger.deleted, rows.map((r) => ({ ...r, origin: "user" }))));
+  };
+
+  // composeItems 가 붙인 표시용 메타(source/overrides/base/_k)는 저장하지 않는다 — 데이터 필드만 남긴다.
+  // 안 그러면 base(카탈로그 원본 전체)가 my_items 에 통째로 실려 클라우드로 올라간다.
+  const itemFields = (r) => ({
+    name: r.name, cash: r.cash, mAllowed: r.mAllowed !== false, icon: r.icon || "", cat: r.cat,
+  });
+
+  // 기본(카탈로그) 아이템을 '내 아이템'으로 복사해 수정한다. 카탈로그 자체는 운영자 소유라 건드리지 않는다.
+  // 같은 이름의 내 아이템이 카탈로그를 가리므로(composeItems), 결과적으로 이 유저에게만 수정본이 보인다.
+  const overrideCatalogItem = (row) => addItemsToMyList([{ ...itemFields(row), hidden: false }]);
+
+  // 기본 아이템 숨기기 = 같은 이름의 '숨김 행'을 내 아이템에 넣는다. 새 병합 규칙을 만들지 않고
+  // 기존 합집합·표식·at 순서를 그대로 재사용하기 위한 표현이다(items.js 참고).
+  const hideCatalogItem = (row) => addItemsToMyList([{ ...itemFields(row), hidden: true }]);
+
+  // 숨김 해제 / 기본값으로 되돌리기 — 둘 다 '그 my_items 행을 지운다'는 같은 동작이다.
+  // 행이 사라지면 카탈로그 원본이 다시 보인다.
+  const revertToCatalog = (id) => removeMyItem(id);
 
   const onImportFile = (e) => {
     const f = e.target.files[0];
@@ -226,7 +246,11 @@ export default function App() {
           settings={settings} setSettings={setSettings}
           charges={charges} setCharges={setCharges}
           items={items} setItems={setItems}
-          myItems={myItems} setMyItems={applyMyItems} onRemoveMyItem={removeMyItem} onRestoreDefaultItems={restoreDefaultItems} onAddMyItems={addItemsToMyList}
+          myItems={myItems} setMyItems={applyMyItems} onRemoveMyItem={removeMyItem} onAddMyItems={addItemsToMyList}
+          catalog={catalog}
+          onOverrideCatalogItem={overrideCatalogItem}
+          onHideCatalogItem={hideCatalogItem}
+          onRevertToCatalog={revertToCatalog}
           chargeMethods={chargeOptions}
           calc={calc}
           tiers={rules.tiers}
