@@ -26,10 +26,23 @@ import { DEFAULT_ITEMS, itemCat } from "./constants.js";
 const isRow = (x) => !!x && typeof x === "object" && !Array.isArray(x) && typeof x.name === "string";
 
 // DB(app_config)에서 온 카탈로그는 신뢰하지 않는다. malformed 원소 하나가 렌더를 통째로 깨뜨릴 수 있다.
-// 이름 없는 원소는 버리고, cat 은 아는 값만 통과시킨다(itemCat).
+//
+// **이름이 곧 정체성이다** — React key 이자 내 아이템과의 매칭 키다. 그래서:
+//   · 빈 이름(공백만인 것 포함)은 버린다. 빈 문자열끼리 key 가 충돌하고, my_items 의 빈 이름 행과
+//     엉뚱하게 매칭돼 숨김/수정이 다른 아이템에 걸린다.
+//   · 이름이 중복되면 **첫 번째만** 남긴다(결정적). 안 그러면 key 가 충돌하고, 어느 쪽을 가릴지도 모호하다.
+// cat 은 아는 값만 통과시킨다(itemCat).
 export function validCatalog(catalog) {
   const rows = Array.isArray(catalog) && catalog.length ? catalog : DEFAULT_ITEMS;
-  return rows.filter(isRow).map((c) => ({ ...c, cat: itemCat(c.cat) }));
+  const seen = new Set();
+  const out = [];
+  rows.filter(isRow).forEach((c) => {
+    const name = c.name.trim();
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    out.push({ ...c, name, cat: itemCat(c.cat) });
+  });
+  return out;
 }
 
 // 화면에 그릴 목록을 만든다. 카탈로그를 깔고, 같은 이름의 내 아이템이 있으면 그것으로 덮는다.
@@ -93,26 +106,37 @@ export function differsFromBase(row, base) {
 // ===== 구 데이터 마이그레이션 =====
 // 예전 my_items 에는 기본 아이템의 **복사본**이 그대로 들어 있다(운영자가 force 로 밀어 넣었으니까).
 // 그걸 남겨 두면 나중에 운영자가 카탈로그 가격을 고쳐도 이 유저는 옛 복사본을 계속 보게 된다.
-// → 이름이 카탈로그에 있는 복사본은 지운다. 카탈로그가 그 자리를 대신 채운다.
+// → 정리해야 한다. 문제는 '무엇을 지워도 되는가'다.
 //
-// **`origin: "user"` 가 붙은 행은 절대 지우지 않는다.** 이 표식이 없으면, 유저가 나중에 만든
+// **이름만 보고 지우면 안 된다.** 구버전 UI 에서는 기본 아이템을 직접 편집할 수 있었다.
+// 그렇게 값을 고쳐 둔 행은 이름이 카탈로그와 같지만 **유저의 의도가 담긴 데이터**다.
+// 이름만 보고 지우면 그 편집이 조용히 사라진다(Codex 지적).
+//
+// 그래서 판정은 값으로 한다:
+//   · 카탈로그와 **완전히 같은** 행 → 정보가 없는 순수 복사본이다. 지운다(카탈로그가 그 자리를 채운다).
+//   · 하나라도 **다른** 행        → 유저가 손댄 것일 수 있다. **지우지 않고** origin 을 찍어 '수정됨'으로 살린다.
+//     화면에 "수정됨" 배지와 '되돌리기' 버튼이 붙으므로, 원치 않으면 한 번 눌러 원래대로 돌릴 수 있다.
+//     지우는 것은 되돌릴 수 없고 배지는 되돌릴 수 있다 — 확신이 없으면 지우지 않는 쪽이 옳다.
+//
+// 카탈로그에 없는 이름(= 진짜 커스텀 아이템)도 살리고 origin 을 찍는다.
+// 그래야 나중에 운영자가 같은 이름을 카탈로그에 추가해도 그 유저의 아이템이 사라지지 않는다.
+//
+// **`origin: "user"` 가 붙은 행은 아예 보지도 않는다.** 이 표식이 없으면, 유저가 나중에 만든
 // 수정본(= 카탈로그와 같은 이름을 갖는 것이 정상이다)까지 다음 로드에서 지워 버린다 —
 // 수정 기능 자체가 성립하지 않는다.
 //
-// 카탈로그에 없는 이름(= 진짜 커스텀 아이템)은 살리되 `origin: "user"` 를 찍어 준다.
-// 그래야 나중에 운영자가 같은 이름을 카탈로그에 추가해도 그 유저의 아이템이 사라지지 않는다.
-//
 // 이 함수는 **멱등**이다: 한 번 돌고 나면 남은 행은 전부 origin:"user" 라서 다음 호출은 아무것도 하지 않는다.
 export function planItemMigration(myItems, catalog) {
-  const names = new Set(validCatalog(catalog).map((c) => c.name));
+  const base = new Map(validCatalog(catalog).map((c) => [c.name, c]));
   const rows = (myItems || []).filter(isRow);
 
   const removeIds = []; // 삭제 표식을 남길 id (다른 기기의 복사본까지 정리된다)
-  const stamp = [];     // origin 을 찍어 줄 행
+  const stamp = [];     // origin 을 찍어 살릴 행
 
   rows.forEach((r) => {
-    if (r.origin === "user") return;    // 유저가 만든 것 — 손대지 않는다
-    if (names.has(r.name)) removeIds.push(r.id);
+    if (r.origin === "user") return; // 유저가 만든 것 — 손대지 않는다
+    const b = base.get(r.name);
+    if (b && !differsFromBase(r, b)) removeIds.push(r.id); // 값까지 같은 순수 복사본만 지운다
     else stamp.push(r);
   });
 

@@ -93,11 +93,11 @@ describe("differsFromBase", () => {
 });
 
 describe("planItemMigration — 구 데이터의 기본값 복사본 정리", () => {
-  it("카탈로그와 이름이 겹치는 옛 복사본은 지우고, 커스텀은 origin 을 찍어 살린다", () => {
+  it("카탈로그와 값까지 같은 옛 복사본은 지우고, 커스텀은 origin 을 찍어 살린다", () => {
     const mine = canonicalizeMyItems([
-      { name: "원더베리", cash: 5400 },              // 옛 복사본 → 삭제
-      { name: "플래티넘 카르마의 가위", cash: 5900 }, // 옛 복사본 → 삭제
-      { name: "금손은손 헤어쿠폰", cash: 5500 },     // 커스텀 → 살린다
+      { ...CAT[0] },                             // 옛 복사본(값까지 동일) → 삭제
+      { ...CAT[1] },                             // 옛 복사본(값까지 동일) → 삭제
+      { name: "금손은손 헤어쿠폰", cash: 5500 }, // 커스텀 → 살린다
     ]);
     const plan = planItemMigration(mine, CAT);
     expect(plan.changed).toBe(true);
@@ -124,8 +124,8 @@ describe("planItemMigration — 구 데이터의 기본값 복사본 정리", ()
 
   it("멱등: 한 번 돌린 뒤 다시 돌리면 아무것도 하지 않는다", () => {
     const mine = canonicalizeMyItems([
-      { name: "원더베리", cash: 5400 },
-      { name: "금손은손 헤어쿠폰", cash: 5500 },
+      { ...CAT[0] },                             // 값까지 같은 복사본
+      { name: "금손은손 헤어쿠폰", cash: 5500 }, // 커스텀
     ]);
     const p1 = planItemMigration(mine, CAT);
     let next = applyItemStamps(mine, p1.stampIds).filter((r) => !p1.removeIds.includes(r.id));
@@ -147,8 +147,8 @@ describe("동기화 불변식 — 새 필드가 병합을 통과한다", () => {
   });
 
   it("마이그레이션 삭제는 표식을 남겨 다른 기기의 복사본까지 정리된다", () => {
-    const stale = canonicalizeMyItems([{ name: "원더베리", cash: 5400 }]); // 다른 기기에 남은 옛 복사본
-    const mine = canonicalizeMyItems([{ name: "원더베리", cash: 5400 }]);
+    const stale = canonicalizeMyItems([{ ...CAT[0] }]); // 다른 기기에 남은 옛 복사본
+    const mine = canonicalizeMyItems([{ ...CAT[0] }]);
     const del = deleteMyItem(mine, { deleted: {} }, mine[0].id, 5000);
     // 표식이 있으므로 다른 기기의 복사본도 병합에서 빠진다
     expect(mergeMyItems(stale, del.myItems, del.ledger.deleted)).toEqual([]);
@@ -156,7 +156,7 @@ describe("동기화 불변식 — 새 필드가 병합을 통과한다", () => {
 
   it("정리 후에 만든 수정본은 그 삭제 표식을 이긴다(at 이 뒤라서)", () => {
     // 이게 깨지면 마이그레이션이 지운 이름으로는 영영 수정본을 만들 수 없다.
-    const mine = canonicalizeMyItems([{ name: "원더베리", cash: 5400 }]);
+    const mine = canonicalizeMyItems([{ ...CAT[0] }]);
     const del = deleteMyItem(mine, { deleted: {} }, mine[0].id, 5000);
     const override = addMyItems([], del.ledger.deleted, [{ name: "원더베리", cash: 5000, origin: "user" }], 5000);
     const merged = mergeMyItems([], override, del.ledger.deleted);
@@ -246,5 +246,65 @@ describe("프로덕션 데이터 재생 — force 사고 이후 상태의 정리
     expect(w.length).toBe(1);
     expect(w[0].cash).toBe(5000);
     expect(w[0].overrides).toBe(true);
+  });
+});
+
+// ===== Codex 재검수에서 잡힌 것들 =====
+describe("Codex — 마이그레이션이 유저의 옛 편집을 지우지 않는다", () => {
+  it("구버전 UI 에서 기본 아이템을 고쳐 둔 행(origin 없음)은 지우지 않고 '수정됨'으로 살린다", () => {
+    // 예전 UI 는 기본 아이템을 직접 편집할 수 있었다. 그렇게 값을 고친 행은 이름이 카탈로그와 같지만
+    // **유저의 의도가 담긴 데이터**다. 이름만 보고 지우면 그 편집이 조용히 사라진다.
+    const edited = canonicalizeMyItems([{ name: "원더베리", cash: 4321, mAllowed: false, icon: "🫐", cat: "pet" }]);
+    const plan = planItemMigration(edited, CAT);
+    expect(plan.removeIds).toEqual([]);        // 지우지 않는다
+    expect(plan.stampIds.length).toBe(1);      // 살리고 origin 을 찍는다
+
+    const kept = applyItemStamps(edited, plan.stampIds);
+    const { items } = composeItems(CAT, kept);
+    const w = items.find((x) => x.name === "원더베리");
+    expect(w.source).toBe("user");
+    expect(w.overrides).toBe(true);            // "수정됨" 배지 + 되돌리기 버튼이 붙는다
+    expect(+w.cash).toBe(4321);
+  });
+
+  it("값까지 똑같은 순수 복사본만 지운다", () => {
+    const pure = canonicalizeMyItems([{ ...CAT[0] }]); // 카탈로그와 완전히 동일
+    expect(planItemMigration(pure, CAT).removeIds.length).toBe(1);
+  });
+
+  it("살린 '수정됨' 행은 되돌리기 한 번으로 카탈로그 값으로 복귀한다(삭제와 달리 되돌릴 수 있다)", () => {
+    const edited = canonicalizeMyItems([{ name: "원더베리", cash: 4321, cat: "pet" }]);
+    const plan = planItemMigration(edited, CAT);
+    const kept = applyItemStamps(edited, plan.stampIds);
+    // '되돌리기' = 그 my_items 행을 지운다 → 카탈로그 원본이 다시 보인다
+    const del = deleteMyItem(kept, { deleted: {} }, kept[0].id);
+    const { items } = composeItems(CAT, del.myItems);
+    const w = items.find((x) => x.name === "원더베리");
+    expect(w.source).toBe("catalog");
+    expect(w.cash).toBe(5400);
+  });
+});
+
+describe("Codex — malformed 카탈로그(빈 이름·중복 이름)", () => {
+  it("빈 이름·공백 이름은 버린다 — React key 충돌과 엉뚱한 매칭을 막는다", () => {
+    const out = validCatalog([{ name: "", cash: 1 }, { name: "   ", cash: 2 }, { name: "정상", cash: 3 }]);
+    expect(out.map((x) => x.name)).toEqual(["정상"]);
+  });
+
+  it("중복 이름은 첫 번째만 결정적으로 남긴다", () => {
+    const out = validCatalog([{ name: "A", cash: 1 }, { name: "A", cash: 2 }, { name: "B", cash: 3 }]);
+    expect(out.map((x) => x.name)).toEqual(["A", "B"]);
+    expect(out[0].cash).toBe(1);
+  });
+
+  it("이름 앞뒤 공백은 다듬는다 — my_items 와의 매칭이 어긋나지 않게", () => {
+    expect(validCatalog([{ name: "  원더베리  ", cash: 1 }])[0].name).toBe("원더베리");
+  });
+
+  it("중복 이름이 있어도 composeItems 의 key 가 충돌하지 않는다", () => {
+    const dup = [{ name: "A", cash: 1, cat: "etc" }, { name: "A", cash: 2, cat: "etc" }];
+    const { items } = composeItems(dup, []);
+    const keys = items.map((x) => x._k);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

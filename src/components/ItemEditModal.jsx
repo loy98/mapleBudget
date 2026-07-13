@@ -10,14 +10,17 @@ import { ITEM_CATS, itemCat } from "../lib/constants.js";
 const catOptions = ITEM_CATS.map((c) => ({ value: c.id, label: c.label }));
 
 export default function ItemEditModal({ item, onCancel, onConfirm }) {
+  // 이름은 고치지 못한다. 수정본이 원본을 가리는 판정이 **이름**이기 때문이다(composeItems).
+  // 이름을 바꾸면 원본 카탈로그 아이템이 그대로 남고 전혀 다른 아이템이 하나 더 생긴다 —
+  // 사용자가 의도한 '이 아이템의 값을 고친다'와 결과가 어긋난다. 다른 이름이 필요하면 '+ 새 항목'을 쓴다.
   const [row, setRow] = useState(() => ({
-    name: item.name || "",
     cash: item.cash ?? "",
     mAllowed: item.mAllowed !== false,
     icon: item.icon || "",
     cat: itemCat(item.cat),
   }));
   const set = (patch) => setRow((r) => ({ ...r, ...patch }));
+  const name = item.name;
 
   return (
     <Modal onClose={onCancel} label="기본 아이템 수정">
@@ -32,8 +35,9 @@ export default function ItemEditModal({ item, onCancel, onConfirm }) {
 
         <div className="itemform">
           <div>
-            <label>이름</label>
-            <input value={row.name} onChange={(e) => set({ name: e.target.value })} />
+            <label>이름 (고정)</label>
+            <div className="readnum">{name}</div>
+            <div className="hint">이름을 바꾸려면 '+ 새 항목'으로 따로 추가하세요.</div>
           </div>
           <div>
             <label>캐시가 (원)</label>
@@ -60,7 +64,7 @@ export default function ItemEditModal({ item, onCancel, onConfirm }) {
         </div>
 
         <div className="modal-actions">
-          <button className="btn" disabled={!row.name.trim()} onClick={() => onConfirm(row)}>내 아이템으로 복사</button>
+          <button className="btn" onClick={() => onConfirm({ ...row, name })}>내 아이템으로 복사</button>
           <button className="btn ghost" onClick={onCancel}>취소</button>
         </div>
       </>
