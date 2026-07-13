@@ -92,7 +92,7 @@ export default function App() {
 
   // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
   // 파생 계산보다 먼저 호출해야 rules(게임 규칙)를 computeCalc 에 넘길 수 있다.
-  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory } = useCloudSync({
+  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload } = useCloudSync({
     settings, charges, items, myItems, ledger,
     setCalcState, setMyItems, setLedger,
   });
@@ -161,7 +161,7 @@ export default function App() {
           <button className="hbtn" onClick={() => setModal("feedback")} aria-label="피드백" title="피드백">
             <IconChat className="hbtn-ico" /><span className="hbtn-lbl">피드백</span>
           </button>
-          <AuthBar session={session} syncState={syncState} />
+          <AuthBar session={session} syncState={syncState} flushPendingUpload={flushPendingUpload} />
         </div>
       </header>
 
