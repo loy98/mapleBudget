@@ -13,7 +13,7 @@
 --   원더베리        3,900 → 5,400, 마일리지 가능 → **불가** (공식 공지 sale/428)
 --   프리미엄 성형   5,500 → 3,500                  (공식 공지 sale/398)
 --   뷰티 쿠폰       제거 — 공식 상시판매 아이템으로 확인되지 않음
---   로얄스타일 20개 제거 — 판매 단위(1/10/25/45개)에 없음
+--   로얄 스타일     판매 단위 1/10/20/45개. 45개는 묶음가를 몰라 제외(배수로 추정하지 않는다)
 update app_config
 set config = config
   || jsonb_build_object(
@@ -29,7 +29,8 @@ set config = config
          {"name":"원더베리","cash":5400,"mAllowed":false,"icon":"🫐","cat":"pet"},
          {"name":"루나 크리스탈","cash":3900,"mAllowed":false,"icon":"🌙","cat":"pet"},
          {"name":"로얄 스타일 쿠폰","cash":2200,"mAllowed":false,"icon":"🎀","cat":"style"},
-         {"name":"로얄 스타일 쿠폰 10개","cash":22000,"mAllowed":false,"icon":"🎀","cat":"style"}
+         {"name":"로얄 스타일 쿠폰 10개","cash":22000,"mAllowed":false,"icon":"🎀","cat":"style"},
+         {"name":"로얄 스타일 쿠폰 20개","cash":44000,"mAllowed":false,"icon":"🎀","cat":"style"}
        ]'::jsonb,
        'force', '["mesoRate","giftRatio","marketRatio","defaultItems"]'::jsonb
      ),
