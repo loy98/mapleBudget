@@ -204,6 +204,8 @@ export default function App() {
         </p>
         {/* 정적 페이지(public/)라 SPA 라우팅이 아닌 전체 이동. 크롤러가 직접 읽을 수 있어야 함. */}
         <p className="legal-links">
+          <a href="/guide.html">엠작 가이드</a>
+          <span aria-hidden="true"> · </span>
           <a href="/privacy.html">개인정보처리방침</a>
           <span aria-hidden="true"> · </span>
           <a href="/terms.html">이용약관</a>
