@@ -50,7 +50,7 @@ export default function App() {
   const [myItems, setMyItems] = useState(loadMyItems);
   const [ledger, setLedger] = useState(loadLedger);
   const [modal, setModal] = useState(null); // null | "help" | "feedback"
-  // 테마 모드: "system"(기본) | "light" | "dark". index.html 인라인 스크립트가 최초 flash 없이 선반영.
+  // 테마 모드: "system"(기본) | "light" | "dark". public/theme-init.js 가 최초 flash 없이 선반영.
   // "system" 은 OS 설정(prefers-color-scheme)을 따르고, OS 가 바뀌면 실시간으로 따라간다.
   const [themeMode, setThemeMode] = useState(() => {
     try {
@@ -65,7 +65,7 @@ export default function App() {
   // 다크가 기본(:root), 라이트는 data-theme="light" 로 켠다. 실제 다크 여부는 모드+OS 로 계산한다.
   useEffect(() => {
     const el = document.documentElement;
-    // matchMedia 가 없는 환경(구형 웹뷰·jsdom 등)에서도 안전하게 — index.html 인라인 스크립트와 같은 가드.
+    // matchMedia 가 없는 환경(구형 웹뷰·jsdom 등)에서도 안전하게 — theme-init.js 와 같은 가드.
     const mq = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
     const apply = () => {
       const dark = themeMode === "dark" || (themeMode === "system" && !!mq?.matches);
@@ -204,11 +204,11 @@ export default function App() {
         </p>
         {/* 정적 페이지(public/)라 SPA 라우팅이 아닌 전체 이동. 크롤러가 직접 읽을 수 있어야 함. */}
         <p className="legal-links">
-          <a href="/guide.html">엠작 가이드</a>
+          <a href="/guide">엠작 가이드</a>
           <span aria-hidden="true"> · </span>
-          <a href="/privacy.html">개인정보처리방침</a>
+          <a href="/privacy">개인정보처리방침</a>
           <span aria-hidden="true"> · </span>
-          <a href="/terms.html">이용약관</a>
+          <a href="/terms">이용약관</a>
         </p>
         <p className="disclaimer">
           본 사이트는 넥슨코리아 및 「메이플스토리」와 무관한 비공식 팬 사이트입니다.
