@@ -180,15 +180,35 @@ export function mergeSnapshots(local, cloud, opts = {}) {
   const cloudItems = Array.isArray(cloud.my_items);
   const cloudHasItems = cloudItems && cloud.my_items.length > 0;
   const cloudHasCalc = !!(cloud.calc && Object.keys(cloud.calc).length);
-  // 아이템은 합집합 + 표식 차감. 같은 id 면 클라우드가 이긴다(calc 와 같은 기준).
-  const my_items = cloudItems ? mergeMyItems(local.my_items, cloud.my_items, ledger.deleted, opts.ceiling) : local.my_items;
-  const calc = cloudHasCalc ? cloud.calc : local.calc;
+  const localHasCalc = !!(local.calc && Object.keys(local.calc).length);
+
+  // localWinsCalc / localWinsItems = 이 기기의 로컬이 그 필드의 **권위**다.
+  // 백업 복원 직후, **파일에 실제로 들어 있던 필드에만** 켠다(storage 의 복원 마커).
+  // 복원은 "이 백업이 지금부터 내 데이터다"라는 명시적 의도인데, 기본 정책(클라우드 우선)을 그대로 두면
+  // 복원한 설정이 새로고침 직후 클라우드 옛값으로 조용히 되돌아간다 —
+  // 게다가 충돌 선택 모달은 최초 로그인 때만 뜨므로, 이미 동기화된 사용자는 물어보지도 않고 잃는다.
+  //
+  // 필드 단위인 이유: 거래만 든 백업을 복원했는데 전역으로 켜면, **복원하지도 않은 옛 로컬 calc** 가
+  // 클라우드를 덮는다. 그건 막으려던 것과 같은 종류의 손실이다.
+  // 로컬 calc 가 비어 있으면 켜도 무의미하니 클라우드를 쓴다(빈 {} 로 클라우드 설정을 날리지 않는다).
+  const lwCalc = !!opts.localWinsCalc;
+  const lwItems = !!opts.localWinsItems;
+  const calc = lwCalc && localHasCalc ? local.calc : (cloudHasCalc ? cloud.calc : local.calc);
+  // 아이템은 합집합 + 표식 차감. 같은 id 면 기본은 클라우드가, 복원 직후엔 로컬이 이긴다.
+  const my_items = cloudItems
+    ? (lwItems
+        ? mergeMyItems(cloud.my_items, local.my_items, ledger.deleted, opts.ceiling)
+        : mergeMyItems(local.my_items, cloud.my_items, ledger.deleted, opts.ceiling))
+    : local.my_items;
+
   const ledgerActive = ["buys", "sells", "cashes", "spends"].some(
     (k) => local.ledger && local.ledger[k] && local.ledger[k].length > 0
   );
   // 거래가 있거나(ledgerActive) 사용자가 설정/아이템을 직접 편집했으면(localTouched) 지켜야 할 로컬 데이터가 있음.
   const localActive = ledgerActive || !!opts.localTouched;
-  const conflict = (cloudHasCalc || cloudHasItems) && localActive;
+  // 충돌 선택은 결국 calc 를 묻는 것이다(아이템은 이제 합집합이라 물을 이유가 없다).
+  // calc 의 답이 이미 정해졌으면(복원본이 권위) 묻지 않는다.
+  const conflict = !lwCalc && (cloudHasCalc || cloudHasItems) && localActive;
   return { snapshot: { calc, my_items, ledger }, conflict };
 }
 // id 합집합 + tombstone 차감.

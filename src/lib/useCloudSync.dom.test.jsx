@@ -34,6 +34,7 @@ const {
   loadCalcState, loadMyItems, loadLedger,
   saveCalcState, saveMyItems, saveLedger,
   clearAccountData, setDataOwner, lockAccountWrites, __unlockAccountWrites,
+  markRestorePending, isRestorePending, getRestorePending, RESTORE_KEY,
 } = await import("./storage.js");
 
 // 프로덕션 app_config 와 같은 형태. force 가 시세 3종을 '모든 유저'에게 덮어쓴다 —
@@ -106,6 +107,8 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   root = null; container = null;
+  // 잠금은 모듈 전역이다 — 풀지 않으면 다음 테스트의 자동저장이 조용히 막혀 엉뚱한 실패를 낸다.
+  __unlockAccountWrites();
 });
 
 describe("로그아웃 — 이전 계정 데이터가 다음 계정으로 유입되지 않는다", () => {
@@ -269,8 +272,6 @@ describe("복원 후 새로고침 대기(suspended) — 복원본을 지킨다",
     localStorage.setItem(LKEY, JSON.stringify(RESTORED_LEDGER));
   };
 
-  afterEach(() => { __unlockAccountWrites(); });
-
   it("지연된 app_config 가 resolve 돼도 복원된 저장소가 그대로다", async () => {
     seedRestored();
     lockAccountWrites();                 // App 이 복원 실패 경로에서 거는 잠금
@@ -398,5 +399,265 @@ describe("복원 후 새로고침 대기(suspended) — 복원본을 지킨다",
     await settle();
     // 기존 유저(저장 이력 있음)라도 force 는 모든 유저에게 적용된다 → 시세가 app_config 값으로 덮인다.
     expect(JSON.parse(localStorage.getItem(KEY)).mesoRate).toBe(1800);
+  });
+});
+
+// 백업 복원 → 새로고침 → 최초 동기화.
+// 회귀: 복원한 사실을 어디에도 남기지 않아, mergeSnapshots 의 기본 정책(클라우드 우선)이
+// 복원한 calc 를 클라우드 옛값으로 조용히 되돌렸다. 충돌 선택 모달은 최초 로그인 때만 뜨므로
+// **이미 동기화된 사용자는 물어보지도 않고 잃었다.** 복원 마커로 그 한 번은 로컬이 이기게 한다.
+describe("백업 복원 — 새로고침 뒤 클라우드가 복원본을 덮지 않는다", () => {
+  const RESTORED_CALC = { mesoRate: 1234, charge: [{ name: "복원된카드", rate: 9, limit: 111111 }], items: [] };
+  const CLOUD_ROW = {
+    updated_at: "2026-07-13T00:00:00Z",
+    calc: { mesoRate: 9999, charge: [{ name: "클라우드카드", rate: 1, limit: 0 }] },
+    my_items: [{ id: "c1", name: "클라우드아이템", cash: 1 }],
+    ledger: { buys: [{ id: "cloud-1", date: "2026-07-01", item: "클라우드거래", qty: 1, price: 1 }], sells: [], cashes: [], spends: [], deleted: {} },
+  };
+
+  it("복원 마커가 있으면 복원한 calc 가 살아남고, 클라우드에 올라간다", async () => {
+    // 복원 직후 새로고침한 상태를 재현한다(importAll 이 쓴 결과 + 마커).
+    localStorage.setItem(KEY, JSON.stringify(RESTORED_CALC));
+    setDataOwner(A_UID);
+    markRestorePending({ calc: true, my_items: true, ledger: true });
+    fetchUserData.mockResolvedValue(CLOUD_ROW);
+    localStorage.setItem("mvpCloudSyncedUid", A_UID); // 이미 동기화된 사용자 = firstLogin 아님(모달 안 뜸)
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); }); // 디바운스 통과
+    await settle();
+
+    // 화면·저장소는 복원본이다.
+    // (mesoRate 는 app_config.force 대상이라 모든 유저에게 덮인다 → sentinel 로 쓰면 안 된다. charge 로 판정한다.)
+    const calc = JSON.parse(localStorage.getItem(KEY));
+    expect(JSON.stringify(calc.charge)).toContain("복원된카드");
+    expect(JSON.stringify(calc.charge)).not.toContain("클라우드카드");
+
+    // 그리고 그 복원본이 클라우드로 올라갔다(다른 기기도 따라온다).
+    const uploads = writeUserData.mock.calls.filter(([uid]) => uid === A_UID);
+    expect(uploads.length).toBeGreaterThan(0);
+    expect(JSON.stringify(uploads[uploads.length - 1][1].calc)).toContain("복원된카드");
+
+    // 거래는 합집합 — 클라우드 거래를 지우지 않았다.
+    expect(localStorage.getItem(LKEY)).toContain("cloud-1");
+
+    // 업로드가 끝났으니 마커는 사라진다(다음 로드부터는 평소 정책).
+    expect(isRestorePending()).toBe(false);
+  });
+
+  it("업로드가 실패하면 마커를 지우지 않는다(다음 로드에서 다시 시도)", async () => {
+    localStorage.setItem(KEY, JSON.stringify(RESTORED_CALC));
+    setDataOwner(A_UID);
+    markRestorePending({ calc: true, my_items: true, ledger: true });
+    fetchUserData.mockResolvedValue(CLOUD_ROW);
+    writeUserData.mockRejectedValue(new Error("network down"));
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    expect(isRestorePending()).toBe(true); // 못 올렸으면 마커는 남는다
+  });
+
+  it("마커가 없으면 평소대로 클라우드가 이긴다(정책을 바꾸지 않았다)", async () => {
+    localStorage.setItem(KEY, JSON.stringify(RESTORED_CALC));
+    setDataOwner(A_UID);
+    localStorage.setItem("mvpCloudSyncedUid", A_UID);
+    fetchUserData.mockResolvedValue(CLOUD_ROW);
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+
+    const calc = JSON.parse(localStorage.getItem(KEY));
+    expect(JSON.stringify(calc.charge)).toContain("클라우드카드"); // 클라우드 우선(기존 동작)
+    expect(JSON.stringify(calc.charge)).not.toContain("복원된카드");
+  });
+
+  // 소유자가 다른 계정이면 local 은 EMPTY_SNAPSHOT 이다. 여기서 '로컬이 이긴다'가 그대로 적용되면
+  // 빈 {} 로 남의 클라우드 설정을 날려 버린다 — 막으려던 것보다 나쁜 손실이다.
+  // (실제로 막는 것은 mergeSnapshots 의 '로컬 calc 가 비면 클라우드를 쓴다' 다. 이 테스트는 그 **결과**를 고정한다.)
+  it("로컬 데이터의 소유자가 다른 계정이면 복원본으로 클라우드를 덮지 않는다", async () => {
+    localStorage.setItem(KEY, JSON.stringify(RESTORED_CALC));
+    setDataOwner("someone-else");   // 남의 데이터
+    markRestorePending({ calc: true, my_items: true, ledger: true });
+    fetchUserData.mockResolvedValue(CLOUD_ROW);
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    // 클라우드 설정이 그대로 살아 있다(빈 값으로 날아가지 않았다).
+    expect(JSON.stringify(JSON.parse(localStorage.getItem(KEY)).charge)).toContain("클라우드카드");
+    const uploads = writeUserData.mock.calls.filter(([uid]) => uid === A_UID);
+    for (const [, snap] of uploads) expect(JSON.stringify(snap.calc)).toContain("클라우드카드");
+  });
+
+  it("로그아웃하면 복원 마커도 지워진다(다음 계정에 적용되지 않는다)", async () => {
+    localStorage.setItem(KEY, JSON.stringify(RESTORED_CALC));
+    setDataOwner(A_UID);
+    markRestorePending({ calc: true, my_items: true, ledger: true });
+    expect(getRestorePending()).toEqual({ calc: true, my_items: true, ledger: true });
+
+    clearAccountData();
+    expect(localStorage.getItem(RESTORE_KEY)).toBe(null);
+  });
+});
+
+// Codex 지적: 복원한 탭만 보호하면 부족하다. **이미 열려 있던 다른 탭**은 복원 전 메모리를 그대로 갖고 있고,
+// 그 탭이 업로드하면 mergeForUpload 가 '이 탭의 calc'를 우선하므로 서버의 복원본을 그대로 덮는다.
+describe("다른 탭이 복원한 경우 — 이 탭이 옛 값으로 클라우드를 덮지 않는다", () => {
+  const RESTORED = JSON.stringify({ calc: true, my_items: true });
+
+  it("storage 이벤트를 받으면 이 탭은 저장·업로드를 멈춘다", async () => {
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));   // 이 탭의 옛 값
+    setDataOwner(A_UID);
+    fetchUserData.mockResolvedValue({ updated_at: "2026-07-13T00:00:00Z", calc: {}, my_items: [], ledger: {} });
+
+    await mount();                                        // 평범하게 로그인·동기화된 탭
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    // 다른 탭이 백업을 복원했다 → 마커가 생기고 storage 이벤트가 이 탭에 도착한다.
+    writeUserData.mockClear();
+    localStorage.setItem(RESTORE_KEY, RESTORED);
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent("storage", { key: RESTORE_KEY, newValue: RESTORED }));
+    });
+    await settle();
+
+    // 이 탭에서 무엇이든 바뀌어도(사용자 편집·프로그램적 변경) 저장·업로드가 일어나지 않는다.
+    await act(async () => { api.setLedger((l) => ({ ...l, spends: [{ id: "stale-2", date: "2026-07-13", amount: 1 }] })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    expect(writeUserData).not.toHaveBeenCalled();                 // 옛 calc 를 클라우드에 올리지 않았다
+    expect(localStorage.getItem(LKEY) || "").not.toContain("stale-2"); // 저장소도 잠겼다
+  });
+
+  // storage 이벤트를 처리하기 전의 짧은 창: 이미 시작된 업로드가 남의 복원본을 덮으면 안 된다.
+  it("복원 마커의 주인이 아닌 탭은 업로드 자체를 중단한다", async () => {
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));
+    setDataOwner(A_UID);
+    fetchUserData.mockResolvedValue({ updated_at: "2026-07-13T00:00:00Z", calc: {}, my_items: [], ledger: {} });
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    // 마커만 심는다(이벤트는 아직 도착하지 않았다 = 처리 전의 창).
+    writeUserData.mockClear();
+    localStorage.setItem(RESTORE_KEY, RESTORED);
+
+    await act(async () => { api.setLedger((l) => ({ ...l, spends: [{ id: "stale-3", date: "2026-07-13", amount: 1 }] })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    expect(writeUserData).not.toHaveBeenCalled(); // 이 탭은 그 복원의 주인이 아니다 → 올리지 않는다
+  });
+});
+
+// Codex 지적: 마커가 전역이면, 거래만 든 백업을 복원했는데 **복원하지도 않은 옛 calc** 가 클라우드를 덮는다.
+describe("부분 백업 — 복원한 필드에만 권위를 준다", () => {
+  it("거래만 복원했으면 옛 로컬 calc 가 클라우드를 덮지 않는다", async () => {
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));    // 복원하지 않은, 저장소에 남아 있던 옛 calc
+    setDataOwner(A_UID);
+    localStorage.setItem("mvpCloudSyncedUid", A_UID);
+    markRestorePending({ calc: false, my_items: false, ledger: true }); // 거래만 든 백업
+    fetchUserData.mockResolvedValue({
+      updated_at: "2026-07-13T00:00:00Z",
+      calc: { charge: [{ name: "클라우드카드", rate: 1, limit: 0 }] },
+      my_items: [], ledger: {},
+    });
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+
+    // 마커는 남는다 — 거래만 복원해도 **다른 탭을 멈춰야** 하기 때문이다(권위와 정지 신호는 다른 일이다).
+    expect(getRestorePending()).toEqual({ calc: false, my_items: false, ledger: true });
+    const calc = JSON.parse(localStorage.getItem(KEY));
+    expect(JSON.stringify(calc.charge)).toContain("클라우드카드");        // 클라우드 유지
+    expect(JSON.stringify(calc.charge)).not.toContain("도서문화상품권");  // 옛 로컬이 이기지 않았다
+  });
+
+  it("calc 만 든 백업이면 아이템에는 권위를 주지 않는다", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ charge: [{ name: "복원된카드", rate: 9, limit: 1 }] }));
+    localStorage.setItem(ITEMS_KEY, JSON.stringify([{ id: "i1", name: "옛로컬아이템", cash: 111 }]));
+    setDataOwner(A_UID);
+    localStorage.setItem("mvpCloudSyncedUid", A_UID);
+    markRestorePending({ calc: true, my_items: false, ledger: false });   // calc 만 복원했다
+    fetchUserData.mockResolvedValue({
+      updated_at: "2026-07-13T00:00:00Z",
+      calc: { charge: [{ name: "클라우드카드", rate: 1, limit: 0 }] },
+      my_items: [{ id: "i1", name: "클라우드아이템", cash: 999 }],
+      ledger: {},
+    });
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+
+    expect(JSON.stringify(JSON.parse(localStorage.getItem(KEY)).charge)).toContain("복원된카드"); // calc 는 로컬 승
+    const items = JSON.parse(localStorage.getItem(ITEMS_KEY));
+    const i1 = items.find((x) => x.id === "i1");
+    expect(i1.cash).toBe(999); // 아이템은 평소대로 클라우드 승(권위를 주지 않았다)
+  });
+});
+
+// Codex 2차 지적: 마커의 두 역할(병합 권위 / 다른 탭 정지)을 섞으면, 거래만 든 백업에서
+// 마커가 아예 안 생겨 **다른 탭이 멈추지 않는다** → 그 탭의 옛 원장이 복원된 원장을 덮는다.
+describe("거래만 든 백업도 다른 탭을 멈춘다", () => {
+  it("ledger-only 복원 마커에도 다른 탭이 저장·업로드를 멈춘다", async () => {
+    const LEDGER_ONLY = JSON.stringify({ calc: false, my_items: false, ledger: true });
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));
+    localStorage.setItem(LKEY, JSON.stringify(A_LEDGER)); // 이 탭의 옛 원장
+    setDataOwner(A_UID);
+    fetchUserData.mockResolvedValue({ updated_at: "2026-07-13T00:00:00Z", calc: {}, my_items: [], ledger: {} });
+
+    await mount();
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    // 다른 탭이 '거래만 든' 백업을 복원했다.
+    writeUserData.mockClear();
+    localStorage.setItem(RESTORE_KEY, LEDGER_ONLY);
+    localStorage.setItem(LKEY, JSON.stringify({ buys: [{ id: "restored-only" }], sells: [], cashes: [], spends: [], deleted: {} }));
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent("storage", { key: RESTORE_KEY, newValue: LEDGER_ONLY }));
+    });
+    await settle();
+
+    await act(async () => { api.setLedger((l) => ({ ...l, spends: [{ id: "stale-4", date: "2026-07-13", amount: 1 }] })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    expect(localStorage.getItem(LKEY)).toContain("restored-only");  // 복원된 원장이 살아 있다
+    expect(localStorage.getItem(LKEY)).not.toContain("a-buy-1");    // 이 탭의 옛 원장이 덮지 않았다
+    expect(writeUserData).not.toHaveBeenCalled();                   // 클라우드에도 올리지 않았다
+  });
+
+  it("구버전 전역 마커('1')는 모든 필드를 복원한 것으로 읽는다", () => {
+    localStorage.setItem(RESTORE_KEY, "1");
+    expect(getRestorePending()).toEqual({ calc: true, my_items: true, ledger: true });
+  });
+
+  it("형태가 깨진 마커는 무시한다(평소 정책으로)", () => {
+    localStorage.setItem(RESTORE_KEY, "{깨진 JSON");
+    expect(getRestorePending()).toBe(null);
+    localStorage.setItem(RESTORE_KEY, JSON.stringify([1, 2]));
+    expect(getRestorePending()).toBe(null);
   });
 });

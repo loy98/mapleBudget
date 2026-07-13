@@ -26,7 +26,9 @@ const PATTERNS = [
 const hasNativeDialog = (code) => PATTERNS.some((re) => re.test(code));
 
 // 주석에서 언급하는 건 허용해야 한다 — 왜 걷어냈는지 설명하는 주석이 코드에 남아 있다.
-const stripComment = (line) => line.replace(/\/\/.*$/, "");
+// 줄 끝의 `\r` 를 먼저 턴다: `.` 는 `\r` 를 매치하지 않아, CRLF 파일에서는 `//.*$` 가 주석을 지우지 못하고
+// 주석 속 `alert()` 가 코드로 오인된다. (git 이 체크아웃하며 LF→CRLF 로 바꾸면 실제로 그렇게 된다.)
+const stripComment = (line) => line.replace(/\r$/, "").replace(/\/\/.*$/, "");
 
 function* sourceFiles(dir) {
   for (const name of readdirSync(dir)) {
@@ -42,7 +44,7 @@ describe("네이티브 대화상자 금지", () => {
   it("src 어디에도 alert/confirm/prompt 호출이 없다", () => {
     const offenders = [];
     for (const file of sourceFiles("src")) {
-      readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+      readFileSync(file, "utf8").split(/\r?\n/).forEach((line, i) => {
         if (hasNativeDialog(stripComment(line))) offenders.push(`${file}:${i + 1}: ${line.trim()}`);
       });
     }
@@ -71,6 +73,16 @@ describe("네이티브 대화상자 금지", () => {
       `alert?.("x")`,
     ];
     expect(mustCatch.filter((s) => !hasNativeDialog(s))).toEqual([]);
+  });
+
+  // 회귀: `.` 는 `\r` 를 매치하지 않는다 → CRLF 파일에서 `//.*$` 가 주석을 지우지 못하고,
+  // "왜 alert() 를 걷어냈나" 같은 **주석이 코드로 오인**돼 초록불이 빨간불이 됐다.
+  // (git 이 체크아웃하며 LF→CRLF 로 바꾸면 실제로 그렇게 된다.)
+  it("CRLF 줄바꿈이어도 주석을 코드로 오인하지 않는다", () => {
+    expect(hasNativeDialog(stripComment("// 왜 alert() 를 걷어냈나\r"))).toBe(false);
+    expect(hasNativeDialog(stripComment("  toast.warn('x'); // confirm() 대신\r"))).toBe(false);
+    // 그렇다고 진짜 호출을 놓치면 안 된다.
+    expect(hasNativeDialog(stripComment("  alert('x');\r"))).toBe(true);
   });
 
   it("검사기가 무해한 코드를 오탐하지 않는다", () => {
