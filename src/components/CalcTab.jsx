@@ -67,10 +67,13 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
     return ITEM_CATS.filter((k) => n[k.id]).map((k) => ({ ...k, n: n[k.id] }));
   }, [myItems]);
   // 선택한 카테고리가 사라지면(그 카테고리 아이템을 다 지우면) 빈 목록에 갇힌다 → '전체'로 되돌린다.
+  // 되돌린 결과는 activeCat 하나로 표현한다. cat 만 보고 목록을 고르면 전체 아이템이 보이는데
+  // '전체' 탭은 선택돼 있지 않은 상태가 된다(어느 탭도 강조되지 않음).
   const catExists = cat === "all" || shownCats.some((k) => k.id === cat);
+  const activeCat = catExists ? cat : "all";
   const shownItems = useMemo(
-    () => (!catExists || cat === "all" ? myItems : myItems.filter((p) => itemCat(p.cat) === cat)),
-    [myItems, cat, catExists]
+    () => (activeCat === "all" ? myItems : myItems.filter((p) => itemCat(p.cat) === activeCat)),
+    [myItems, activeCat]
   );
 
   const setMyItem = (i, patch) => setMyItems(myItems.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -315,13 +318,13 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             <div className="presetbar">
               <span className="pblabel">자주 쓰는 아이템</span>
               <div className="catpills" role="tablist" aria-label="아이템 카테고리">
-                <button role="tab" aria-selected={cat === "all"}
-                  className={"catpill" + (cat === "all" ? " on" : "")} onClick={() => setCat("all")}>
+                <button role="tab" aria-selected={activeCat === "all"}
+                  className={"catpill" + (activeCat === "all" ? " on" : "")} onClick={() => setCat("all")}>
                   전체 <span className="cnt">{myItems.length}</span>
                 </button>
                 {shownCats.map((k) => (
-                  <button key={k.id} role="tab" aria-selected={cat === k.id}
-                    className={"catpill" + (cat === k.id ? " on" : "")} onClick={() => setCat(k.id)}>
+                  <button key={k.id} role="tab" aria-selected={activeCat === k.id}
+                    className={"catpill" + (activeCat === k.id ? " on" : "")} onClick={() => setCat(k.id)}>
                     {k.label} <span className="cnt">{k.n}</span>
                   </button>
                 ))}
