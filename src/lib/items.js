@@ -25,6 +25,13 @@ import { DEFAULT_ITEMS, itemCat } from "./constants.js";
 
 const isRow = (x) => !!x && typeof x === "object" && !Array.isArray(x) && typeof x.name === "string";
 
+// 카탈로그와 my_items 를 맞출 때 쓰는 **매칭 키**.
+// 카탈로그 이름은 validCatalog 가 trim 하는데, my_items 의 이름은 저장된 그대로다(id 가 거기서 유도됐으므로
+// 함부로 바꾸면 id 가 흔들린다). 양쪽을 같은 규칙으로 정규화해서 비교해야
+// 공백만 다른 옛 복사본(" 원더베리 ")이 매칭에서 빠져 유령 '수정됨' 행으로 남지 않는다.
+// 저장되는 이름은 건드리지 않는다 — 비교에만 쓴다.
+const matchKey = (name) => String(name ?? "").trim();
+
 // DB(app_config)에서 온 카탈로그는 신뢰하지 않는다. malformed 원소 하나가 렌더를 통째로 깨뜨릴 수 있다.
 //
 // **이름이 곧 정체성이다** — React key 이자 내 아이템과의 매칭 키다. 그래서:
@@ -59,15 +66,15 @@ export function composeItems(catalog, myItems) {
 
   // 같은 이름의 내 아이템이 여럿이면 뒤엣것이 이긴다(id 는 달라도 화면엔 하나만 보여야 한다).
   const byName = new Map();
-  mine.forEach((r) => byName.set(r.name, r));
+  mine.forEach((r) => byName.set(matchKey(r.name), r));
 
   const items = [];
   const hidden = [];
   const catNames = new Set();
 
   cat.forEach((c) => {
-    catNames.add(c.name);
-    const u = byName.get(c.name);
+    catNames.add(matchKey(c.name));
+    const u = byName.get(matchKey(c.name));
     if (!u) {
       items.push({ ...c, _k: "cat:" + c.name, source: "catalog", overrides: false, base: null });
       return;
@@ -80,7 +87,7 @@ export function composeItems(catalog, myItems) {
   });
 
   mine.forEach((u) => {
-    if (catNames.has(u.name)) return; // 위 루프에서 이미 처리했다
+    if (catNames.has(matchKey(u.name))) return; // 위 루프에서 이미 처리했다
     if (u.hidden) {
       hidden.push({ ...u, source: "user", userRowId: u.id });
       return;
@@ -127,7 +134,7 @@ export function differsFromBase(row, base) {
 //
 // 이 함수는 **멱등**이다: 한 번 돌고 나면 남은 행은 전부 origin:"user" 라서 다음 호출은 아무것도 하지 않는다.
 export function planItemMigration(myItems, catalog) {
-  const base = new Map(validCatalog(catalog).map((c) => [c.name, c]));
+  const base = new Map(validCatalog(catalog).map((c) => [matchKey(c.name), c]));
   const rows = (myItems || []).filter(isRow);
 
   const removeIds = []; // 삭제 표식을 남길 id (다른 기기의 복사본까지 정리된다)
@@ -135,7 +142,7 @@ export function planItemMigration(myItems, catalog) {
 
   rows.forEach((r) => {
     if (r.origin === "user") return; // 유저가 만든 것 — 손대지 않는다
-    const b = base.get(r.name);
+    const b = base.get(matchKey(r.name));
     if (b && !differsFromBase(r, b)) removeIds.push(r.id); // 값까지 같은 순수 복사본만 지운다
     else stamp.push(r);
   });

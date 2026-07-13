@@ -308,3 +308,20 @@ describe("Codex — malformed 카탈로그(빈 이름·중복 이름)", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 });
+
+describe("Codex 2차 — 공백만 다른 옛 복사본도 정리된다", () => {
+  it("이름 앞뒤 공백이 있는 복사본도 카탈로그와 매칭돼 지워진다(유령 '수정됨' 행이 남지 않는다)", () => {
+    const legacy = canonicalizeMyItems([{ ...CAT[0], name: "  원더베리  " }]);
+    const plan = planItemMigration(legacy, CAT);
+    expect(plan.removeIds.length).toBe(1); // 살아남아 '수정됨'이 되면 안 된다
+    expect(plan.stampIds).toEqual([]);
+  });
+
+  it("공백만 다른 내 아이템은 카탈로그를 가린다 — 같은 아이템이 두 줄로 보이지 않는다", () => {
+    const mine = canonicalizeMyItems([{ name: " 원더베리 ", cash: 5000, origin: "user" }]);
+    const { items } = composeItems(CAT, mine);
+    expect(items.filter((x) => matchName(x.name) === "원더베리").length).toBe(1);
+    expect(items.find((x) => matchName(x.name) === "원더베리").overrides).toBe(true);
+  });
+});
+const matchName = (n) => String(n ?? "").trim();
