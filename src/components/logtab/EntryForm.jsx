@@ -1,5 +1,6 @@
 import { won, todayStr, uid } from "../../lib/util.js";
 import { cashWonOf } from "../../lib/ledger.js";
+import { toast } from "../../lib/toast.js";
 import { DateInput, ItemCombo, NumInput } from "../ui.jsx";
 import { IconEdit, IconCart, IconTag, IconBanknote, IconCard } from "../ui/icons.jsx";
 
@@ -25,7 +26,7 @@ export default function EntryForm({ draft, setDraft, entryDate, setEntryDate, my
     const cashes = draft.cashes.filter((x) => x.meso || x.rate);
     const spends = draft.spends.filter((x) => x.amount);
     n = buys.length + sells.length + cashes.length + spends.length;
-    if (n === 0) { alert("입력된 항목이 없습니다."); return; }
+    if (n === 0) { toast.warn("입력된 항목이 없습니다."); return; }
     next.buys = [...ledger.buys, ...buys.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, price: x.price, mil: x.mil, _effD: snap?.effD }))];
     next.sells = [...ledger.sells, ...sells.map((x) => ({ id: uid(), date, item: x.item, qty: x.qty, meso: x.meso, _fee: snap?.fee }))];
     next.cashes = [...ledger.cashes, ...cashes.map((x) => ({ id: uid(), date, meso: x.meso, rate: x.rate }))];

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { TIERS } from "../lib/constants.js";
 import { fmtD, todayStr, curMonth, weekStartThu, uid, nowD } from "../lib/util.js";
 import { loadCalMode, saveCalMode, deleteLedgerEntry } from "../lib/storage.js";
+import { toast } from "../lib/toast.js";
 import { useLedgerDerived } from "./logtab/useLedgerDerived.js";
 import StatsPanel from "./logtab/StatsPanel.jsx";
 import CalendarPanel from "./logtab/CalendarPanel.jsx";
@@ -80,7 +81,7 @@ export default function LogTab({ ledger, setLedger, myItems, calc, tiers = TIERS
           onCommit={(n, date) => {
             setSelectedDate(date);
             setSub("view");
-            alert(date + "에 " + n + "건 저장되었습니다.");
+            toast.success(date + "에 " + n + "건 저장되었습니다.");
           }}
           ledger={ledger} setLedger={setLedger}
           snap={snap}

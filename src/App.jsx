@@ -3,6 +3,7 @@ import { computeCalc } from "./lib/calc.js";
 import {
   loadCalcState, saveCalcState, loadMyItems, saveMyItems,
   loadLedger, saveLedger, exportAll, importAll, withRowKeys, markUserTouched, normalizeMyItems, deleteMyItem, restoreDefaultMyItems, addMyItems,
+  lockAccountWrites,
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
 import { useCloudSync } from "./lib/useCloudSync.js";
@@ -16,6 +17,9 @@ import HelpModal from "./components/HelpModal.jsx";
 import FeedbackModal from "./components/FeedbackModal.jsx";
 import Modal from "./components/Modal.jsx";
 import StorageAlert from "./components/StorageAlert.jsx";
+import ToastHost from "./components/ui/Toast.jsx";
+import RestoreReloadModal from "./components/RestoreReloadModal.jsx";
+import { toast, queueToast, flushQueuedToast } from "./lib/toast.js";
 
 const TABS = [
   { id: "calc", label: "계산기" },
@@ -50,6 +54,8 @@ export default function App() {
   const [myItems, setMyItems] = useState(loadMyItems);
   const [ledger, setLedger] = useState(loadLedger);
   const [modal, setModal] = useState(null); // null | "help" | "feedback"
+  // 복원은 됐는데 알림을 새로고침 너머로 넘기지 못한 상태. { warnings } — 편집을 봉쇄하는 모달을 띄운다.
+  const [restoreNeedsReload, setRestoreNeedsReload] = useState(null);
   // 테마 모드: "system"(기본) | "light" | "dark". public/theme-init.js 가 최초 flash 없이 선반영.
   // "system" 은 OS 설정(prefers-color-scheme)을 따르고, OS 가 바뀌면 실시간으로 따라간다.
   const [themeMode, setThemeMode] = useState(() => {
@@ -60,6 +66,9 @@ export default function App() {
     return "system";
   });
   const fileRef = useRef(null);
+
+  // 새로고침을 건너온 토스트(백업 복원)를 마운트 시 한 번 꺼내 띄운다.
+  useEffect(() => { flushQueuedToast(); }, []);
 
   // 테마 적용 + 저장 + 모바일 주소창 색(theme-color) 동기화.
   // 다크가 기본(:root), 라이트는 data-theme="light" 로 켠다. 실제 다크 여부는 모드+OS 로 계산한다.
@@ -92,9 +101,12 @@ export default function App() {
 
   // 세션·app_config·클라우드 동기화·업로드는 useCloudSync 훅이 담당(App은 계산기 상태·렌더만 소유).
   // 파생 계산보다 먼저 호출해야 rules(게임 규칙)를 computeCalc 에 넘길 수 있다.
-  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload } = useCloudSync({
+  // 복원 후 새로고침 대기 중에는 훅을 멈춘다 — 메모리는 복원 전 옛 값이라, 이 훅이 상태를 건드리거나
+  // 업로드하면 방금 복원한 데이터를 옛 값으로 덮어쓴다(로컬은 storage 잠금이, 클라우드는 이 신호가 막는다).
+  const { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload, restoreFromOtherTab } = useCloudSync({
     settings, charges, items, myItems, ledger,
     setCalcState, setMyItems, setLedger,
+    suspended: !!restoreNeedsReload,
   });
 
   // 파생 계산 (기존 render()의 순수 버전). rules 는 app_config 에서 오거나 constants 폴백.
@@ -135,12 +147,29 @@ export default function App() {
     reader.onload = () => {
       const r = importAll(reader.result);
       if (r.ok) {
-        // 경고를 삼키면 "복원 완료"만 보고 데이터가 빠진 것을 나중에야 안다(B-6).
-        const notes = (r.warnings || []).length ? "\n\n" + r.warnings.map((w) => "· " + w).join("\n") : "";
-        alert("복원 완료! 페이지를 새로고침합니다." + notes);
-        location.reload();
+        // 복원은 곧바로 새로고침해야 한다 — 복원본은 저장소에 들어갔지만 메모리의 React 상태는 아직 옛것이라,
+        // 새로고침하지 않으면 자동저장 이펙트가 방금 복원한 데이터를 옛 값으로 덮어쓴다.
+        // 그런데 새로고침은 지금 띄운 토스트도 함께 지운다 → 알림을 저장소로 넘겨 새로고침 뒤에 띄운다.
+        // 경고가 있으면 sticky: 경고를 삼키면 "복원 완료"만 보고 데이터가 빠진 걸 나중에야 안다(B-6).
+        const warnings = r.warnings || [];
+        const queued = queueToast("success", "복원 완료.", { detail: warnings, sticky: warnings.length > 0 });
+        if (!queued) {
+          // 알림을 새로고침 너머로 넘길 수 없다 → 여기서 바로 새로고침하면 경고가 통째로 사라진다.
+          // 그렇다고 안내만 하면 새로고침 전에 상태가 바뀔 수 있고, 그러면 자동저장이
+          // **옛 메모리 상태로 방금 복원한 데이터를 덮어쓴다.** 위험은 사용자 편집만이 아니다 —
+          // app_config 적용·클라우드 최초 동기화·충돌 병합 같은 프로그램적 변경도 같은 일을 한다.
+          // 그래서 세 겹으로 막는다:
+          //  ① 저장소 쓰기 잠금(어떤 경로로 setState 가 일어나도 복원본은 안전하다)
+          //  ② useCloudSync 중단(스테일 메모리가 클라우드로 올라가지 않는다 — 잠금이 못 막는 곳)
+          //  ③ 닫을 수 없는 모달(사용자 편집 봉쇄 + 나갈 길은 새로고침 하나)
+          lockAccountWrites();
+          setRestoreNeedsReload({ warnings });
+          return;
+        }
+        // 새로고침이 막힌 환경이면(throw/무동작) 최소한 지금 화면에라도 띄운다 — 침묵보다 낫다.
+        try { location.reload(); } catch { flushQueuedToast(); }
       } else {
-        alert(r.error);
+        toast.error(r.error);
       }
     };
     reader.readAsText(f);
@@ -216,6 +245,17 @@ export default function App() {
         </p>
       </footer>
 
+      <ToastHost />
+
+      {/* 이 탭이 복원했는데 알림을 넘기지 못했거나(restoreNeedsReload), 다른 탭이 복원했거나(restoreFromOtherTab).
+          어느 쪽이든 이 화면의 메모리는 복원 전 값이라, 새로고침 전에는 아무것도 저장/업로드하면 안 된다. */}
+      {(restoreNeedsReload || restoreFromOtherTab) && (
+        <RestoreReloadModal
+          warnings={restoreNeedsReload?.warnings || []}
+          otherTab={!restoreNeedsReload && restoreFromOtherTab}
+          onReload={() => location.reload()}
+        />
+      )}
       {conflictPrompt && <ConflictModal onChoose={conflictPrompt.onChoose} />}
       {modal === "help" && <HelpModal onClose={() => setModal(null)} />}
       {modal === "feedback" && <FeedbackModal session={session} onClose={() => setModal(null)} />}

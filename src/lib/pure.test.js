@@ -267,6 +267,64 @@ describe("mergeSnapshots", () => {
     expect(snapshot.ledger.sells[0].meso).toBe(99);
   });
 
+  // 백업 복원은 "이 백업이 지금부터 내 데이터다"라는 명시적 의도다.
+  // 기본 정책(클라우드 우선)을 그대로 두면 복원한 설정이 새로고침 직후 클라우드 옛값으로 조용히 되돌아간다.
+  describe("localWins — 백업 복원 직후", () => {
+    it("calc 는 로컬(복원본)이 이긴다", () => {
+      const local = mk({ calc: { mesoRate: 1234, charge: [{ name: "복원된카드" }] } });
+      const cloud = mk({ calc: { mesoRate: 9999, charge: [{ name: "클라우드카드" }] } });
+      const { snapshot } = mergeSnapshots(local, cloud, { localWinsCalc: true, localWinsItems: true });
+      expect(snapshot.calc.mesoRate).toBe(1234);
+      expect(JSON.stringify(snapshot.calc)).toContain("복원된카드");
+    });
+
+    it("묻지 않는다 — 답이 이미 정해졌다(conflict=false)", () => {
+      const local = mk({ calc: { mesoRate: 1 }, ledger: { ...EMPTY_LEDGER, buys: [{ id: "a" }] } });
+      const cloud = mk({ calc: { mesoRate: 2 } });
+      expect(mergeSnapshots(local, cloud, { localWinsCalc: true, localWinsItems: true }).conflict).toBe(false);
+      expect(mergeSnapshots(local, cloud, { localWinsCalc: false, localWinsItems: false }).conflict).toBe(true); // 평소엔 묻는다
+    });
+
+    it("아이템도 같은 id 면 로컬이 이긴다(평소엔 클라우드가 이긴다)", () => {
+      const local = mk({ my_items: [{ id: "i1", name: "복원된이름", cash: 111 }] });
+      const cloud = mk({ calc: { x: 1 }, my_items: [{ id: "i1", name: "클라우드이름", cash: 999 }] });
+      expect(mergeSnapshots(local, cloud, { localWinsCalc: true, localWinsItems: true }).snapshot.my_items[0].cash).toBe(111);
+      expect(mergeSnapshots(local, cloud, { localWinsCalc: false, localWinsItems: false }).snapshot.my_items[0].cash).toBe(999);
+    });
+
+    it("거래는 여전히 합집합이다(복원이 클라우드 거래를 지우지 않는다)", () => {
+      const local = mk({ calc: { x: 1 }, ledger: { ...EMPTY_LEDGER, buys: [{ id: "local-1" }] } });
+      const cloud = mk({ calc: { y: 1 }, ledger: { ...EMPTY_LEDGER, buys: [{ id: "cloud-1" }] } });
+      const ids = mergeSnapshots(local, cloud, { localWinsCalc: true, localWinsItems: true }).snapshot.ledger.buys.map((x) => x.id).sort();
+      expect(ids).toEqual(["cloud-1", "local-1"]);
+    });
+
+    // 거래만 든 백업을 복원했는데 calc 에까지 권위를 주면, **복원하지도 않은 옛 로컬 calc** 가 클라우드를 덮는다.
+    it("필드 단위다 — calc 만 켜면 아이템은 평소대로 클라우드가 이긴다", () => {
+      const local = mk({ calc: { mesoRate: 1234 }, my_items: [{ id: "i1", name: "옛로컬", cash: 111 }] });
+      const cloud = mk({ calc: { mesoRate: 9999 }, my_items: [{ id: "i1", name: "클라우드", cash: 999 }] });
+      const { snapshot } = mergeSnapshots(local, cloud, { localWinsCalc: true, localWinsItems: false });
+      expect(snapshot.calc.mesoRate).toBe(1234);        // calc 는 로컬 승
+      expect(snapshot.my_items[0].cash).toBe(999);      // 아이템은 클라우드 승
+    });
+
+    it("아무 필드도 켜지 않으면 평소 정책 그대로다", () => {
+      const local = mk({ calc: { mesoRate: 1234 } });
+      const cloud = mk({ calc: { mesoRate: 9999 } });
+      const { snapshot } = mergeSnapshots(local, cloud, { localWinsCalc: false, localWinsItems: false });
+      expect(snapshot.calc.mesoRate).toBe(9999);
+    });
+
+    // 백업에 calc 가 없었으면 로컬 calc 는 {} 다. 그걸로 이기면 클라우드 설정을 빈 값으로 날려 버린다 —
+    // 막으려던 것보다 나쁜 손실이다.
+    it("로컬 calc 가 비어 있으면 클라우드를 쓴다(빈 값으로 덮지 않는다)", () => {
+      const local = mk({ calc: {} });
+      const cloud = mk({ calc: { mesoRate: 9999 } });
+      const { snapshot } = mergeSnapshots(local, cloud, { localWinsCalc: true, localWinsItems: true });
+      expect(snapshot.calc.mesoRate).toBe(9999);
+    });
+  });
+
   it("클라우드 calc가 있으면 calc는 클라우드 우선", () => {
     const local = mk({ calc: { mesoRate: 1 } });
     const cloud = mk({ calc: { mesoRate: 2 } });
