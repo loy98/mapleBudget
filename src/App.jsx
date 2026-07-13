@@ -7,6 +7,8 @@ import {
 } from "./lib/storage.js";
 import { cloudEnabled } from "./lib/cloud.js";
 import { useCloudSync } from "./lib/useCloudSync.js";
+import { cumNow, hasLedgerEntries } from "./lib/ledger.js";
+import { rulesAt } from "./lib/constants.js";
 import CalcTab from "./components/CalcTab.jsx";
 import LogTab from "./components/LogTab.jsx";
 import ForecastTab from "./components/ForecastTab.jsx";
@@ -109,8 +111,23 @@ export default function App() {
     suspended: !!restoreNeedsReload,
   });
 
+  // 거래 기록의 13주 누적 실적. 거래일마다 그 날 유효했던 마일리지 규칙을 적용해야
+  // 거래 기록·예상 탭이 내는 누적과 계산기가 쓰는 누적이 일치한다(ForecastTab 과 같은 식).
+  const mileageROf = useMemo(
+    () => (b) => (rulesAt(ruleHistory, b && b.date).mileageRate || 0) / 100,
+    [ruleHistory]
+  );
+  const ledgerCum = useMemo(() => cumNow(ledger, mileageROf), [ledger, mileageROf]);
+
+  // 계산기가 실제로 쓰는 설정. '내 기록' 모드면 '현재 누적 실적'을 원장에서 끌어온다.
+  // settings.curAchieved(직접 입력값)는 지우지 않고 보존한다 — 모드를 되돌리면 그대로 돌아온다.
+  const calcSettings = useMemo(
+    () => (settings.curSource === "ledger" ? { ...settings, curAchieved: ledgerCum } : settings),
+    [settings, ledgerCum]
+  );
+
   // 파생 계산 (기존 render()의 순수 버전). rules 는 app_config 에서 오거나 constants 폴백.
-  const calc = useMemo(() => computeCalc(settings, charges, items, rules), [settings, charges, items, rules]);
+  const calc = useMemo(() => computeCalc(calcSettings, charges, items, rules), [calcSettings, charges, items, rules]);
 
   // 로컬 자동 저장 (게스트/로그인 공통 캐시)
   // 반드시 블록 본문으로 둔다 — save* 는 성공 여부(boolean)를 반환하므로, 화살표 축약형이면
@@ -213,6 +230,8 @@ export default function App() {
           chargeMethods={chargeOptions}
           calc={calc}
           tiers={rules.tiers}
+          ledgerCum={ledgerCum}
+          hasLedger={hasLedgerEntries(ledger)}
         />
       )}
       {tab === "log" && (

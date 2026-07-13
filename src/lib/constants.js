@@ -21,14 +21,64 @@ export const CHARGE_METHODS = [
 
 export const MVP_GRADES = ["무등급 (15만 미만)", "브론즈", "실버", "골드", "다이아", "레드", "블랙"];
 
+// ===== 자주 쓰는 아이템의 카테고리 =====
+// 기본 목록이 20종을 넘어가면 칩이 한 줄로 쏟아져 아무것도 찾을 수 없다 → 카테고리로 접는다.
+// id 는 데이터(로컬·클라우드·app_config)에 저장되므로 **바꾸지 않는다**. label 만 바꿔도 된다.
+// 사용자가 직접 만든 아이템·구 데이터에는 cat 이 없다 → itemCat() 이 "etc" 로 떨어뜨린다.
+export const ITEM_CATS = [
+  { id: "beauty", label: "헤어·성형" },
+  { id: "style", label: "코디·스타일" },
+  { id: "karma", label: "카르마" },
+  { id: "pet", label: "펫" },
+  { id: "etc", label: "기타" },
+];
+export const ITEM_CAT_IDS = ITEM_CATS.map((c) => c.id);
+// DB/구 데이터에서 온 cat 은 신뢰하지 않는다. 아는 값이 아니면 "기타".
+export const itemCat = (v) => (ITEM_CAT_IDS.includes(v) ? v : "etc");
+
+// 새 사용자의 '자주 쓰는 아이템' 기본 목록. app_config.defaultItems 가 있으면 그것이 이긴다(이건 폴백).
+//
+// **여기 숫자가 틀리면 계산기 전체가 조용히 틀린 답을 낸다.** 근거 없는 값을 추측으로 채우지 말 것.
+// 넥슨은 상시 판매가를 공개 웹으로 내놓지 않아, 판매 공지에 가격이 적힌 것만 '공식'으로 확인된다.
+//
+// 2026-07 조사 결과:
+//   [공식 고지] 원더베리 5,400 · 마일리지 불가 (sale/428) — 3,900/마일리지 가능으로 잘못돼 있었다.
+//              마일리지 불가는 사용자가 게임에서 재확인해 줬다.
+//   [공식 고지] 루나 크리스탈 3,900 (sale/428)
+//   [공식 고지] 로얄 헤어 5,500 / 로얄 성형외과 3,500 · 마일리지 30% (CashShop/360)
+//   [공식 고지] 프리미엄 헤어 5,500 / 프리미엄 성형 3,500 (sale/398) — 성형이 5,500 으로 잘못돼 있었다
+//   [커뮤니티] 플래티넘 카르마의 가위 5,900 — 사용자가 게임 내 캐시샵에서 확인
+//   [커뮤니티] 컬러링 프리즘 5,900 · 체인지 로얄 헤어/성형 5,500/3,500 · 로얄 스타일 쿠폰 개당 2,200
+//
+// 랜덤박스류(원더베리·루나 크리스탈·로얄 스타일)는 마일리지를 쓸 수 없다 → mAllowed: false.
+// 이걸 true 로 두면 계산기가 있지도 않은 30% 절감을 반영해 실비용을 과소평가한다.
+//
+// 뺀 것: 미라클 서큘레이터·확성기·프리미엄 생명의 물·골드 애플 — 가격은 알아냈지만 **경매장에 올라가는지**를
+// 확인하지 못했다. 되팔 수 없는 아이템을 되팔기 목록에 넣으면 계산기가 성립하지 않는다.
+//
+// `name` 은 아이템의 정체성이다(id 가 이름에서 유도되고, 거래 원장의 품목 통계도 이름으로 매칭한다)
+// → **함부로 바꾸지 말 것.** 이름을 바꾸면 과거 거래와의 연결이 끊긴다.
+// `cat` 은 ITEM_CATS 의 id. 없으면 itemCat() 이 "etc" 로 떨어뜨린다.
 export const DEFAULT_ITEMS = [
-  { name: "로얄 스타일 쿠폰 10개", cash: 22000, mAllowed: false, icon: "🎀" },
-  { name: "로얄 스타일 쿠폰 20개", cash: 44000, mAllowed: false, icon: "🎀" },
-  { name: "원더베리", cash: 3900, mAllowed: true, icon: "🫐" },
-  { name: "플래티넘 카르마의 가위", cash: 5900, mAllowed: true, icon: "✂️" },
-  { name: "프리미엄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇" },
-  { name: "프리미엄 성형 쿠폰", cash: 5500, mAllowed: true, icon: "💄" },
-  { name: "뷰티 쿠폰", cash: 4900, mAllowed: true, icon: "💅" },
+  // --- 카르마 ---
+  { name: "플래티넘 카르마의 가위", cash: 5900, mAllowed: true, icon: "✂️", cat: "karma" },
+  // --- 헤어·성형(마일리지 30% 가 먹혀 실질 단가가 낮다) ---
+  { name: "프리미엄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇", cat: "beauty" },
+  { name: "프리미엄 성형 쿠폰", cash: 3500, mAllowed: true, icon: "💄", cat: "beauty" },
+  { name: "로얄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇", cat: "beauty" },
+  { name: "로얄 성형외과 쿠폰", cash: 3500, mAllowed: true, icon: "💄", cat: "beauty" },
+  { name: "체인지 로얄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇", cat: "beauty" },
+  { name: "체인지 로얄 성형외과 쿠폰", cash: 3500, mAllowed: true, icon: "💄", cat: "beauty" },
+  { name: "컬러링 프리즘", cash: 5900, mAllowed: true, icon: "🎨", cat: "beauty" },
+  // --- 펫(랜덤박스라 마일리지 불가) ---
+  { name: "원더베리", cash: 5400, mAllowed: false, icon: "🫐", cat: "pet" },
+  { name: "루나 크리스탈", cash: 3900, mAllowed: false, icon: "🌙", cat: "pet" },
+  // --- 코디·스타일(랜덤박스라 마일리지 불가) ---
+  // 판매 단위는 1 / 10 / 20 / 45개. 45개는 묶음가를 확인하지 못해 넣지 않았다 —
+  // 묶음 할인이 있는지 알 수 없어 개당가의 배수로 추정하면 계산기가 틀린 답을 낸다.
+  { name: "로얄 스타일 쿠폰", cash: 2200, mAllowed: false, icon: "🎀", cat: "style" },
+  { name: "로얄 스타일 쿠폰 10개", cash: 22000, mAllowed: false, icon: "🎀", cat: "style" },
+  { name: "로얄 스타일 쿠폰 20개", cash: 44000, mAllowed: false, icon: "🎀", cat: "style" },
 ];
 
 // ===== 아이콘 이미지 호스트 allowlist (B-8) =====
@@ -218,6 +268,12 @@ export const DEFAULT_SETTINGS = {
   tierSel: "4",
   tierAmt: 1500000,
   curAchieved: 0,
+  // '현재 누적 실적'을 어디서 가져오는가.
+  //   "manual" — 사용자가 직접 입력한 curAchieved 를 그대로 쓴다(시나리오만 돌려보는 순수 계산).
+  //   "ledger" — 거래 기록 탭의 13주 누적(cumNow)을 쓴다. curAchieved 는 보존만 하고 쓰지 않는다.
+  // 기본이 "manual" 인 이유: 기록이 하나도 없는 첫 방문자가 "ledger" 로 시작하면 입력칸이 잠긴 채
+  // 0원이 박혀 있어 계산기를 시험해 볼 수가 없다. 기록이 쌓이면 UI 가 전환을 안내한다.
+  curSource: "manual",
   months: "0",
 };
 
