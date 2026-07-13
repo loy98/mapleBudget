@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS } from "../lib/constants.js";
+import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS, ITEM_CATS, itemCat } from "../lib/constants.js";
 import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
 import { hasFeeBenefit } from "../lib/calc.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
@@ -9,10 +9,12 @@ const tierOptionsOf = (tiers) =>
   tiers.map((t, i) => ({ value: i, label: `${t.name} (${(t.amt / 10000).toLocaleString()}만원)` }));
 const gradeOptions = MVP_GRADES.map((g, i) => ({ value: i, label: g }));
 const splitOptions = SPLITS.map((s, i) => ({ value: i, label: s.label }));
+const catOptions = ITEM_CATS.map((c) => ({ value: c.id, label: c.label }));
 
-export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, onAddMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS }) {
+export default function CalcTab({ settings, setSettings, charges, setCharges, items, setItems, myItems, setMyItems, onRemoveMyItem, onRestoreDefaultItems, onAddMyItems, chargeMethods = CHARGE_METHODS, calc, tiers = TIERS, ledgerCum = 0, hasLedger = false }) {
   const [preset, setPreset] = useState("0");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [cat, setCat] = useState("all"); // 자주 쓰는 아이템 카테고리 필터("all" = 전체)
   // 등급 기준은 app_config(rules.tiers)에서 올 수 있다 → 목록 길이가 바뀌어도 인덱스가 깨지지 않게 방어.
   const tierOptions = useMemo(() => tierOptionsOf(tiers), [tiers]);
   // 충전 방식 프리셋 옵션 — DB 설정 목록(chargeMethods) 기반. DB에 malformed/null 원소가 섞여도
@@ -27,7 +29,10 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
 
   // ----- 히어로/방식비교 파생값 -----
   const goalAmt = +settings.tierAmt || 0;
-  const curAch = +settings.curAchieved || 0;
+  // '내 기록' 모드에서는 원장의 13주 누적이 실적이다. 그 분기를 여기서 다시 쓰지 않고 c.cur 를 읽는다 —
+  // 화면의 진행률과 실제 계산이 갈라지지 않게(hasFeeBenefit 과 같은 이유).
+  const fromLedger = settings.curSource === "ledger";
+  const curAch = c.cur;
   const rawProgPct = c.remain <= 0 ? 100 : goalAmt > 0 ? (curAch / goalAmt) * 100 : 0;
   const progPct = Math.max(0, Math.min(100, Number.isFinite(rawProgPct) ? rawProgPct : 0));
   const targetName = (tiers[+settings.tierSel] || {}).name || "목표";
@@ -55,6 +60,19 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
     setItems([...items, data || { name: "", cash: "", sell: "", mAllowed: true, mil: false }]);
 
   // ----- 자주 쓰는 아이템 -----
+  // 카테고리별 개수. 아이템이 하나도 없는 카테고리는 탭을 만들지 않는다.
+  const shownCats = useMemo(() => {
+    const n = {};
+    myItems.forEach((p) => { const k = itemCat(p.cat); n[k] = (n[k] || 0) + 1; });
+    return ITEM_CATS.filter((k) => n[k.id]).map((k) => ({ ...k, n: n[k.id] }));
+  }, [myItems]);
+  // 선택한 카테고리가 사라지면(그 카테고리 아이템을 다 지우면) 빈 목록에 갇힌다 → '전체'로 되돌린다.
+  const catExists = cat === "all" || shownCats.some((k) => k.id === cat);
+  const shownItems = useMemo(
+    () => (!catExists || cat === "all" ? myItems : myItems.filter((p) => itemCat(p.cat) === cat)),
+    [myItems, cat, catExists]
+  );
+
   const setMyItem = (i, patch) => setMyItems(myItems.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   // 배열에서 빼기만 하면 그 아이템을 아직 가진 기기가 다음 접속 때 되살린다 → 삭제 표식을 남기는 App 핸들러를 쓴다.
   const delMyItem = (i) => onRemoveMyItem(myItems[i].id);
@@ -67,7 +85,8 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
   };
 
   const resetAll = () => {
-    setSettings({ ...DEFAULT_SETTINGS, tierSel: settings.tierSel, tierAmt: settings.tierAmt, curAchieved: settings.curAchieved, months: settings.months });
+    // '시세/조건 초기화'는 시세·마일리지·환경만 되돌린다. 목표와 실적(그 실적을 어디서 읽는지 포함)은 사용자 데이터다.
+    setSettings({ ...DEFAULT_SETTINGS, tierSel: settings.tierSel, tierAmt: settings.tierAmt, curAchieved: settings.curAchieved, curSource: settings.curSource, months: settings.months });
     setCharges([{ name: "정가 (할인 없음)", rate: 0, limit: 0 }]);
   };
 
@@ -226,6 +245,29 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           <div className="card" id="sec2">
             <h2><span className="n">2</span>목표 등급까지 총비용 (기초 방식)</h2>
             <p className="desc">현재 13주 누적 실적에서 목표 등급까지 채우는 최소 실비용.</p>
+
+            {/* 현재 누적 실적을 어디서 가져올지. 이 선택 하나가 히어로의 진행률 링과 아래 모든 비용을 좌우한다.
+                예전에는 '직접 입력'만 있었고 기본값이 0이라, 실제로는 다이아인 사람도 링이 0% 로 보였다. */}
+            <div className="curmode">
+              <div className="calmodes" role="group" aria-label="현재 누적 실적 기준">
+                <button className={"calmode" + (!fromLedger ? " on" : "")}
+                  aria-pressed={!fromLedger} onClick={() => setSettings({ curSource: "manual" })}>
+                  직접 입력
+                </button>
+                <button className={"calmode" + (fromLedger ? " on" : "")}
+                  aria-pressed={fromLedger} onClick={() => setSettings({ curSource: "ledger" })}>
+                  내 기록 사용
+                </button>
+              </div>
+              <span className="hint curmode-hint">
+                {fromLedger
+                  ? <>거래 기록 탭의 <b>최근 13주 누적 {won(ledgerCum)}</b>을 현재 실적으로 씁니다.</>
+                  : hasLedger
+                    ? <>시나리오를 직접 넣어 계산합니다. 거래 기록 기준 누적은 <b>{won(ledgerCum)}</b>이에요.</>
+                    : <>시나리오를 직접 넣어 계산합니다. 거래 기록을 쌓으면 자동으로 불러올 수 있어요.</>}
+              </span>
+            </div>
+
             <div className="formgrid">
               <div>
                 <label>목표 등급</label>
@@ -233,7 +275,14 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   onChange={(v) => setSettings({ tierSel: v, tierAmt: (tiers[+v] || tiers[tiers.length - 1]).amt })} />
               </div>
               <div><label>목표 기준 금액 (원)</label><NumInput value={settings.tierAmt} step={10000} onChange={(v) => setSettings({ tierAmt: v })} /></div>
-              <div><label>현재 누적 실적 (원)</label><NumInput value={settings.curAchieved} step={10000} onChange={(v) => setSettings({ curAchieved: v })} /></div>
+              <div>
+                <label>현재 누적 실적 (원)</label>
+                {/* '내 기록' 모드에서는 원장이 진실이라 편집할 것이 없다. 직접 입력값은 지우지 않고 보존한다 —
+                    '직접 입력'으로 되돌리면 예전에 넣어 둔 값이 그대로 돌아온다. */}
+                {fromLedger
+                  ? <div className="readnum num" aria-readonly="true">{won(ledgerCum)}</div>
+                  : <NumInput value={settings.curAchieved} step={10000} onChange={(v) => setSettings({ curAchieved: v })} />}
+              </div>
               <div><label>분할 방식</label><CSelect value={settings.months} onChange={(v) => setSettings({ months: v })} options={splitOptions} /></div>
             </div>
             <div className="kpi">
@@ -261,18 +310,33 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
             <div className="hint" style={{ marginBottom: 12 }}>
               억당 회수 현금(수수료 {c.feePct}% 반영): <b>{won(1e8 * (1 - c.f) * c.s)}</b> / 1억 메소
             </div>
+            {/* 기본 목록이 20종을 넘어 한 줄에 다 깔면 아무것도 찾을 수 없다 → 카테고리 필터로 접는다.
+                비어 있는 카테고리는 탭 자체를 감춘다(목록을 커스터마이즈한 사용자에게 죽은 탭을 보이지 않게). */}
             <div className="presetbar">
               <span className="pblabel">자주 쓰는 아이템</span>
-              <div className="chips">
-                {myItems.map((p, i) => (
-                  <span key={p._k} className="chip"
-                    onClick={() => addItem({ name: p.name, cash: p.cash, sell: "", mAllowed: p.mAllowed !== false, mil: p.mAllowed !== false })}>
-                    <IconView icon={p.icon} />{p.name || "(무명)"}{" "}
-                    <span className="fx">{p.cash ? (+p.cash).toLocaleString() + "원" : ""}{p.mAllowed === false ? " · 마일불가" : ""}</span>
-                  </span>
+              <div className="catpills" role="tablist" aria-label="아이템 카테고리">
+                <button role="tab" aria-selected={cat === "all"}
+                  className={"catpill" + (cat === "all" ? " on" : "")} onClick={() => setCat("all")}>
+                  전체 <span className="cnt">{myItems.length}</span>
+                </button>
+                {shownCats.map((k) => (
+                  <button key={k.id} role="tab" aria-selected={cat === k.id}
+                    className={"catpill" + (cat === k.id ? " on" : "")} onClick={() => setCat(k.id)}>
+                    {k.label} <span className="cnt">{k.n}</span>
+                  </button>
                 ))}
               </div>
               <button className="btn ghost sm" onClick={() => setEditorOpen(!editorOpen)}>목록 편집</button>
+            </div>
+            <div className="chips itemchips">
+              {shownItems.map((p) => (
+                <span key={p._k} className="chip"
+                  onClick={() => addItem({ name: p.name, cash: p.cash, sell: "", mAllowed: p.mAllowed !== false, mil: p.mAllowed !== false })}>
+                  <IconView icon={p.icon} />{p.name || "(무명)"}{" "}
+                  <span className="fx">{p.cash ? (+p.cash).toLocaleString() + "원" : ""}{p.mAllowed === false ? " · 마일불가" : ""}</span>
+                </span>
+              ))}
+              {!shownItems.length && <span className="hint">이 카테고리에 아이템이 없어요.</span>}
             </div>
             {editorOpen && (
               <div className="editor">
@@ -280,7 +344,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   자주 쓰는 아이템 목록 편집. 마일리지 사용 가능 여부도 설정. (자동 저장)
                 </div>
                 <table>
-                  <thead><tr><th>아이콘</th><th>이름</th><th>캐시가(원)</th><th className="milh">마일가능</th><th></th></tr></thead>
+                  <thead><tr><th>아이콘</th><th>이름</th><th>분류</th><th>캐시가(원)</th><th className="milh">마일가능</th><th></th></tr></thead>
                   <tbody>
                     {myItems.map((it, i) => (
                       <tr key={it._k}>
@@ -289,6 +353,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                           <input value={it.icon || ""} style={{ width: 64 }} placeholder="🫐/URL" onChange={(e) => setMyItem(i, { icon: e.target.value })} />
                         </td>
                         <td><input value={it.name || ""} onChange={(e) => setMyItem(i, { name: e.target.value })} /></td>
+                        <td><CSelect value={itemCat(it.cat)} options={catOptions} onChange={(v) => setMyItem(i, { cat: v })} /></td>
                         <td><NumInput noStepper width={100} step={100} value={it.cash || ""} onChange={(v) => setMyItem(i, { cash: v })} /></td>
                         <td className="mil-cell"><input type="checkbox" checked={it.mAllowed !== false} onChange={(e) => setMyItem(i, { mAllowed: e.target.checked })} /></td>
                         <td><button className="del" onClick={() => delMyItem(i)}>×</button></td>
@@ -303,7 +368,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다.
                       (id 는 한 번 정해지면 바뀌지 않는다. 이름을 입력할 때 id 를 다시 계산하면 React key 가 바뀌어
                        입력 도중 리마운트로 포커스를 잃는다.) */}
-                  <button className="btn sm" onClick={() => onAddMyItems([{ id: uid(), name: "", cash: "", mAllowed: true, icon: "" }])}>+ 새 항목</button>
+                  <button className="btn sm" onClick={() => onAddMyItems([{ id: uid(), name: "", cash: "", mAllowed: true, icon: "", cat: "etc" }])}>+ 새 항목</button>
                   <button className="btn ghost sm" onClick={addTableRowsToList}>아래 표를 목록에 추가</button>
                   {/* 기본 목록 복원 = '지금 목록을 기본값으로 바꾼다'. 지운 기본 아이템의 삭제 표식이 남아 있으면
                       복원해도 병합에서 다시 빠진다. 표식은 합집합이라 지울 수 없으므로, App 핸들러가

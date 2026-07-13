@@ -293,12 +293,18 @@ export function deleteMyItem(myItems, ledger, id, now = Date.now()) {
   };
 }
 
-// '기본 목록 복원' — 지금 목록을 기본값으로 바꾼다.
-// 지운 기본 아이템의 표식이 클라우드에 남아 있으면(표식은 합집합이라 로컬에서 지워도 되살아난다)
-// 복원해도 병합에서 다시 빠진다. 그래서 남아 있는 표식보다 **뒤인** 시각을 `at` 으로 찍는다.
-export function restoreDefaultMyItems(deleted, now = Date.now()) {
+// 지금 목록을 주어진 목록으로 **통째로 교체**한다.
+// 지운 아이템의 표식이 클라우드에 남아 있으면(표식은 합집합이라 로컬에서 지워도 되살아난다)
+// 교체해도 병합에서 다시 빠진다. 그래서 남아 있는 표식보다 **뒤인** 시각을 `at` 으로 찍어 표식을 이기게 한다.
+// 쓰는 곳: 사용자의 '기본 목록 복원', 그리고 운영자의 app_config force(모든 유저에게 목록을 덮어씀).
+export function replaceMyItems(rows, deleted, now = Date.now()) {
   const at = nextItemAt(deleted, now);
-  return canonicalizeMyItems(DEFAULT_ITEMS.map((x) => ({ ...x, at })));
+  return canonicalizeMyItems(asArray(rows).map((x) => ({ ...x, at })));
+}
+
+// '기본 목록 복원' — 지금 목록을 코드 기본값으로 바꾼다.
+export function restoreDefaultMyItems(deleted, now = Date.now()) {
+  return replaceMyItems(DEFAULT_ITEMS, deleted, now);
 }
 
 // 사용자가 목록에 새 아이템을 넣을 때 쓴다. 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.

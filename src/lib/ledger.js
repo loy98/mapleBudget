@@ -1,5 +1,10 @@
 import { fmtD, start13, addDays, weekStartThu, estGrade, nowD } from "./util.js";
-import { TIERS, WINDOW_WEEKS } from "./constants.js";
+import { TIERS, WINDOW_WEEKS, LEDGER_BUCKETS } from "./constants.js";
+
+// 이 원장에 거래가 하나라도 있는가. 계산기가 '내 기록' 모드를 권할지 판단하는 데 쓴다
+// (기록이 0건이면 그 모드는 0원을 잠가 놓는 것이라 권할 이유가 없다).
+export const hasLedgerEntries = (l) =>
+  !!l && LEDGER_BUCKETS.some((b) => Array.isArray(l[b]) && l[b].length > 0);
 
 // ===== 거래별 요율 =====
 // 과거 거래를 '현재 설정'으로 계산하면, 사용자가 설정을 바꾸는 순간 과거 기록이 조용히 변한다(B-5).

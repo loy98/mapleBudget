@@ -21,14 +21,40 @@ export const CHARGE_METHODS = [
 
 export const MVP_GRADES = ["무등급 (15만 미만)", "브론즈", "실버", "골드", "다이아", "레드", "블랙"];
 
+// ===== 자주 쓰는 아이템의 카테고리 =====
+// 기본 목록이 20종을 넘어가면 칩이 한 줄로 쏟아져 아무것도 찾을 수 없다 → 카테고리로 접는다.
+// id 는 데이터(로컬·클라우드·app_config)에 저장되므로 **바꾸지 않는다**. label 만 바꿔도 된다.
+// 사용자가 직접 만든 아이템·구 데이터에는 cat 이 없다 → itemCat() 이 "etc" 로 떨어뜨린다.
+export const ITEM_CATS = [
+  { id: "beauty", label: "헤어·성형" },
+  { id: "style", label: "코디·스타일" },
+  { id: "karma", label: "카르마" },
+  { id: "pet", label: "펫" },
+  { id: "etc", label: "기타" },
+];
+export const ITEM_CAT_IDS = ITEM_CATS.map((c) => c.id);
+// DB/구 데이터에서 온 cat 은 신뢰하지 않는다. 아는 값이 아니면 "기타".
+export const itemCat = (v) => (ITEM_CAT_IDS.includes(v) ? v : "etc");
+
+// 새 사용자의 '자주 쓰는 아이템' 기본 목록. app_config.defaultItems 가 있으면 그것이 이긴다(이건 폴백).
+//
+// **가격은 넥슨 공식 캐시샵 고지에서 확인한 것만 넣는다.** 여기 숫자가 틀리면 계산기 전체가 조용히 틀린다.
+// 2026-07 확인:
+//   원더베리(위습의 원더베리) 5,400 — 공식 캐시샵 고지 sale/395. 오래 3,900 으로 잘못 박혀 있었다.
+//   프리미엄 헤어 5,500 / 프리미엄 성형 3,500 — 공식 캐시샵 고지 sale/398. 성형이 5,500 으로 잘못돼 있었다.
+//   로얄 스타일 쿠폰 개당 2,200 — 공식. 10개/20개 묶음은 그 배수.
+//   플래티넘 카르마의 가위 5,900 — 공식 고지를 찾지 못했고 사용자가 게임 내 캐시샵에서 확인해 준 값.
+//
+// `name` 은 아이템의 정체성이다(id 가 이름에서 유도되고, 거래 원장의 품목 통계도 이름으로 매칭한다)
+// → **함부로 바꾸지 말 것.** 이름을 바꾸면 과거 거래와의 연결이 끊긴다.
+// `cat` 은 ITEM_CATS 의 id. 없으면 itemCat() 이 "etc" 로 떨어뜨린다.
 export const DEFAULT_ITEMS = [
-  { name: "로얄 스타일 쿠폰 10개", cash: 22000, mAllowed: false, icon: "🎀" },
-  { name: "로얄 스타일 쿠폰 20개", cash: 44000, mAllowed: false, icon: "🎀" },
-  { name: "원더베리", cash: 3900, mAllowed: true, icon: "🫐" },
-  { name: "플래티넘 카르마의 가위", cash: 5900, mAllowed: true, icon: "✂️" },
-  { name: "프리미엄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇" },
-  { name: "프리미엄 성형 쿠폰", cash: 5500, mAllowed: true, icon: "💄" },
-  { name: "뷰티 쿠폰", cash: 4900, mAllowed: true, icon: "💅" },
+  { name: "원더베리", cash: 5400, mAllowed: true, icon: "🫐", cat: "pet" },
+  { name: "플래티넘 카르마의 가위", cash: 5900, mAllowed: true, icon: "✂️", cat: "karma" },
+  { name: "프리미엄 헤어 쿠폰", cash: 5500, mAllowed: true, icon: "💇", cat: "beauty" },
+  { name: "프리미엄 성형 쿠폰", cash: 3500, mAllowed: true, icon: "💄", cat: "beauty" },
+  { name: "로얄 스타일 쿠폰 10개", cash: 22000, mAllowed: false, icon: "🎀", cat: "style" },
+  { name: "로얄 스타일 쿠폰 20개", cash: 44000, mAllowed: false, icon: "🎀", cat: "style" },
 ];
 
 // ===== 아이콘 이미지 호스트 allowlist (B-8) =====
@@ -218,6 +244,12 @@ export const DEFAULT_SETTINGS = {
   tierSel: "4",
   tierAmt: 1500000,
   curAchieved: 0,
+  // '현재 누적 실적'을 어디서 가져오는가.
+  //   "manual" — 사용자가 직접 입력한 curAchieved 를 그대로 쓴다(시나리오만 돌려보는 순수 계산).
+  //   "ledger" — 거래 기록 탭의 13주 누적(cumNow)을 쓴다. curAchieved 는 보존만 하고 쓰지 않는다.
+  // 기본이 "manual" 인 이유: 기록이 하나도 없는 첫 방문자가 "ledger" 로 시작하면 입력칸이 잠긴 채
+  // 0원이 박혀 있어 계산기를 시험해 볼 수가 없다. 기록이 쌓이면 UI 가 전환을 안내한다.
+  curSource: "manual",
   months: "0",
 };
 

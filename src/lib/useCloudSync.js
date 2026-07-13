@@ -3,6 +3,7 @@ import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
   getDataOwner, setDataOwner, clearAccountData, emptyLedger, isRestorePending, getRestorePending, clearRestorePending, lockAccountWrites, RESTORE_KEY,
+  replaceMyItems,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { fitsKeepalive, setKeepalive } from "./supabaseClient.js";
@@ -229,7 +230,10 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     if (Object.keys(patch).length) setCalcState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
     if (force.includes("defaultItems")) {
       const its = validItems(appConfig.defaultItems);
-      if (its.length) setMyItems(normalizeMyItems(its));
+      // normalizeMyItems 로 그냥 넣으면 `at` 이 없어, 예전에 같은 이름을 지운 적이 있는 계정에서는
+      // 그 삭제 표식이 이겨 **강제 목록이 다음 병합에서 조용히 사라진다**. force 는 '운영자가 모두에게
+      // 덮어쓴다'는 뜻이므로 표식보다 뒤인 at 을 찍어 확실히 이기게 한다(사용자의 '기본 목록 복원'과 같은 규칙).
+      if (its.length) setMyItems(replaceMyItems(its, dataRef.current?.ledger?.deleted));
     }
   }, [appConfig, authResolved, userId, cloudReady, halted]);
 

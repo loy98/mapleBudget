@@ -3,17 +3,18 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows, validateBackup,
-  canonicalizeMyItems, deleteMyItem, restoreDefaultMyItems, itemTombstoneKey, isItemDeleted, nextItemAt, addMyItems,
+  canonicalizeMyItems, deleteMyItem, restoreDefaultMyItems, replaceMyItems, itemTombstoneKey, isItemDeleted, nextItemAt, addMyItems,
   loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
+  emptyLedger,
 } from "./storage.js";
 import { mergeSnapshots, mergeLedger, mergeForUpload, tombstoneClock, mergeMyItems } from "./cloud.js";
 import { applyMergedSnapshot } from "./useCloudSync.js";
 import { weeklyMeso, weeklyItems, itemSummary, NO_ITEM, ledgerStats } from "./ledger.js";
 import { uid, estGrade, fmtD, weekStartThu, padDate, hasSnapshot, todayStr, curMonth, legacyRowId, won, pct, eok, ml, mlN, manW } from "./util.js";
 import { tzDateStr, dateOf, nowD, APP_TZ } from "./tz.js";
-import { computeForecast, cumNow } from "./ledger.js";
+import { computeForecast, cumNow, hasLedgerEntries } from "./ledger.js";
 import { computeCalc, computeFeePct, hasFeeBenefit } from "./calc.js";
-import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt } from "./constants.js";
+import { DEFAULT_RULES, resolveRules, DEFAULT_SETTINGS, DEFAULT_CHARGES, TIERS, TOMBSTONE_TTL_DAYS, TOMBSTONE_MAX, resolveRuleHistory, rulesAt, ITEM_CATS, itemCat, DEFAULT_ITEMS } from "./constants.js";
 
 // ===== ledger.js 순수 함수 =====
 
@@ -2509,5 +2510,78 @@ describe("hasFeeBenefit — CalcTab 의 재구현 제거", () => {
     expect(hasFeeBenefit("0", "1")).toBe(true);
     expect(hasFeeBenefit("1", "0")).toBe(true);
     expect(hasFeeBenefit("6", "0")).toBe(true);
+  });
+});
+
+// ===== 자주 쓰는 아이템 카테고리 & 강제 목록 교체 =====
+describe("아이템 카테고리", () => {
+  it("아는 카테고리는 그대로, 모르는 값·없는 값은 기타로 떨어진다", () => {
+    expect(itemCat("karma")).toBe("karma");
+    expect(itemCat("beauty")).toBe("beauty");
+    // DB·구 데이터·사용자 입력에서 온 쓰레기 값이 그대로 렌더되면 죽은 탭이 생긴다.
+    expect(itemCat(undefined)).toBe("etc");
+    expect(itemCat("__주입__")).toBe("etc");
+    expect(itemCat(null)).toBe("etc");
+    expect(itemCat(123)).toBe("etc");
+  });
+
+  it("기본 목록의 모든 아이템은 유효한 카테고리를 갖는다", () => {
+    DEFAULT_ITEMS.forEach((it) => {
+      expect(ITEM_CATS.map((c) => c.id)).toContain(it.cat);
+    });
+  });
+});
+
+describe("replaceMyItems — 운영자 force 목록이 옛 삭제 표식에 지지 않는다", () => {
+  it("지운 적 있는 아이템도 교체 목록에 있으면 되살아난다", () => {
+    const items = canonicalizeMyItems([{ name: "원더베리" }]);
+    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
+    // at 을 찍지 않으면(=구 동작) 표식이 이겨 강제 목록이 조용히 사라진다.
+    const naive = canonicalizeMyItems([{ name: "원더베리", cash: 5400 }]);
+    expect(mergeMyItems([], naive, del.ledger.deleted)).toEqual([]);
+    // replaceMyItems 는 표식보다 뒤인 at 을 찍는다 → 살아남는다.
+    const forced = replaceMyItems([{ name: "원더베리", cash: 5400 }], del.ledger.deleted, 5000);
+    const merged = mergeMyItems([], forced, del.ledger.deleted);
+    expect(merged.map((x) => x.name)).toEqual(["원더베리"]);
+    expect(merged[0].cash).toBe(5400);
+  });
+
+  it("배열이 아닌 입력에도 던지지 않는다(malformed app_config)", () => {
+    expect(replaceMyItems(null, {}, 1000)).toEqual([]);
+    expect(replaceMyItems(undefined, undefined, 1000)).toEqual([]);
+  });
+});
+
+describe("hasLedgerEntries — '내 기록' 모드를 권할지 판단", () => {
+  it("버킷 중 하나라도 거래가 있으면 true", () => {
+    expect(hasLedgerEntries(emptyLedger())).toBe(false);
+    expect(hasLedgerEntries({ ...emptyLedger(), buys: [{ date: "2026-07-01" }] })).toBe(true);
+    expect(hasLedgerEntries({ ...emptyLedger(), spends: [{ date: "2026-07-01" }] })).toBe(true);
+    // 삭제 표식만 남은 원장은 '거래가 있다'가 아니다.
+    expect(hasLedgerEntries({ ...emptyLedger(), deleted: { "item:x": 1 } })).toBe(false);
+    expect(hasLedgerEntries(null)).toBe(false);
+  });
+});
+
+describe("계산 모드 — 현재 누적 실적의 출처", () => {
+  it("새 사용자의 기본은 '직접 입력'이다", () => {
+    // 기록이 0건인 첫 방문자가 'ledger' 로 시작하면 입력칸이 0원에 잠긴 채 계산기를 시험할 수 없다.
+    expect(DEFAULT_SETTINGS.curSource).toBe("manual");
+  });
+
+  it("curSource 는 저장·복원된다(구 저장본은 기본값을 받는다)", () => {
+    expect(parseCalcState({ curSource: "ledger" }).settings.curSource).toBe("ledger");
+    expect(parseCalcState({ mesoRate: 1800 }).settings.curSource).toBe("manual");
+  });
+
+  it("'내 기록' 모드는 원장 누적을 실적으로 써 remain 을 줄인다", () => {
+    const ledger = normalizeLedger({ spends: [{ date: todayStr(), amount: 500000 }] });
+    const cum = cumNow(ledger, 0.3);
+    expect(cum).toBe(500000);
+    const base = { ...DEFAULT_SETTINGS, tierAmt: 1500000, curAchieved: 0 };
+    // 직접 입력(0원) → 150만 전액이 남는다.
+    expect(computeCalc(base, [], [], DEFAULT_RULES).remain).toBe(1500000);
+    // 내 기록(50만) → 100만만 남는다. App 이 curAchieved 를 원장 누적으로 갈아끼운다.
+    expect(computeCalc({ ...base, curAchieved: cum }, [], [], DEFAULT_RULES).remain).toBe(1000000);
   });
 });

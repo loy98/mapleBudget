@@ -107,6 +107,14 @@
   .presetbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
   .pblabel{font-size:12px;color:var(--sub);white-space:nowrap}
   .chips{display:flex;gap:7px;flex-wrap:wrap}
+  /* 아이템 카테고리 필터 탭. 칩(.chip)과 시각적으로 구분돼야 한다 — 이건 '고르는 것'이 아니라 '거르는 것'. */
+  .catpills{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+  .catpill{background:none;border:1px solid transparent;color:var(--sub);font-size:12px;font-weight:700;padding:5px 10px;border-radius:14px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .catpill:hover{color:var(--accent);border-color:var(--line)}
+  .catpill.on{background:var(--panel2);border-color:var(--accent);color:var(--accent)}
+  .catpill .cnt{font-size:10.5px;font-weight:600;color:var(--hint)}
+  .catpill.on .cnt{color:var(--accent)}
+  .itemchips{margin-bottom:12px;min-height:30px}
   .chip{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:6px 11px;border-radius:16px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:6px}
   .chip:hover{border-color:var(--accent);color:var(--accent)}
   .chip .fx{color:var(--hint);font-size:12px}
@@ -122,6 +130,11 @@
   .hero .t{font-size:12px;color:var(--sub)}
   .hero .big{font-size:24px;font-weight:900;margin-top:4px;letter-spacing:-.5px}
   .hero .big.acc{color:var(--accent)}
+  /* 현재 누적 실적의 출처 선택(직접 입력 / 내 기록). 세그먼트는 달력의 .calmodes 를 그대로 재사용한다. */
+  .curmode{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .curmode-hint{margin-top:0}
+  /* '내 기록' 모드의 읽기 전용 실적 — NumInput 과 같은 높이/여백이라 그리드가 흔들리지 않는다. */
+  .readnum{display:flex;align-items:center;min-height:40px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--sub);padding:9px 10px;font-size:14px}
   .draftblock{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:var(--panel2)}
   .draftblock .bt{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px}
   /* ===== 달력 (Google/Apple 스타일) ===== */
