@@ -262,10 +262,14 @@ export function nextItemAt(deleted, now = Date.now()) {
   return Number.isFinite(max) ? Math.max(now, max + 1) : now;
 }
 
-// `[]` 는 '사용자가 목록을 비웠다'는 뜻이고, `null`/배열 아님은 '저장된 데이터가 없다'는 뜻이다.
-// 예전에는 둘을 구분하지 못해(`d.length` 검사) 아이템을 전부 지워도 다음 로드에서 기본 목록이 되살아났다.
+// my_items 는 **유저가 만든 것만** 담는다. 기본 아이템은 여기 들어오지 않는다 —
+// 카탈로그(app_config.defaultItems)가 화면에서 합쳐진다(items.js composeItems).
+//
+// 예전에는 저장된 데이터가 없으면 DEFAULT_ITEMS 를 심었다. 그래서 모든 유저의 my_items 에
+// 기본 아이템 복사본이 들어앉았고, 운영자가 기본값을 고치려면 그 배열을 통째로 덮어쓸 수밖에 없었다(force).
+// 그 덮어쓰기가 유저가 추가한 아이템을 삭제 표식도 없이 지웠다. 이제 새 유저의 my_items 는 **빈 배열**이다.
 export function normalizeMyItems(d) {
-  return canonicalizeMyItems(Array.isArray(d) ? d : DEFAULT_ITEMS);
+  return canonicalizeMyItems(Array.isArray(d) ? d : []);
 }
 export function loadMyItems() {
   return normalizeMyItems(readJSON(ITEMS_KEY));
@@ -293,19 +297,9 @@ export function deleteMyItem(myItems, ledger, id, now = Date.now()) {
   };
 }
 
-// 지금 목록을 주어진 목록으로 **통째로 교체**한다.
-// 지운 아이템의 표식이 클라우드에 남아 있으면(표식은 합집합이라 로컬에서 지워도 되살아난다)
-// 교체해도 병합에서 다시 빠진다. 그래서 남아 있는 표식보다 **뒤인** 시각을 `at` 으로 찍어 표식을 이기게 한다.
-// 쓰는 곳: 사용자의 '기본 목록 복원', 그리고 운영자의 app_config force(모든 유저에게 목록을 덮어씀).
-export function replaceMyItems(rows, deleted, now = Date.now()) {
-  const at = nextItemAt(deleted, now);
-  return canonicalizeMyItems(asArray(rows).map((x) => ({ ...x, at })));
-}
-
-// '기본 목록 복원' — 지금 목록을 코드 기본값으로 바꾼다.
-export function restoreDefaultMyItems(deleted, now = Date.now()) {
-  return replaceMyItems(DEFAULT_ITEMS, deleted, now);
-}
+// (구) '기본 목록 복원'/force 덮어쓰기용 헬퍼는 제거했다.
+// 기본 아이템은 이제 카탈로그(app_config)에서 바로 그려지고 유저의 my_items 로 복사되지 않는다(items.js).
+// 목록을 통째로 교체하는 경로 자체가 사라졌다 — 그 경로가 유저가 추가한 아이템을 표식 없이 지우던 원인이었다.
 
 // 사용자가 목록에 새 아이템을 넣을 때 쓴다. 예전에 같은 이름을 지웠다면 그 표식보다 뒤여야 살아남는다.
 export function addMyItems(myItems, deleted, rows, now = Date.now()) {

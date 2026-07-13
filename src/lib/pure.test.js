@@ -3,7 +3,7 @@ import {
   parseCalcState, serializeCalcState, normalizeLedger, normalizeMyItems, withRowKeys,
   getDataOwner, setDataOwner, clearAccountData, deleteLedgerEntry, mergeDeleted, importAll,
   KEY, ITEMS_KEY, LKEY, SYNC_KEY, TOUCHED_KEY, OWNER_KEY, CALMODE_KEY, canonicalizeRows, validateBackup,
-  canonicalizeMyItems, deleteMyItem, restoreDefaultMyItems, replaceMyItems, itemTombstoneKey, isItemDeleted, nextItemAt, addMyItems,
+  canonicalizeMyItems, deleteMyItem, itemTombstoneKey, isItemDeleted, nextItemAt, addMyItems,
   loadLedger, saveLedger, loadCalcState, getStorageIssues, onStorageIssue, __resetStorageIssues, CORRUPT_SUFFIX, corruptSlots,
   emptyLedger,
 } from "./storage.js";
@@ -221,13 +221,13 @@ describe("normalizeLedger", () => {
 });
 
 describe("normalizeMyItems", () => {
-  // B-2b: `[]`(사용자가 목록을 비웠다)와 '데이터 없음'은 다르다.
-  // 예전에는 구분하지 못해 전부 지워도 다음 로드에서 기본 목록이 되살아났다.
-  it("데이터가 없으면(null·비배열) 기본 목록(+_k)", () => {
-    const out = normalizeMyItems(null);
-    expect(out.length).toBeGreaterThan(0);
-    expect(out.every((x) => x._k)).toBe(true);
-    expect(normalizeMyItems("쓰레기").length).toBeGreaterThan(0);
+  // my_items 는 이제 **유저가 만든 것만** 담는다. 기본 아이템은 카탈로그(app_config)에서 화면이 합친다.
+  // 예전엔 여기서 DEFAULT_ITEMS 를 심었고, 그래서 운영자가 기본값을 고치려면 유저 배열을 통째로
+  // 덮어쓸 수밖에 없었다(force) — 그 덮어쓰기가 유저가 추가한 아이템을 표식 없이 지웠다.
+  it("데이터가 없으면 빈 목록이다 — 기본 아이템을 유저 데이터에 심지 않는다", () => {
+    expect(normalizeMyItems(null)).toEqual([]);
+    expect(normalizeMyItems("쓰레기")).toEqual([]);
+    expect(normalizeMyItems(undefined)).toEqual([]);
   });
   it("빈 배열은 '의도적으로 비운 목록'이다 — 기본값이 되살아나지 않는다", () => {
     expect(normalizeMyItems([])).toEqual([]);
@@ -402,9 +402,9 @@ describe("malformed 입력 방어", () => {
     expect(() => normalizeLedger([])).not.toThrow();
     expect(() => normalizeLedger("nope")).not.toThrow();
   });
-  it("normalizeMyItems: 배열이 아니면 기본 목록으로 폴백", () => {
-    expect(normalizeMyItems({}).length).toBeGreaterThan(0);
-    expect(normalizeMyItems("x").length).toBeGreaterThan(0);
+  it("normalizeMyItems: 배열이 아니면 빈 목록(던지지 않는다)", () => {
+    expect(normalizeMyItems({})).toEqual([]);
+    expect(normalizeMyItems("x")).toEqual([]);
   });
   it("parseCalcState: charge/items가 배열이 아니어도 던지지 않는다", () => {
     expect(() => parseCalcState({ charge: {}, items: "x" })).not.toThrow();
@@ -2323,14 +2323,6 @@ describe("B-2b · 지웠다가 다시 추가할 수 있다 (at vs 표식 시각)
     expect(mergeMyItems([], readded, del.ledger.deleted)).toEqual([]);
   });
 
-  it("기본 목록 복원은 옛 표식을 이긴다", () => {
-    const items = canonicalizeMyItems([{ name: "원더베리" }]);
-    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
-    const restored = restoreDefaultMyItems(del.ledger.deleted, 9000);
-    const alive = mergeMyItems([], restored, del.ledger.deleted).map((x) => x.name);
-    expect(alive).toContain("원더베리");
-  });
-
   it("isItemDeleted 계약", () => {
     const it0 = { id: "a" };
     expect(isItemDeleted({}, it0)).toBe(false);
@@ -2385,13 +2377,6 @@ describe("B-2b · 같은 밀리초의 복원/추가가 삭제에 지지 않는�
     expect(nextItemAt({ "item:a": 5000 }, 9000)).toBe(9000);
     expect(nextItemAt({ "거래id": 999999 }, 5000)).toBe(5000); // 거래 표식은 세지 않는다
     expect(nextItemAt(null, 5000)).toBe(5000);
-  });
-
-  it("같은 시각에 지우고 기본 목록을 복원해도 아이템이 살아남는다", () => {
-    const items = canonicalizeMyItems([{ name: "원더베리" }]);
-    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
-    const restored = restoreDefaultMyItems(del.ledger.deleted, 5000); // 같은 밀리초
-    expect(mergeMyItems([], restored, del.ledger.deleted).map((x) => x.name)).toContain("원더베리");
   });
 
   it("같은 시각에 지우고 다시 추가해도 아이템이 살아남는다", () => {
@@ -2529,26 +2514,6 @@ describe("아이템 카테고리", () => {
     DEFAULT_ITEMS.forEach((it) => {
       expect(ITEM_CATS.map((c) => c.id)).toContain(it.cat);
     });
-  });
-});
-
-describe("replaceMyItems — 운영자 force 목록이 옛 삭제 표식에 지지 않는다", () => {
-  it("지운 적 있는 아이템도 교체 목록에 있으면 되살아난다", () => {
-    const items = canonicalizeMyItems([{ name: "원더베리" }]);
-    const del = deleteMyItem(items, { deleted: {} }, items[0].id, 5000);
-    // at 을 찍지 않으면(=구 동작) 표식이 이겨 강제 목록이 조용히 사라진다.
-    const naive = canonicalizeMyItems([{ name: "원더베리", cash: 5400 }]);
-    expect(mergeMyItems([], naive, del.ledger.deleted)).toEqual([]);
-    // replaceMyItems 는 표식보다 뒤인 at 을 찍는다 → 살아남는다.
-    const forced = replaceMyItems([{ name: "원더베리", cash: 5400 }], del.ledger.deleted, 5000);
-    const merged = mergeMyItems([], forced, del.ledger.deleted);
-    expect(merged.map((x) => x.name)).toEqual(["원더베리"]);
-    expect(merged[0].cash).toBe(5400);
-  });
-
-  it("배열이 아닌 입력에도 던지지 않는다(malformed app_config)", () => {
-    expect(replaceMyItems(null, {}, 1000)).toEqual([]);
-    expect(replaceMyItems(undefined, undefined, 1000)).toEqual([]);
   });
 });
 
