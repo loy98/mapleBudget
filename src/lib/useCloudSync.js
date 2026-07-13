@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   serializeCalcState, parseCalcState, normalizeLedger, normalizeMyItems, localSnapshot,
   isCloudSynced, markCloudSynced, hasStoredCalc, hasStoredItems, withRowKeys, isUserTouched,
-  getDataOwner, setDataOwner,
+  getDataOwner, setDataOwner, clearAccountData, emptyLedger,
 } from "./storage.js";
 import { onAuthChange, fetchUserData, writeUserData, mergeForUpload, mergeSnapshots, fetchAppConfig, tombstoneClock } from "./cloud.js";
 import { fitsKeepalive, setKeepalive } from "./supabaseClient.js";
@@ -108,6 +108,8 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   const liveUserIdRef = useRef(null);
   const syncedUserRef = useRef(null);
   const dirtyForFlushRef = useRef(false);
+  const inFlightRef = useRef(null);   // 진행 중인 업로드 프로미스(로그아웃 전 플러시가 기다린다)
+  const cloudReadyRef = useRef(false); // cloudReady 의 ref 미러 — 안정 콜백(flushPendingUpload)에서 읽는다
   const retryTimer = useRef(null);
   const retryAtRef = useRef(0);   // 연속 업로드 실패 횟수(백오프 단계)
   const runUploadRef = useRef(null);
@@ -119,9 +121,34 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   // '항상 최신값'이 필요하고, 파생값 재기록이라 StrictMode 이중 렌더에도 idempotent.
   dataRef.current = { calc: serializeCalcState(settings, charges, items), my_items: myItems, ledger };
   liveUserIdRef.current = userId;
+  cloudReadyRef.current = cloudReady;
 
   // 세션 구독. 첫 콜백(세션 null이어도) = auth 해석 완료.
   useEffect(() => onAuthChange((s) => { setSession(s); setAuthResolved(true); }), []);
+
+  // 로그아웃 = 이 기기에서 계정 데이터를 떼어내는 것. **localStorage 를 지우는 것만으로는 부족하다** —
+  // React 메모리에는 여전히 그 계정의 settings/charges/items/ledger 가 있고, 이후 어떤 이유로든
+  // 상태가 한 번 갱신되면 App 의 자동저장 이펙트가 그 값을 localStorage 에 **되살려 쓴다**.
+  // 실제로 그런 경로가 있었다: 로그아웃 직후 아래 force 이펙트가 컨텍스트를 '__guest__' 로 보고
+  // setCalcState 로 시세를 덮어쓰면 settings identity 가 바뀌고 → 자동저장이 옛 계정의 charges/items 까지
+  // 통째로 다시 쓴다. clearAccountData() 로 지운 소유자 마커는 돌아오지 않으므로, 되살아난 그 데이터는
+  // 다음 로그인에서 '진짜 게스트 데이터'로 오인돼 **다른 계정의 행에 업로드된다**(공용 브라우저 유출).
+  // location.reload() 는 동기 장벽이 아니라 이 순서를 막지 못하고, 다른 탭은 애초에 리로드되지도 않는다.
+  // → 세션이 사라지는 전이에서 메모리 상태까지 기본값으로 되돌린다. 데이터는 클라우드에 있으므로 안전하다.
+  const prevUserIdRef = useRef(null);
+  useEffect(() => {
+    const prev = prevUserIdRef.current;
+    prevUserIdRef.current = userId;
+    if (!prev || userId) return; // 로그인 상태 → 게스트로의 전이일 때만
+    clearAccountData();          // 다른 탭에서 로그아웃한 경우(이 탭은 signOut 을 부르지 않았다)까지 — idempotent
+    setCalcState(parseCalcState(null));
+    setMyItems(normalizeMyItems(null));
+    setLedger(emptyLedger());
+    // 이 기기는 이제 '저장 이력 없는 새 게스트'다 → app_config 기본값/force 를 다시 받게 재무장한다.
+    freshRef.current = { calc: true, items: true };
+    configAppliedRef.current = false;
+    forceAppliedForRef.current = undefined;
+  }, [userId, setCalcState, setMyItems, setLedger]);
 
   // app_config 로드. 충전 프리셋은 즉시 반영, 시세/기본아이템은 아래 적용 이펙트가 담당. 실패/오프라인은 constants 폴백.
   useEffect(() => {
@@ -272,7 +299,7 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
   // flush=true 는 '탭이 사라지는 중'이라는 뜻이다. 이때만 keepalive 로 보낸다.
   // keepalive 판정은 **요청 직전, 실제로 보낼 본문으로** 한다 — 충돌 재시도의 `merged` 는 서버 원장을
   // 합쳐 처음 payload 보다 커질 수 있고, 64KB 를 넘으면 브라우저가 요청 자체를 거부한다.
-  const runUpload = useCallback(async (uid, flush = false) => {
+  const runUploadInner = useCallback(async (uid, flush = false) => {
     if (upsertingRef.current) { dirtyRef.current = true; return; } // in-flight면 dirty만 표시(러너가 소비)
     upsertingRef.current = true;
     setSyncState("syncing");
@@ -339,6 +366,32 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     }
   }, [setLedger]);
 
+  // 진행 중 업로드의 프로미스를 잡아 둔다 — 로그아웃 전 플러시가 '지금 올라가는 중인 것'까지 기다려야 하므로.
+  // 재진입 호출에서 **새 프로미스를 만들어 덮으면 안 된다**: 기다리는 쪽이 즉시 끝나는 껍데기를 기다리게 되어
+  // 실제 업로드가 끝나기 전에 로그아웃이 진행되고, 그 편집이 로컬에서도 지워진다.
+  const runUpload = useCallback((uid, flush = false) => {
+    if (upsertingRef.current) { dirtyRef.current = true; return inFlightRef.current ?? Promise.resolve(); }
+    const p = runUploadInner(uid, flush);
+    inFlightRef.current = p;
+    // runUploadInner 는 내부에서 모든 예외를 처리하므로 reject 하지 않는다(unhandled rejection 없음).
+    p.finally(() => { if (inFlightRef.current === p) inFlightRef.current = null; });
+    return p;
+  }, [runUploadInner]);
+
+  // 로그아웃 직전 플러시. 디바운스(800ms) 대기 중인 편집은 로컬에만 있고 클라우드엔 없다.
+  // 로그아웃은 이 기기의 계정 데이터를 지우므로, 여기서 올리지 않으면 그 편집은 **영구 소실**된다
+  // ("데이터는 클라우드에 있으니 안전하다"는 전제가 디바운스 창 안에서는 성립하지 않는다).
+  // 반환 { ok } — false 면 아직 못 올린 변경이 남았다는 뜻이고, 호출측이 사용자 확인을 받는다.
+  const flushPendingUpload = useCallback(async () => {
+    const uid = liveUserIdRef.current;
+    if (!uid || !cloudReadyRef.current) return { ok: true };
+    clearTimeout(upsertTimer.current);
+    if (upsertingRef.current) await inFlightRef.current; // 올라가는 중인 것부터 끝낸다(실패하면 부채가 되살아난다)
+    // 러너의 await 중 들어온 편집이 다시 부채로 남을 수 있어 몇 번 더 확인한다(무한루프 방지 상한).
+    for (let i = 0; i < 3 && dirtyForFlushRef.current; i++) await runUpload(uid);
+    return { ok: !dirtyForFlushRef.current };
+  }, [runUpload]);
+
   runUploadRef.current = runUpload; // 파생값 재기록 → StrictMode 이중 렌더에도 idempotent
 
   // 데이터 변경 → 디바운스 후 업로드.
@@ -394,5 +447,5 @@ export function useCloudSync({ settings, charges, items, myItems, ledger, setCal
     };
   }, [userId, cloudReady, runUpload]);
 
-  return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory };
+  return { session, syncState, chargeOptions, conflictPrompt, rules, ruleHistory, flushPendingUpload };
 }
