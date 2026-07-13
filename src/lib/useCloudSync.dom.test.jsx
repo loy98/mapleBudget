@@ -33,7 +33,7 @@ const {
   KEY, ITEMS_KEY, LKEY, OWNER_KEY,
   loadCalcState, loadMyItems, loadLedger,
   saveCalcState, saveMyItems, saveLedger,
-  clearAccountData, setDataOwner,
+  clearAccountData, setDataOwner, lockAccountWrites, __unlockAccountWrites,
 } = await import("./storage.js");
 
 // 프로덕션 app_config 와 같은 형태. force 가 시세 3종을 '모든 유저'에게 덮어쓴다 —
@@ -63,12 +63,12 @@ const A_ITEMS = [{ name: "A 전용 아이템", cash: 1234, mAllowed: true }];
 // 이 자동저장 이펙트가 바로 유출의 마지막 고리이므로 테스트도 반드시 같이 재현해야 한다.
 // api 로 훅 반환값과 setLedger 를 밖으로 빼 테스트가 '편집'과 'flush' 를 직접 구동한다.
 const api = {};
-function Harness() {
+function Harness({ suspended = false }) {
   const [{ settings, charges, items }, setCalcState] = useState(loadCalcState);
   const [myItems, setMyItems] = useState(loadMyItems);
   const [ledger, setLedger] = useState(loadLedger);
 
-  const hook = useCloudSync({ settings, charges, items, myItems, ledger, setCalcState, setMyItems, setLedger });
+  const hook = useCloudSync({ settings, charges, items, myItems, ledger, setCalcState, setMyItems, setLedger, suspended });
   api.flushPendingUpload = hook.flushPendingUpload;
   api.setLedger = setLedger;
 
@@ -81,12 +81,12 @@ function Harness() {
 let container = null;
 let root = null;
 
-async function mount() {
+async function mount(props = {}) {
   container = document.createElement("div");
   document.body.appendChild(container);
   await act(async () => {
     root = createRoot(container);
-    root.render(<StrictMode><Harness /></StrictMode>);
+    root.render(<StrictMode><Harness {...props} /></StrictMode>);
   });
 }
 async function settle() {
@@ -251,5 +251,152 @@ describe("로그아웃 — 이전 계정 데이터가 다음 계정으로 유입
     const calc = JSON.parse(localStorage.getItem(KEY) || "{}");
     expect(calc.mesoRate).toBe(1800);   // force 는 게스트에게도 그대로 적용된다
     expect(calc.giftRatio).toBe(7200);
+  });
+});
+
+// 백업 복원 후 새로고침을 아직 못 한 상태(알림을 넘길 저장소가 없어 모달로 요청 중).
+// 이때 메모리는 **복원 전 옛 값**이다. 사용자 편집은 모달이 막지만, 프로그램적 상태 변경은 막지 못한다 —
+// 지연됐던 app_config fetch 나 클라우드 최초 동기화가 resolve 되면 setCalcState/setMyItems 가 불리고,
+// App 의 자동저장이 방금 복원한 데이터를 옛 값으로 덮어쓴다(Codex 4차 지적).
+describe("복원 후 새로고침 대기(suspended) — 복원본을 지킨다", () => {
+  const RESTORED_CALC = { mesoRate: 1234, charge: [{ name: "복원된카드", rate: 9, limit: 111111 }], items: [] };
+  const RESTORED_ITEMS = [{ id: "r1", name: "복원된아이템", cash: 4200, mAllowed: true }];
+  const RESTORED_LEDGER = { buys: [{ id: "restored-1", date: "2026-07-10", item: "복원된거래", qty: 2, price: 5900 }], sells: [], cashes: [], spends: [], deleted: {} };
+
+  const seedRestored = () => {
+    localStorage.setItem(KEY, JSON.stringify(RESTORED_CALC));
+    localStorage.setItem(ITEMS_KEY, JSON.stringify(RESTORED_ITEMS));
+    localStorage.setItem(LKEY, JSON.stringify(RESTORED_LEDGER));
+  };
+
+  afterEach(() => { __unlockAccountWrites(); });
+
+  it("지연된 app_config 가 resolve 돼도 복원된 저장소가 그대로다", async () => {
+    seedRestored();
+    lockAccountWrites();                 // App 이 복원 실패 경로에서 거는 잠금
+
+    await mount({ suspended: true });    // 게스트 + suspended
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); }); // app_config resolve
+    await settle();
+
+    expect(JSON.parse(localStorage.getItem(KEY)).mesoRate).toBe(1234);       // force(1800)로 덮이지 않았다
+    expect(localStorage.getItem(KEY)).toContain("복원된카드");
+    expect(localStorage.getItem(ITEMS_KEY)).toContain("복원된아이템");
+    expect(localStorage.getItem(LKEY)).toContain("restored-1");
+  });
+
+  it("로그인 세션이 들어와도 클라우드 동기화가 복원본을 덮지 않는다", async () => {
+    seedRestored();
+    lockAccountWrites();
+
+    // 클라우드에는 전혀 다른 데이터가 있다 — 평소라면 병합돼 화면·저장소에 반영된다.
+    fetchUserData.mockResolvedValue({
+      updated_at: "2026-07-13T00:00:00Z",
+      calc: { mesoRate: 9999, charge: [{ name: "클라우드카드", rate: 1, limit: 0 }] },
+      my_items: [{ id: "c1", name: "클라우드아이템", cash: 1 }],
+      ledger: { buys: [{ id: "cloud-1", date: "2026-07-01", item: "클라우드거래", qty: 1, price: 1 }], sells: [], cashes: [], spends: [], deleted: {} },
+    });
+
+    await mount({ suspended: true });
+    await act(async () => emitSession({ user: { id: "user-a" } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); }); // 디바운스(800ms) 초과
+    await settle();
+
+    // 저장소는 복원본 그대로 — 클라우드 값이 섞이지 않았다.
+    expect(JSON.parse(localStorage.getItem(KEY)).mesoRate).toBe(1234);
+    expect(localStorage.getItem(LKEY)).not.toContain("cloud-1");
+    expect(localStorage.getItem(ITEMS_KEY)).not.toContain("클라우드아이템");
+    expect(writeUserData).not.toHaveBeenCalled();
+  });
+
+  // **진짜 위험한 시나리오**: 이미 로그인·동기화가 끝난(cloudReady=true) 탭에서 복원이 일어나 suspended 로 바뀐다.
+  // 이때 업로드 이펙트는 deps 에 suspended 가 있어 다시 실행되는데, 가드가 없으면
+  // dirtyForFlush 를 세우고 디바운스를 걸어 **옛 메모리(복원 전 값)를 클라우드에 올려버린다.**
+  // (처음부터 suspended 로 마운트하면 cloudReady 가 false 라 이 경로가 드러나지 않는다 — 그래서 전이로 테스트한다.)
+  it("동기화가 끝난 뒤 복원으로 suspended 가 되면, 옛 메모리를 클라우드에 올리지 않는다", async () => {
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));
+    setDataOwner(A_UID);
+
+    await mount({ suspended: false });                       // 평소 상태로 로그인·동기화 완료
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+    await settle();
+
+    // 여기서 사용자가 백업을 복원했다 → App 이 잠금 + suspended 로 전환한다.
+    seedRestored();
+    lockAccountWrites();
+    writeUserData.mockClear();
+    await act(async () => { root.render(<StrictMode><Harness suspended /></StrictMode>); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); }); // 디바운스 창을 지나 보낸다
+    await settle();
+
+    expect(writeUserData).not.toHaveBeenCalled();            // 스테일 업로드 없음
+    expect(JSON.parse(localStorage.getItem(KEY)).mesoRate).toBe(1234); // 복원본도 그대로
+  });
+
+  // 저장소 잠금은 useCloudSync 가 아닌 **모든** 경로를 막는다. suspended 로 훅을 멈춰도,
+  // 훅 바깥에서 상태가 바뀌면(타이머·이벤트 핸들러 등) 자동저장이 복원본을 덮는다 → 잠금이 마지막 방어선이다.
+  it("훅 바깥에서 상태가 바뀌어도 잠금이 복원본을 지킨다", async () => {
+    seedRestored();
+    lockAccountWrites();
+    await mount({ suspended: true });
+    await settle();
+
+    // Harness 는 App 과 같은 자동저장 이펙트를 갖고 있다 → 이 setLedger 는 곧장 saveLedger 를 부른다.
+    await act(async () => { api.setLedger({ buys: [{ id: "stale-1", date: "2026-01-01", item: "옛거래" }], sells: [], cashes: [], spends: [], deleted: {} }); });
+    await settle();
+
+    expect(localStorage.getItem(LKEY)).toContain("restored-1"); // 복원본이 살아 있다
+    expect(localStorage.getItem(LKEY)).not.toContain("stale-1"); // 옛 값이 쓰이지 않았다
+  });
+
+  // Codex 5차 지적: **이미 시작된** 업로드는 이펙트 가드를 지나온 뒤라 suspended 로 바뀌어도 계속 돈다.
+  // await 를 건널 때마다 확인하지 않으면, 복원 도중에 옛 dataRef 가 클라우드에 계속 쓰인다.
+  it("업로드가 진행 중일 때 복원으로 suspended 가 되면, 남은 쓰기를 중단한다", async () => {
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));
+    setDataOwner(A_UID);
+
+    // 첫 write 를 붙잡아 in-flight 상태를 만든다. 그 사이에 복원이 일어난다.
+    let releaseFirstWrite;
+    writeUserData.mockImplementationOnce(
+      () => new Promise((res) => { releaseFirstWrite = () => res({ conflict: true }); }) // 충돌 → 재시도 루프 진입
+    );
+    writeUserData.mockImplementation(async () => ({ updatedAt: "2026-07-13T00:00:00Z" }));
+    fetchUserData.mockResolvedValue({ updated_at: "2026-07-13T00:00:00Z", calc: {}, my_items: [], ledger: {} });
+
+    await mount({ suspended: false });
+    await act(async () => emitSession({ user: { id: A_UID } }));
+    await settle();
+    await act(async () => { api.setLedger((l) => ({ ...l, spends: [{ id: "p1", date: "2026-07-13", amount: 1 }] })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); }); // 디바운스 → 업로드 시작(첫 write 에서 멈춤)
+
+    const writesBefore = writeUserData.mock.calls.length;
+    expect(writesBefore).toBeGreaterThan(0); // 업로드가 실제로 in-flight 다
+
+    // 이 순간 사용자가 복원했다 → 잠금 + suspended 전환.
+    seedRestored();
+    lockAccountWrites();
+    await act(async () => { root.render(<StrictMode><Harness suspended /></StrictMode>); });
+    await act(async () => { releaseFirstWrite(); await new Promise((r) => setTimeout(r, 50)); });
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)); }); // 재시도·디바운스 창을 지나 보낸다
+    await settle();
+
+    // 붙잡혔던 첫 write 이후로는 아무것도 더 쓰지 않았다(충돌 재시도가 옛 메모리를 다시 쓰지 않았다).
+    expect(writeUserData.mock.calls.length).toBe(writesBefore);
+    expect(JSON.parse(localStorage.getItem(KEY)).mesoRate).toBe(1234); // 복원본도 그대로
+  });
+
+  it("suspended 가 아니면 평소대로 동작한다(잠금·중단이 일반 경로를 죽이지 않는다)", async () => {
+    localStorage.setItem(KEY, JSON.stringify(A_CALC));
+    await mount({ suspended: false });
+    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    await settle();
+    // 기존 유저(저장 이력 있음)라도 force 는 모든 유저에게 적용된다 → 시세가 app_config 값으로 덮인다.
+    expect(JSON.parse(localStorage.getItem(KEY)).mesoRate).toBe(1800);
   });
 });

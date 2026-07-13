@@ -128,7 +128,24 @@ function ensureWritable(key) {
   return ok;
 }
 
+// ===== 복원 후 쓰기 잠금 =====
+// 백업 복원은 저장소를 새 값으로 바꾸지만 **React 메모리는 여전히 옛 상태**다.
+// 그래서 정상 경로는 곧바로 새로고침한다. 새로고침을 못 하는 상태(알림을 넘길 저장소가 없어
+// 사용자에게 모달로 새로고침을 요청 중)에서는, 그 사이 어떤 이유로든 상태가 바뀌면
+// 자동저장 이펙트가 **방금 복원한 데이터를 옛 값으로 덮어쓴다.**
+//
+// 사용자 편집은 모달이 막지만 그것만으로는 부족하다 — app_config 적용, 클라우드 최초 동기화,
+// 업로드 충돌 병합처럼 **프로그램적 상태 변경**이 남아 있다. 그래서 저장소 쓰기 자체를 잠근다.
+// 새로고침하면 모듈이 새로 로드되며 잠금도 사라진다(그것이 유일한 탈출구다).
+const LOCKABLE = new Set([KEY, ITEMS_KEY, LKEY]); // 계정 데이터만. 테마·달력보기 같은 기기 설정은 막지 않는다.
+let writesLocked = false;
+export function lockAccountWrites() { writesLocked = true; }
+export function areAccountWritesLocked() { return writesLocked; }
+export function __unlockAccountWrites() { writesLocked = false; } // 테스트 격리용
+
 function writeJSON(key, val) {
+  // 복원본을 지키는 잠금. 여기서 막지 않으면 어떤 setState 경로로도 덮어쓰기가 새어 들어온다.
+  if (writesLocked && LOCKABLE.has(key)) return false;
   // 손상된 키에 쓸 때는 '지금 이 순간' 원본이 백업돼 있는지 다시 확인한다.
   // backedUp:true 는 과거 시점의 기록일 뿐이다 — 그 뒤 다른 탭이나 브라우저의 저장소 정리로
   // 슬롯이 사라졌다면 그 기록은 거짓이 되고, 우리는 백업 없는 원본을 덮어쓰게 된다.

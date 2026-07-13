@@ -383,6 +383,36 @@ footer.site{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;co
 .storage-alert code{font-size:11.5px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.18)}
 .storage-alert .sa-actions{display:flex;gap:8px;flex-shrink:0}
 
+/* ===== 토스트 알림 (alert 대체) ===== */
+/* 화면 오른쪽 아래에 쌓인다. alert 와 달리 조작을 막지 않으므로 pointer-events 는 호스트에서 끄고
+   토스트 자신에게만 되살린다(뒤에 있는 버튼이 눌리지 않는 죽은 영역을 만들지 않기 위해). */
+.toast-host{position:fixed;right:16px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:8px;
+  max-width:min(380px,calc(100vw - 32px));pointer-events:none}
+.toast{pointer-events:auto;display:flex;gap:10px;align-items:flex-start;
+  padding:11px 12px;border-radius:10px;font-size:13px;line-height:1.6;
+  background:var(--panel);border:1px solid var(--line);color:var(--txt);box-shadow:var(--shadow);
+  animation:toast-in .18s ease-out}
+@keyframes toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}}
+.toast .toast-ico{flex:none;width:16px;height:16px;margin-top:2px}
+.toast .toast-body{flex:1;min-width:0}
+.toast .toast-msg{word-break:break-word}
+.toast .toast-detail{margin:6px 0 0;padding-left:1.1em;color:var(--sub);font-size:12px}
+.toast .toast-x{flex:none;background:none;border:0;color:var(--sub);cursor:pointer;
+  font-size:16px;line-height:1;padding:2px 4px;border-radius:6px}
+.toast .toast-x:hover{color:var(--txt);background:var(--panel2)}
+.toast.success{border-color:color-mix(in srgb,var(--good) 55%,var(--line))}
+.toast.success .toast-ico{color:var(--good)}
+.toast.error{border-color:var(--bad)}
+.toast.error .toast-ico{color:var(--bad)}
+.toast.warn{border-color:var(--accent2)}
+.toast.warn .toast-ico{color:var(--accent2)}
+.toast.info .toast-ico{color:var(--blue)}
+/* 모바일: 가로 전체를 쓰되 화면 아래에 붙인다 */
+@media (max-width:520px){
+  .toast-host{left:12px;right:12px;bottom:12px;max-width:none}
+}
+
 /* ===== 치명적 렌더 오류 폴백(ErrorBoundary) ===== */
 .card.fatal{margin-top:40px}
 .card.fatal .modal-actions{margin-top:16px}

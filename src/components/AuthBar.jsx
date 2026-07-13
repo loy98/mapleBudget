@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { cloudEnabled, signInWithGoogle, signInWithEmail, signOut } from "../lib/cloud.js";
 import { IconCloud } from "./ui/icons.jsx";
 import Modal from "./Modal.jsx";
+import { toast } from "../lib/toast.js";
 
 // 아직 클라우드에 못 올린 변경이 있는데 로그아웃하려 할 때. 로그아웃은 이 기기의 계정 데이터를 지우므로
 // 그대로 진행하면 그 변경은 영구 소실된다 → 반드시 사용자에게 알리고 고르게 한다.
@@ -61,7 +62,7 @@ export default function AuthBar({ session, syncState, flushPendingUpload }) {
   // 그 편집은 로컬에만 있고 클라우드엔 없다 → 로컬을 지우는 순간 영구 소실된다.
   const doLogout = async () => {
     const { error } = await signOut();
-    if (error) { alert("로그아웃 실패: " + error.message); return; }
+    if (error) { toast.error("로그아웃 실패: " + error.message); return; }
     location.reload();
   };
   const logout = async () => {
@@ -107,12 +108,12 @@ export default function AuthBar({ session, syncState, flushPendingUpload }) {
     // Supabase auth는 throw하지 않고 {error}를 반환 → 반드시 확인.
     const { error } = await signInWithEmail(email);
     setBusy(false);
-    if (error) { alert("메일 전송 실패: " + error.message); return; }
+    if (error) { toast.error("메일 전송 실패: " + error.message); return; }
     setSent(true);
   };
   const google = async () => {
     const { error } = await signInWithGoogle();
-    if (error) alert("Google 로그인 실패: " + error.message);
+    if (error) toast.error("Google 로그인 실패: " + error.message);
   };
 
   return (
