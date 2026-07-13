@@ -160,7 +160,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                 ))}
               </tbody>
             </table>
-            <div className="hint">할인율 높은 방식부터 한도만큼 배분. 한도 0=무제한.</div>
+            <div className="hint">할인율이 높은 것부터 한도만큼 채워 씁니다. 한도를 0으로 두면 무제한입니다.</div>
 
             <div className="subhead">경매장 수수료 (자동)</div>
             <label>현재 MVP 등급</label>
@@ -221,7 +221,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           {/* 1. 방식 비교 */}
           <div className="card" id="sec1">
             <h2><span className="n">1</span>기초 엠작 방식 비교</h2>
-            <p className="desc">1만원 실적을 쌓는 데 드는 실제 현금 비용(회수 후 순비용). 낮을수록 이득.</p>
+            <p className="desc">1만원치 실적을 쌓는 데 실제로 나가는 현금입니다. 낮을수록 이득이고, 시세가 좋으면 마이너스(=돈이 남음)도 나옵니다.</p>
             <div className="mcards">
               <div className={"mcard" + (c.giftBest ? " best" : "")}>
                 <div className="mc-name">선물식</div>
@@ -247,7 +247,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           {/* 2. 목표 총비용 */}
           <div className="card" id="sec2">
             <h2><span className="n">2</span>목표 등급까지 총비용 (기초 방식)</h2>
-            <p className="desc">현재 13주 누적 실적에서 목표 등급까지 채우는 최소 실비용.</p>
+            <p className="desc">지금 누적에서 목표 등급까지 채우는 데 최소 얼마가 드는지 봅니다.</p>
 
             {/* 현재 누적 실적을 어디서 가져올지. 이 선택 하나가 히어로의 진행률 링과 아래 모든 비용을 좌우한다.
                 예전에는 '직접 입력'만 있었고 기본값이 0이라, 실제로는 다이아인 사람도 링이 0% 로 보였다. */}
@@ -264,10 +264,10 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
               </div>
               <span className="hint curmode-hint">
                 {fromLedger
-                  ? <>거래 기록 탭의 <b>최근 13주 누적 {won(ledgerCum)}</b>을 현재 실적으로 씁니다.</>
+                  ? <>거래 기록에 쌓인 <b>최근 13주 누적 {won(ledgerCum)}</b>을 실적으로 쓰고 있습니다.</>
                   : hasLedger
-                    ? <>시나리오를 직접 넣어 계산합니다. 거래 기록 기준 누적은 <b>{won(ledgerCum)}</b>이에요.</>
-                    : <>시나리오를 직접 넣어 계산합니다. 거래 기록을 쌓으면 자동으로 불러올 수 있어요.</>}
+                    ? <>넣은 숫자로 계산합니다. 참고로 거래 기록 기준 누적은 <b>{won(ledgerCum)}</b>입니다.</>
+                    : <>넣은 숫자로 계산합니다. 거래 기록을 쌓으면 실제 누적을 불러올 수 있습니다.</>}
               </span>
             </div>
 
@@ -309,7 +309,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           {/* 3. 경매장 되팔기 */}
           <div className="card" id="sec3">
             <h2><span className="n">3</span>경매장 캐시템 되팔기 분석</h2>
-            <p className="desc">판매 가능한 캐시 아이템을 사서 경매장에 되파는 방식. 본전가·회수현금·손익·효율 비교.</p>
+            <p className="desc">캐시템을 사서 경매장에 되파는 방식입니다. 얼마에 팔아야 본전인지, 실제로 얼마가 돌아오는지 아이템별로 비교합니다.</p>
             <div className="hint" style={{ marginBottom: 12 }}>
               억당 회수 현금(수수료 {c.feePct}% 반영): <b>{won(1e8 * (1 - c.f) * c.s)}</b> / 1억 메소
             </div>
@@ -339,12 +339,12 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   <span className="fx">{p.cash ? (+p.cash).toLocaleString() + "원" : ""}{p.mAllowed === false ? " · 마일불가" : ""}</span>
                 </span>
               ))}
-              {!shownItems.length && <span className="hint">이 카테고리에 아이템이 없어요.</span>}
+              {!shownItems.length && <span className="hint">이 분류에 등록된 아이템이 없습니다.</span>}
             </div>
             {editorOpen && (
               <div className="editor">
                 <div style={{ fontSize: 12, color: "var(--sub)", marginBottom: 8 }}>
-                  자주 쓰는 아이템 목록 편집. 마일리지 사용 가능 여부도 설정. (자동 저장)
+                  이름, 분류, 캐시가를 고치거나 새 아이템을 추가할 수 있습니다. 랜덤박스류처럼 마일리지가 안 되는 건 체크를 풀어 두세요. 고치는 대로 저장됩니다.
                 </div>
                 <table>
                   <thead><tr><th>아이콘</th><th>이름</th><th>분류</th><th>캐시가(원)</th><th className="milh">마일가능</th><th></th></tr></thead>
@@ -365,7 +365,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   </tbody>
                 </table>
                 <div className="hint" style={{ marginTop: 4 }}>
-                  아이콘은 이모지(🫐) 또는 <b>maplestory.io</b> 의 https 이미지 URL을 넣을 수 있어요. 다른 주소는 안전을 위해 표시하지 않습니다.
+                  아이콘은 이모지(🫐)나 <b>maplestory.io</b> 의 https 이미지 주소를 넣을 수 있습니다. 다른 주소는 안전 때문에 표시하지 않습니다.
                 </div>
                 <div className="row-actions">
                   {/* 빈 이름으로 시작하므로 id 를 이름에서 유도하면 두 기기의 새 행이 같은 id 가 된다 → 여기서만 uid 를 준다.
@@ -430,13 +430,13 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                 </div>
               </div>
             </div>
-            <div className="note">본전가보다 높게 팔면 이득(초록), 낮으면 손해(빨강).</div>
+            <div className="note">본전가보다 비싸게 팔면 이득(초록), 싸게 팔면 손해(빨강)입니다. 경매장 시세는 매일 움직이니 팔기 전에 한 번 확인하세요.</div>
           </div>
 
           {/* 4. 통합 최적 */}
           <div className="card" id="sec4">
             <h2><span className="n">4</span>통합 최적 총비용 (경매장 포함)</h2>
-            <p className="desc">선물식·메소마켓·경매장 되팔기 중 실제로 가장 싼 방식으로 총 실비용 계산.</p>
+            <p className="desc">선물식, 메소마켓, 경매장 되팔기 중에서 지금 시세로 제일 싼 걸 골라 총비용을 냅니다.</p>
             <div className="kpi">
               <div className="box best"><div className="t">최적 방식</div><div className="v" style={{ fontSize: 17 }}>{optDisp}</div></div>
               <KpiBox title="1만원 실적당 단가"><CostLabel n={c.optPer10k} /></KpiBox>
@@ -462,7 +462,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           {/* 5. 마일리지 */}
           <div className="card" id="sec5">
             <h2><span className="n">5</span>마일리지 수급</h2>
-            <p className="desc">이번 엠작 충전으로 쌓이는 마일리지와 3번 아이템 필요 마일리지.</p>
+            <p className="desc">이번 충전으로 쌓이는 마일리지와, 3번에서 마일리지로 결제하기로 한 아이템에 필요한 양입니다.</p>
             <div className="kpi">
               <KpiBox title="월 적립 (≈5%, 한도 반영)"><span className="mil"><span className="num">{mlN(c.earnPerMonth)}</span><span className="u"> 마일리지 적립</span></span></KpiBox>
               <KpiBox title="3번 마일 아이템 소요(1세트)"><MilUse n={c.milNeed} /></KpiBox>
@@ -481,7 +481,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
           {/* 6. 최적 플랜 */}
           <div className="card" id="sec6">
             <h2><span className="n">6</span>이번 달 최적 실행 플랜</h2>
-            <p className="desc">이번 달 채울 실적을 가장 싼 구성으로 제시. 마일리지는 '월 사용 가능' 한도 내 우선 배정.</p>
+            <p className="desc">이번 달 채울 실적을 어떤 조합으로 사는 게 제일 싼지 짜 줍니다. 마일리지는 보유량 안에서 효율 좋은 쪽에 먼저 씁니다.</p>
             <div className="tblx"><table>
               <thead><tr><th>구성 (구매/판매 방식)</th><th>채우는 실적</th><th>실비용</th><th>마일리지 소모</th></tr></thead>
               <tbody>
