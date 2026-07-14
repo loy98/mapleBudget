@@ -44,9 +44,6 @@ src/
     supabaseClient.js       # 클라이언트 생성·keepalive
     toast.js                # 앱 테마 알림
     errorLog.js             # 로컬 오류 기록
-    useCloudSync.js         # 동기화 훅(세션·config·초기동기화·업로드·충돌모달)
-    supabaseClient.js       # Supabase 클라이언트 생성(공개 .env 값)
-    pure.test.js            # vitest: 순수 함수 회귀(22건)
   components/
     CalcTab.jsx             # 계산기 탭(시세·조건·방식비교·총비용·경매장·마일리지·플랜)
     LogTab.jsx              # 거래 기록(통계·달력 월력/MVP주간·거래 입력·일자 상세)
