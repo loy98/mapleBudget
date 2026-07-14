@@ -102,3 +102,19 @@ npx supabase functions deploy feedback-notify --no-verify-jwt
 - **탈퇴 시 첨부는 파기된다.** 문의 글(본문)만 익명 상태로 남는다 — 첨부 경로에는 uid 가 박혀 있어
   남겨 두면 탈퇴한 사람의 문의들을 uid 로 다시 꿸 수 있다(= 익명화가 절반만 참이 된다).
 - 스토리지 사용량은 가끔 확인할 것. 오래된 문의의 첨부를 지우면 용량이 회수된다.
+
+### 고아 첨부 청소 (가끔)
+
+탈퇴는 **계정 삭제(되돌릴 수 없는 쪽)를 먼저 확정하고** 그다음에 브라우저가 실물 파일을 지운다.
+그 마지막 단계가 실패하면(탭을 닫았거나 네트워크가 끊겼거나) 파일이 남는다. **찾을 수 있게 설계돼 있다** —
+소유자가 끊긴(`owner is null`) 객체가 그것이다:
+
+```sql
+-- 남은 고아 첨부 확인
+select name, created_at from storage.objects
+ where bucket_id = 'feedback-attachments' and owner is null
+ order by created_at;
+```
+
+지우는 것은 **SQL 이 아니라 대시보드에서** 한다(Storage → `feedback-attachments` → 해당 파일 삭제).
+SQL 로 행만 지우면 실물 파일이 백엔드에 남아 용량도 회수되지 않고 존재도 추적할 수 없게 된다.

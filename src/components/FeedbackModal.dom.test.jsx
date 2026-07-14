@@ -232,3 +232,15 @@ describe("전송 중 잠금", () => {
     expect(has("소중한 의견 감사합니다")).toBe(true);
   });
 });
+
+// Codex 2차 지적: 예외가 나면 status 가 "sending" 에 머물러 모달이 영영 닫히지 않는다.
+it("전송 중 예외가 나도 잠금이 풀린다 (모달이 갇히지 않는다)", async () => {
+  submitFeedback.mockImplementation(async () => { throw new Error("network down"); });
+  await render({ session: SESSION });
+  await type(container.querySelector("textarea"), "예외 경로");
+  await click("보내기");
+
+  expect(has("전송 중 오류가 발생했어요")).toBe(true);
+  expect(btn("취소").disabled).toBe(false);
+  expect(container.querySelector(".modal-x").disabled).toBe(false);
+});

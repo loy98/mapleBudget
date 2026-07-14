@@ -119,47 +119,57 @@ function SendPanel({ session, onClose, onSent, onBusy }) {
   // 보내는 동안에는 모달을 닫을 수 없다(× · Esc · 배경 클릭 모두). 부모가 잠근다.
   useEffect(() => { onBusy?.(status === "sending"); }, [status, onBusy]);
 
+  // 전송 중에는 모달이 잠긴다(취소·×·Esc·탭). 그러므로 **어떤 경로로도 status 가 "sending" 에
+  // 머물러선 안 된다** — 예외 하나가 모달을 영영 못 닫게 만든다(Codex 2차 지적).
+  // 그래서 전 구간을 try/catch 로 감싸고, 예상 못 한 예외도 '오류' 상태로 떨어뜨린다.
   const send = async () => {
     if (!canSend) return;
     setStatus("sending");
     setErrMsg("");
 
-    // 이미지 먼저 올리고, 그 경로를 달아 문의를 넣는다(cloud.js 의 순서 주석 참고).
-    let paths = [];
-    if (files.length && userId) {
-      setProgress({ done: 0, total: files.length });
-      const up = await uploadFeedbackAttachments(files, userId, (done, total) => setProgress({ done, total }));
-      setProgress(null);
-      if (up.error) {
+    try {
+      // 이미지 먼저 올리고, 그 경로를 달아 문의를 넣는다(cloud.js 의 순서 주석 참고).
+      let paths = [];
+      if (files.length && userId) {
+        setProgress({ done: 0, total: files.length });
+        const up = await uploadFeedbackAttachments(files, userId, (done, total) => setProgress({ done, total }));
+        if (up.error) {
+          setStatus("error");
+          setErrMsg(
+            up.error.message === "attach-rejected"
+              ? "이미지를 올릴 수 없었어요. 짧은 시간에 너무 많이 올렸다면 잠시 뒤 다시 시도해 주세요."
+              : "이미지 업로드에 실패했어요. 네트워크를 확인한 뒤 다시 시도해 주세요."
+          );
+          return;
+        }
+        paths = up.paths;
+      }
+
+      // 첨부는 본문 뒤에 붙인다(서버가 message 를 4000자로 자르므로 사용자 글이 먼저 온다).
+      const body = attachErrors ? message + formatErrorsForFeedback(recentErrors) : message;
+      const { error } = await submitFeedback({ message: body, category, email, attachments: paths });
+      if (error) {
         setStatus("error");
         setErrMsg(
-          up.error.message === "attach-rejected"
-            ? "이미지를 올릴 수 없었어요. 짧은 시간에 너무 많이 올렸다면 잠시 뒤 다시 시도해 주세요."
-            : "이미지 업로드에 실패했어요. 네트워크를 확인한 뒤 다시 시도해 주세요."
+          error.message === "cloud-disabled"
+            ? "지금은 피드백 전송을 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+            : error.message === "rate-limited"
+            ? "짧은 시간에 너무 많이 보내셨어요. 10분 뒤에 다시 시도해 주세요."
+            : error.message === "bad-attachment"
+            ? "첨부 이미지를 처리하지 못했어요. 이미지를 빼고 다시 시도해 주세요."
+            : "전송에 실패했어요. 잠시 후 다시 시도해 주세요."
         );
         return;
       }
-      paths = up.paths;
-    }
-
-    // 첨부는 본문 뒤에 붙인다(서버가 message 를 4000자로 자르므로 사용자 글이 먼저 온다).
-    const body = attachErrors ? message + formatErrorsForFeedback(recentErrors) : message;
-    const { error } = await submitFeedback({ message: body, category, email, attachments: paths });
-    if (error) {
+      setStatus("sent");
+      onSent?.();
+    } catch (e) {
+      console.warn("[feedback] 전송 중 예외", e);
       setStatus("error");
-      setErrMsg(
-        error.message === "cloud-disabled"
-          ? "지금은 피드백 전송을 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
-          : error.message === "rate-limited"
-          ? "짧은 시간에 너무 많이 보내셨어요. 10분 뒤에 다시 시도해 주세요."
-          : error.message === "bad-attachment"
-          ? "첨부 이미지를 처리하지 못했어요. 이미지를 빼고 다시 시도해 주세요."
-          : "전송에 실패했어요. 잠시 후 다시 시도해 주세요."
-      );
-      return;
+      setErrMsg("전송 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setProgress(null);
     }
-    setStatus("sent");
-    onSent?.();
   };
 
   if (status === "sent") {

@@ -153,29 +153,48 @@ export async function fetchMyFeedback(limit = 50) {
 //
 // 인자가 없다 — 대상은 언제나 JWT 의 본인이다. 남의 계정을 지정할 방법이 아예 없다.
 //
-// **첨부 실물 파일은 RPC 보다 먼저, 여기서 지운다.** SQL 로 storage.objects 행만 지우면
-// API 에서는 안 보여도 실물 파일은 스토리지 백엔드에 남는다 — 방침이 약속한 '파기'가 아니다.
-// 파일 삭제가 실패해도 탈퇴는 계속한다: 계정을 못 지우고 멈추는 쪽이 사용자에게 더 나쁘고,
-// 참조(attachments)는 RPC 가 어차피 끊는다.
+// **순서가 핵심이다: 되돌릴 수 없는 쪽(RPC)이 먼저다.**
+// 첨부 파일을 먼저 지우고 RPC 가 실패하면(네트워크) **파일만 사라지고 계정은 남는다** —
+// 사용자는 "삭제 실패"를 보는데 데이터는 이미 없다(Codex 2차 지적).
+// 그래서 RPC 로 계정 삭제를 확정한 뒤, 그 다음에 실물 파일을 지운다.
+//
+// 파일을 SQL 로 못 지우는 이유: storage.objects 행을 지워도 **실물 파일은 백엔드에 남는다.**
+// 지우려면 Storage API 를 불러야 하고, 그건 클라이언트만 할 수 있다(service key 는 브라우저에 못 둔다).
+// RPC 가 끝난 뒤에도 이 탭의 JWT 는 유효하므로(서명된 토큰) 삭제 정책을 그대로 통과한다.
+//
+// 파일 삭제가 실패하면 `owner is null` 인 고아 객체가 남는다 — 운영자가 청소 쿼리로 찾을 수 있다
+// (docs/setup-feedback-account.md). 계정과 참조는 이미 사라졌으므로 탈퇴 자체는 성공으로 본다.
 //
 // 성공하면 이 기기의 로컬 데이터도 지우고(공용 브라우저), 세션을 끊는다.
 // signOut 이 실패해도 계정은 이미 서버에서 사라졌으므로 성공으로 본다 — 남은 토큰은 무효다.
 export async function deleteAccount() {
   if (!supabase) return { error: new Error("cloud-disabled") };
 
+  // 지울 파일 목록을 **먼저 읽어 둔다.** RPC 가 끝나면 attachments 가 비워져 경로를 알 수 없다.
+  // 읽기 실패는 치명적이지 않다(고아 파일이 남을 뿐) → 탈퇴를 막지 않는다.
+  let paths = [];
   try {
-    // RLS 가 본인 문의만 돌려준다 → 내 첨부 경로만 모인다.
-    const { data } = await supabase.from("feedback").select("attachments");
-    const paths = (data || [])
+    const { data } = await supabase.from("feedback").select("attachments"); // RLS: 본인 문의만
+    paths = (data || [])
       .flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []))
       .filter((p) => typeof p === "string");
-    if (paths.length) await supabase.storage.from(ATTACH_BUCKET).remove(paths);
   } catch (e) {
-    console.warn("[account] 첨부 삭제 실패 — 참조는 서버가 끊는다", e);
+    console.warn("[account] 첨부 목록을 읽지 못했다 — 파일이 남을 수 있다", e);
   }
 
   const { error } = await supabase.rpc("delete_account");
-  if (error) return { error };
+  if (error) return { error }; // 아직 아무것도 지우지 않았다 → 다시 시도하면 된다
+
+  // 계정은 사라졌다. 여기부터의 실패는 탈퇴를 되돌리지 않는다(고아 파일만 남는다).
+  if (paths.length) {
+    try {
+      const { error: rmErr } = await supabase.storage.from(ATTACH_BUCKET).remove(paths);
+      if (rmErr) console.warn("[account] 첨부 파일 삭제 실패 — 고아 파일이 남았다", rmErr);
+    } catch (e) {
+      console.warn("[account] 첨부 파일 삭제 예외 — 고아 파일이 남았다", e);
+    }
+  }
+
   try { await supabase.auth.signOut(); } catch { /* 계정은 이미 없다 */ }
   clearAccountData();
   return { error: null };

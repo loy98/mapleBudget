@@ -496,10 +496,17 @@ begin
      set user_id = null, email = null, attachments = '[]'::jsonb, updated_at = now()
    where user_id = v_uid;
 
-  -- 클라이언트의 파일 삭제가 실패했더라도(오프라인 등) 참조는 위에서 끊겼다.
-  -- 남은 객체 행은 여기서 지운다 — 그러면 API 로는 더 이상 닿지 않는다.
-  -- (실물 파일이 백엔드에 남을 수 있다는 한계는 docs/setup-feedback-account.md 에 적어 뒀다.)
-  delete from storage.objects
+  -- 첨부 **객체 행은 남긴다.** 여기서 지우면 실물 파일이 백엔드에 남는데(SQL 은 파일을 못 지운다)
+  -- 그러면 아무도 그 존재를 알 수 없다. 대신 소유자만 끊어 두고, 클라이언트가 이 RPC 가 성공한 뒤
+  -- Storage API 로 실제 파일을 지운다(cloud.js deleteAccount).
+  --
+  -- 순서가 이렇게 된 이유(Codex 2차 지적): 파일을 먼저 지우고 이 RPC 가 실패하면
+  -- **파일만 사라지고 계정은 남는다** — 사용자는 "삭제 실패"를 보는데 데이터는 이미 없다.
+  -- 되돌릴 수 없는 쪽(계정 삭제)을 먼저 확정하고, 그 뒤에 파일을 지운다.
+  --
+  -- 파일 삭제가 실패하면 `owner is null` 인 고아 객체가 남는다 — **찾을 수 있는 상태**다.
+  -- 운영자 청소 쿼리는 docs/setup-feedback-account.md 에 있다.
+  update storage.objects set owner = null
    where bucket_id = 'feedback-attachments' and owner = v_uid;
 
   delete from auth.users where id = v_uid;
