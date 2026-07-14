@@ -149,13 +149,31 @@ export async function fetchMyFeedback(limit = 50) {
 
 // ===== 계정 삭제(탈퇴) =====
 // 서버의 delete_account() RPC 가 지운다: user_data(동기화 데이터) + auth 계정.
-// 피드백은 내용을 남기고 작성자·회신 이메일만 지운다(방침: 접수일로부터 1년 보관).
+// 피드백은 **내용을 남기고** 작성자·회신 이메일·첨부 참조를 지운다(방침: 접수일로부터 1년 보관).
 //
 // 인자가 없다 — 대상은 언제나 JWT 의 본인이다. 남의 계정을 지정할 방법이 아예 없다.
+//
+// **첨부 실물 파일은 RPC 보다 먼저, 여기서 지운다.** SQL 로 storage.objects 행만 지우면
+// API 에서는 안 보여도 실물 파일은 스토리지 백엔드에 남는다 — 방침이 약속한 '파기'가 아니다.
+// 파일 삭제가 실패해도 탈퇴는 계속한다: 계정을 못 지우고 멈추는 쪽이 사용자에게 더 나쁘고,
+// 참조(attachments)는 RPC 가 어차피 끊는다.
+//
 // 성공하면 이 기기의 로컬 데이터도 지우고(공용 브라우저), 세션을 끊는다.
 // signOut 이 실패해도 계정은 이미 서버에서 사라졌으므로 성공으로 본다 — 남은 토큰은 무효다.
 export async function deleteAccount() {
   if (!supabase) return { error: new Error("cloud-disabled") };
+
+  try {
+    // RLS 가 본인 문의만 돌려준다 → 내 첨부 경로만 모인다.
+    const { data } = await supabase.from("feedback").select("attachments");
+    const paths = (data || [])
+      .flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []))
+      .filter((p) => typeof p === "string");
+    if (paths.length) await supabase.storage.from(ATTACH_BUCKET).remove(paths);
+  } catch (e) {
+    console.warn("[account] 첨부 삭제 실패 — 참조는 서버가 끊는다", e);
+  }
+
   const { error } = await supabase.rpc("delete_account");
   if (error) return { error };
   try { await supabase.auth.signOut(); } catch { /* 계정은 이미 없다 */ }

@@ -402,8 +402,7 @@ on conflict (id) do update set
   file_size_limit    = 5242880,
   allowed_mime_types = array['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
--- 자기 폴더만 읽는다. 수정·삭제 정책은 두지 않는다 —
--- 문의에 매단 증거를 나중에 지우거나 바꿀 수 있으면 첨부의 의미가 없다.
+-- 자기 폴더만 읽는다.
 drop policy if exists "fb_attach_select_own" on storage.objects;
 create policy "fb_attach_select_own" on storage.objects
   for select
@@ -413,9 +412,15 @@ create policy "fb_attach_select_own" on storage.objects
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
--- 자기 폴더에만 올린다 + **업로드 상한을 정책 안에 둔다**.
--- 로그인만 하면 5MB 를 무한히 올릴 수 있고(매직링크로 계정은 쉽게 만든다), 그건 스토리지 요금이 된다.
--- 계정당 1시간 20개 — 사람이 문의에 붙일 양(최대 5장)보다 넉넉하고 스크립트에는 좁다.
+-- 자기 폴더에, **경로 규약대로만** 올린다 + 업로드 상한.
+--
+-- 경로를 첫 폴더(uid)만 보고 통과시키면, Storage API 를 직접 호출해 `uid/깊은/경로/x.gif` 나
+-- 규약 밖 이름을 얼마든지 올릴 수 있다. DB 트리거는 '문의에 매다는' 경로만 검사하므로
+-- 스토리지에는 규약 밖 객체가 쌓인다(Codex 지적). 정책에서 같은 정규식을 강제한다 —
+-- 이 정규식은 feedback_validate 트리거의 것과 **같아야 한다**(둘이 갈라지면 한쪽이 무의미해진다).
+--
+-- 상한(계정당 1시간 20개): 로그인만 하면 5MB 를 무한히 올릴 수 있고(매직링크로 계정은 쉽게 만든다)
+-- 그건 스토리지 요금이 된다. 사람이 문의에 붙일 양(최대 5장)보다 넉넉하고 스크립트에는 좁다.
 -- 트리거가 아니라 정책에 넣는 이유: storage.objects 는 관리형 스키마라 트리거 생성(테이블 소유권)이
 -- 막힐 수 있다. 정책은 대시보드도 쓰는 정식 경로다. 세는 SELECT 는 위의 select 정책 덕에 본인 것만 보인다.
 drop policy if exists "fb_attach_insert_own" on storage.objects;
@@ -424,7 +429,7 @@ create policy "fb_attach_insert_own" on storage.objects
   to authenticated
   with check (
     bucket_id = 'feedback-attachments'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and name ~ ('^' || auth.uid()::text || '/[A-Za-z0-9._-]{1,120}$')
     and (
       select count(*)
         from storage.objects o
@@ -432,6 +437,24 @@ create policy "fb_attach_insert_own" on storage.objects
          and o.owner = auth.uid()
          and o.created_at > now() - interval '1 hour'
     ) < 20
+  );
+
+-- 자기 파일은 지울 수 있다. 두 가지가 이 정책을 요구한다:
+--  ① **전송 실패 정리** — 이미지를 올린 뒤 문의 INSERT 가 실패하면(레이트리밋·네트워크) 그 파일은
+--     어디에도 매달리지 못한 쓰레기다. 지울 권한이 없으면 스토리지에 영원히 남는다(Codex 지적).
+--  ② **탈퇴** — 방침이 약속한 '지체 없이 파기'를 지키려면 실제 파일이 사라져야 한다.
+--     SQL 로 storage.objects 행만 지우면 API 에서는 안 보여도 **실물 파일은 백엔드에 남는다.**
+--     그래서 클라이언트가 Storage API 로 지운 뒤 delete_account() 를 부른다(cloud.js).
+--
+-- 대가: 유저가 자기 문의의 첨부를 나중에 지울 수 있다(운영자가 증거를 잃을 수 있다).
+-- 자기 데이터를 지울 권리가 그보다 무겁다고 봤다 — 어차피 새 문의 알림 메일은 이미 갔다.
+drop policy if exists "fb_attach_delete_own" on storage.objects;
+create policy "fb_attach_delete_own" on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'feedback-attachments'
+    and (storage.foldername(name))[1] = auth.uid()::text
   );
 
 -- ============================================================
@@ -464,21 +487,20 @@ begin
   -- 동기화 데이터. auth.users 삭제의 on delete cascade 로도 지워지지만, 의도를 코드에 남긴다.
   delete from public.user_data where user_id = v_uid;
 
-  -- 문의 글: 작성자·회신 이메일만 지우고 내용은 남긴다.
+  -- 문의 글: **내용(message)은 남기고** 작성자·회신 이메일·첨부 참조를 지운다.
+  --
+  -- 첨부 경로에는 uid 가 박혀 있다(`<uid>/…`). 그것까지 남기면 "작성자를 익명화했다"는 말이
+  -- 절반만 참이 된다 — 탈퇴한 사람의 문의들을 uid 로 다시 한 줄에 꿸 수 있기 때문이다(Codex 지적).
+  -- 실물 파일은 클라이언트가 Storage API 로 먼저 지운다(cloud.js deleteAccount).
   update public.feedback
-     set user_id = null, email = null, updated_at = now()
+     set user_id = null, email = null, attachments = '[]'::jsonb, updated_at = now()
    where user_id = v_uid;
 
-  -- 첨부 파일의 소유자 링크를 끊는다. auth.users 를 지울 때 storage.objects.owner 의 FK 가
-  -- 걸릴 수 있고, 남겨 두더라도 '없는 유저'를 가리키는 소유자는 의미가 없다.
-  -- (구버전 프로젝트에는 owner_id 컬럼이 없다 → 그 경우 owner 만 끊는다.)
-  begin
-    update storage.objects set owner = null, owner_id = null
-     where bucket_id = 'feedback-attachments' and owner = v_uid;
-  exception when undefined_column then
-    update storage.objects set owner = null
-     where bucket_id = 'feedback-attachments' and owner = v_uid;
-  end;
+  -- 클라이언트의 파일 삭제가 실패했더라도(오프라인 등) 참조는 위에서 끊겼다.
+  -- 남은 객체 행은 여기서 지운다 — 그러면 API 로는 더 이상 닿지 않는다.
+  -- (실물 파일이 백엔드에 남을 수 있다는 한계는 docs/setup-feedback-account.md 에 적어 뒀다.)
+  delete from storage.objects
+   where bucket_id = 'feedback-attachments' and owner = v_uid;
 
   delete from auth.users where id = v_uid;
 end $$;

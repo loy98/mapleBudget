@@ -101,7 +101,7 @@ function AttachPicker({ files, setFiles, disabled }) {
 }
 
 // ===== 보내기 =====
-function SendPanel({ session, onClose, onSent }) {
+function SendPanel({ session, onClose, onSent, onBusy }) {
   const [category, setCategory] = useState("suggestion");
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState(session?.user?.email || "");
@@ -115,6 +115,9 @@ function SendPanel({ session, onClose, onSent }) {
 
   const userId = session?.user?.id || null;
   const canSend = message.trim().length > 0 && status !== "sending";
+
+  // 보내는 동안에는 모달을 닫을 수 없다(× · Esc · 배경 클릭 모두). 부모가 잠근다.
+  useEffect(() => { onBusy?.(status === "sending"); }, [status, onBusy]);
 
   const send = async () => {
     if (!canSend) return;
@@ -227,8 +230,11 @@ function SendPanel({ session, onClose, onSent }) {
         <div className="hint">※ 현재 환경에서는 피드백 전송이 비활성화되어 있어요.</div>
       )}
 
+      {/* 보내는 중에는 취소를 잠근다. 닫아도 send() 프로미스는 계속 살아 업로드·INSERT 를 끝내므로,
+          사용자는 취소했다고 믿는데 문의는 전송된다(Codex 지적). 나갈 길을 아예 막는 편이 정직하다.
+          모달 자체의 닫기(×·Esc·배경 클릭)도 같은 이유로 함께 잠근다(FeedbackModal 이 onClose 를 넘기지 않는다). */}
       <div className="modal-actions">
-        <button className="btn ghost" onClick={onClose}>취소</button>
+        <button className="btn ghost" onClick={onClose} disabled={status === "sending"}>취소</button>
         <button className="btn" onClick={send} disabled={!canSend}>
           {status === "sending"
             ? progress
@@ -344,16 +350,21 @@ function MyPanel({ onClose, reloadKey }) {
 export default function FeedbackModal({ onClose, session }) {
   const [tab, setTab] = useState("send"); // send | my
   const [reloadKey, setReloadKey] = useState(0);
+  // 전송 중에는 닫기를 잠근다 — 닫아도 전송은 계속되므로, 취소한 줄 알고 나가는 길을 만들지 않는다.
+  const [sending, setSending] = useState(false);
   const loggedIn = !!session?.user?.id;
+  const close = sending ? undefined : onClose;
 
   return (
-    <Modal onClose={onClose} label="피드백 보내기" cardClass="feedback">
+    <Modal onClose={close} label="피드백 보내기" cardClass="feedback">
       <>
         <div className="modal-head">
           <div className="modal-title"><IconChat />{tab === "my" ? "내 문의" : "피드백 보내기"}</div>
-          <button className="modal-x" onClick={onClose} aria-label="닫기">×</button>
+          <button className="modal-x" onClick={close} disabled={sending} aria-label="닫기">×</button>
         </div>
 
+        {/* 전송 중에는 탭도 잠근다. 탭을 옮기면 SendPanel 이 언마운트되는데, 전송 프로미스는 계속 살아
+            문의를 넣고, 잠금(sending)은 풀리지 않아 모달이 영영 닫히지 않는다. */}
         {loggedIn && (
           <div className="fb-tabs" role="tablist">
             {/* 탭 이름은 전송 버튼("보내기")과 겹치지 않게 둔다 — 겹치면 화면에서도, 스크린리더에서도
@@ -363,6 +374,7 @@ export default function FeedbackModal({ onClose, session }) {
               aria-selected={tab === "send"}
               className={"fb-tab " + (tab === "send" ? "on" : "")}
               onClick={() => setTab("send")}
+              disabled={sending}
             >
               문의하기
             </button>
@@ -371,6 +383,7 @@ export default function FeedbackModal({ onClose, session }) {
               aria-selected={tab === "my"}
               className={"fb-tab " + (tab === "my" ? "on" : "")}
               onClick={() => setTab("my")}
+              disabled={sending}
             >
               내 문의
             </button>
@@ -378,7 +391,12 @@ export default function FeedbackModal({ onClose, session }) {
         )}
 
         {tab === "send" ? (
-          <SendPanel session={session} onClose={onClose} onSent={() => setReloadKey((k) => k + 1)} />
+          <SendPanel
+            session={session}
+            onClose={close}
+            onSent={() => setReloadKey((k) => k + 1)}
+            onBusy={setSending}
+          />
         ) : (
           <MyPanel onClose={onClose} reloadKey={reloadKey} />
         )}

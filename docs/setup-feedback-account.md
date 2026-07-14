@@ -19,7 +19,7 @@ Supabase 대시보드 → **SQL Editor** → `supabase/schema.sql` **전체를 �
 | `feedback` 정책 | 로그인 유저가 **본인 문의만** 조회(`feedback_select_own`) |
 | `feedback` 트리거 | 클라이언트가 보낸 상태·답변은 무시하고 덮어씀 / 첨부 경로는 본인 폴더만 / 게스트 첨부 금지 |
 | `feedback` 트리거 | `reply` 를 채우면 상태가 자동으로 `answered` + `replied_at` 기록 |
-| Storage 버킷 | `feedback-attachments` (비공개, 5MB, 이미지만) + 본인 폴더 정책 + 시간당 20개 상한 |
+| Storage 버킷 | `feedback-attachments` (비공개, 5MB, 이미지만) + 본인 폴더·규약 경로만 업로드 + 시간당 20개 상한 + 본인 파일 삭제 |
 | RPC | `delete_account()` — 앱의 '계정 삭제' 버튼이 호출 |
 
 로컬 PostgreSQL 18 에 스텁을 세우고 **17개 항목을 실측**해 두었다(권한·트리거·탈퇴 시 남의 데이터 보존까지).
@@ -34,6 +34,10 @@ Supabase 대시보드 → **SQL Editor** → `supabase/schema.sql` **전체를 �
 - 답변하면서 바로 종료하려면 `reply` 를 채우고 `status` 를 `closed` 로 함께 지정한다(운영자 지정이 우선).
 
 ## ③ Resend 준비 (메일 알림용)
+
+> ⚠️ **`WEBHOOK_SECRET` 은 필수다.** 이 함수는 `--no-verify-jwt` 로 배포되므로 그 헤더 검사가 유일한 문지기다.
+> 설정하지 않으면 함수가 **아무 메일도 보내지 않고 500** 을 돌려준다(fail-closed).
+> 예전 판은 경고만 찍고 통과시켰는데, 그러면 누구나 POST 하나로 **임의의 주소에 메일을 쏘는 릴레이**가 된다.
 
 1. [resend.com](https://resend.com) 가입 → **API Keys** → 키 생성(`re_...`).
 2. **도메인 인증**(권장): Domains → `maplemvpcalculator.com` 추가 → 안내된 DNS 레코드를 Cloudflare 에 추가.
@@ -91,5 +95,10 @@ npx supabase functions deploy feedback-notify --no-verify-jwt
 - **게스트는 이미지 첨부 불가.** 익명 업로드를 열면 스토리지 남용의 문이 된다.
 - **영상은 받지 않는다.** 무료 스토리지 1GB 를 몇 개로 채운다(이미지 5MB × 5장).
 - 첨부는 비공개 버킷이라 **메일에 링크를 넣어도 열리지 않는다.** 대시보드에서 본다
-  (Storage → `feedback-attachments` → 해당 유저 폴더).
+  (Storage → `feedback-attachments` → 해당 유저 폴더). **답변 전에 미리 봐 둘 것** — 아래 이유로 사라질 수 있다.
+- **유저는 자기 첨부를 지울 수 있다.** 전송 실패로 남은 고아 파일을 정리하고, 탈퇴 시 실물 파일을
+  실제로 파기하려면 그 권한이 필요하다(SQL 로 행만 지우면 파일은 백엔드에 남는다).
+  대가로, 이미 보낸 문의의 첨부도 유저가 지울 수 있다 — 자기 데이터를 지울 권리를 더 무겁게 봤다.
+- **탈퇴 시 첨부는 파기된다.** 문의 글(본문)만 익명 상태로 남는다 — 첨부 경로에는 uid 가 박혀 있어
+  남겨 두면 탈퇴한 사람의 문의들을 uid 로 다시 꿸 수 있다(= 익명화가 절반만 참이 된다).
 - 스토리지 사용량은 가끔 확인할 것. 오래된 문의의 첨부를 지우면 용량이 회수된다.

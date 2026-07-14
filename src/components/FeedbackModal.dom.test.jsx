@@ -208,3 +208,27 @@ describe("내 문의", () => {
     expect(has("아직 보낸 문의가 없어요")).toBe(true);
   });
 });
+
+// Codex 지적: 닫아도 send() 는 계속 살아 문의를 넣는다 → 사용자는 취소한 줄 알지만 전송된다.
+// 그래서 전송 중에는 나가는 길을 모두 잠근다(취소·× ·탭).
+describe("전송 중 잠금", () => {
+  it("보내는 동안 취소·닫기·탭이 모두 잠긴다", async () => {
+    let release;
+    uploadFeedbackAttachments.mockImplementation(
+      () => new Promise((r) => { release = () => r({ paths: ["u-1/x.png"], error: null }); })
+    );
+
+    await render({ session: SESSION });
+    await type(container.querySelector("textarea"), "전송 중");
+    await pickFiles([file("a.png", "image/png", 10)]);
+    await click("보내기");
+
+    expect(btn("취소").disabled).toBe(true);
+    expect(container.querySelector(".modal-x").disabled).toBe(true);
+    expect(btn("내 문의").disabled).toBe(true);
+
+    await act(async () => { release(); });
+    expect(submitFeedback).toHaveBeenCalledTimes(1);
+    expect(has("소중한 의견 감사합니다")).toBe(true);
+  });
+});
