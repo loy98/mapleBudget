@@ -54,6 +54,15 @@ export const IconChat = (p) => (
   </svg>
 );
 
+// 후원('커피 한잔') 진입점. 이모지(☕) 대신 라인 아이콘 — 헤더의 다른 버튼들과 톤을 맞춘다.
+export const IconCoffee = (p) => (
+  <svg {...base} {...p}>
+    <path d="M4 8h12v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8z" />
+    <path d="M16 9h2.5a2.5 2.5 0 0 1 0 5H16" />
+    <path d="M7 2.5v2M11 2.5v2" />
+  </svg>
+);
+
 // 스테퍼용 얇은 셰브론(위/아래). rotate 는 CSS 로.
 export const IconChevron = (p) => (
   <svg {...base} {...p}>
