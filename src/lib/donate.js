@@ -13,9 +13,15 @@
 export const DONATE = {
   bank: { name: "신한", holder: "ㅈㅈㅎ", account: "110-472-965110" },
   kakaoPay: {
-    free: "", // 금액 없이 만든 카카오페이 송금 링크 (https://qr.kakaopay.com/... )
+    // 금액을 지정하지 않고 만든 링크. 보내는 사람이 카카오페이 앱에서 금액을 직접 넣는다.
+    free: "https://qr.kakaopay.com/Ej8drOV4N",
+    // 금액 제안 버튼. `url` 을 주면 그 금액이 미리 입력된 채로 열리고(앱에서 금액별 QR 을 만들어 링크를 넣는다),
+    // 안 주면 위 free 링크로 보내고 화면에 '금액은 앱에서 입력'이라고 알린다.
     amounts: [
-      // { won: 3000, url: "https://qr.kakaopay.com/..." },  ← 앱에서 3,000원 고정 QR 을 만들고 그 링크를 넣는다
+      { won: 1000, note: "PC방 한 시간" },
+      { won: 3000, note: "커피 한잔" },
+      { won: 10000, note: "밥 한 끼" },
+      { won: 20000, note: "치킨 한 마리" },
     ],
   },
 };
@@ -65,13 +71,24 @@ export function donateOptions(cfg = DONATE) {
 
   const kp = (cfg && cfg.kakaoPay) || {};
   const free = safeKakaoUrl(kp.free);
-  // 금액과 링크가 **둘 다** 유효한 것만 남긴다. 링크가 깨졌으면 버튼이 아무 데도 못 가고,
-  // 금액이 이상하면 라벨이 거짓말을 한다(5,000원이라 써 놓고 다른 금액이 열린다) — 둘 다 위험하다.
+  // 금액 항목은 자기 링크(url)가 있으면 그 금액이 미리 입력된 채로 열리고(prefilled),
+  // 없으면 자유금액 링크(free)로 보낸다 — 그때는 **금액이 미리 입력되지 않는다**.
+  // 이 구분을 화면까지 들고 가야 한다. 안 그러면 '1,000원' 버튼을 눌렀는데 빈 금액칸이 열려
+  // 라벨이 거짓말을 한 꼴이 된다(금액이 안 채워지는 것 자체보다 그게 더 나쁘다).
+  // 금액이 이상하거나 갈 곳이 아예 없는 항목은 버린다.
   const seen = new Set();
   const amounts = (Array.isArray(kp.amounts) ? kp.amounts : [])
-    .map((a) => ({ won: safeAmount(a && a.won), url: safeKakaoUrl(a && a.url) }))
+    .map((a) => {
+      const url = safeKakaoUrl(a && a.url);
+      return {
+        won: safeAmount(a && a.won),
+        note: str(a && a.note),
+        href: url || free,
+        prefilled: Boolean(url),
+      };
+    })
     .filter((a) => {
-      if (!a.won || !a.url || seen.has(a.won)) return false;
+      if (!a.won || !a.href || seen.has(a.won)) return false;
       seen.add(a.won);
       return true;
     })

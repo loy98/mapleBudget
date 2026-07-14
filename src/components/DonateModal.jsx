@@ -25,6 +25,14 @@ const won = (n) => n.toLocaleString() + "원";
 export default function DonateModal({ onClose }) {
   const { bank, kakao } = donateOptions(DONATE);
   const hasKakao = Boolean(kakao.free || kakao.amounts.length);
+  // 금액이 미리 입력되는 버튼과 그렇지 않은 버튼이 **섞일 수 있다**(금액별 링크를 일부만 발급한 경우).
+  // 안내를 하나로 뭉뚱그리면 그 상태에서 반드시 거짓말이 된다 → 세 경우를 갈라서 말한다.
+  const nPre = kakao.amounts.filter((a) => a.prefilled).length;
+  const allPrefilled = kakao.amounts.length > 0 && nPre === kakao.amounts.length;
+  const mixed = nPre > 0 && nPre < kakao.amounts.length;
+  // 금액 버튼이 전부 자유금액 링크로 간다면 '직접 입력' 버튼은 그 버튼들과 목적지가 똑같다 → 감춘다.
+  // (금액별 링크가 설정되는 순간 목적지가 갈리므로 자동으로 다시 나타난다.)
+  const showFree = Boolean(kakao.free) && (kakao.amounts.length === 0 || nPre > 0);
 
   return (
     <Modal onClose={onClose} label="개발자에게 커피 한잔" cardClass="donate">
@@ -44,20 +52,30 @@ export default function DonateModal({ onClose }) {
               {/* 외부 사이트로 나간다 → noopener/noreferrer (탭 탈취·리퍼러 유출 차단). */}
               <div className="damts" role="group" aria-label="후원 금액 선택">
                 {kakao.amounts.map((a) => (
-                  <a key={a.won} className="damt" href={a.url} target="_blank" rel="noopener noreferrer">
-                    {won(a.won)}
+                  <a key={a.won} className="damt" href={a.href} target="_blank" rel="noopener noreferrer"
+                    // 섞인 상태에서는 이 버튼이 어느 쪽인지 버튼 자신이 말해야 한다(공용 안내문으로는 구분이 안 된다).
+                    aria-label={`${won(a.won)}${a.note ? ` · ${a.note}` : ""}${a.prefilled ? "" : " — 금액은 카카오페이에서 직접 입력"}`}>
+                    <span className="da-won">{won(a.won)}</span>
+                    <span className="da-note">
+                      {a.note}
+                      {mixed && !a.prefilled && <span className="da-manual">앱에서 입력</span>}
+                    </span>
                   </a>
                 ))}
-                {kakao.free && (
+                {showFree && (
                   <a className="damt free" href={kakao.free} target="_blank" rel="noopener noreferrer">
-                    직접 입력
+                    <span className="da-won">직접 입력</span>
+                    <span className="da-note">원하는 만큼</span>
                   </a>
                 )}
               </div>
+              {/* 금액이 미리 입력되는지 아닌지를 숨기지 않는다 — '1,000원'을 눌렀는데 빈 금액칸이 열리면
+                  라벨이 거짓말을 한 꼴이 된다. 어느 쪽인지 먼저 말해 준다. */}
               <div className="hint">
-                카카오페이가 새 창에서 열립니다.
-                {kakao.amounts.length > 0 && " 금액 버튼을 누르면 그 금액이 입력된 채로 열려요."}
-                {kakao.free && " '직접 입력'은 원하는 금액을 앱에서 넣으시면 됩니다."}
+                카카오페이가 새 창에서 열립니다.{" "}
+                {allPrefilled && "금액 버튼을 누르면 그 금액이 입력된 채로 열려요."}
+                {mixed && "'앱에서 입력'이 붙은 금액은 카카오페이에서 직접 넣어 주세요. 나머지는 금액이 입력된 채로 열립니다."}
+                {!allPrefilled && !mixed && "금액은 카카오페이에서 직접 입력해 주세요."}
               </div>
             </div>
           )}

@@ -80,22 +80,32 @@ describe("donateOptions", () => {
     expect(o.any).toBe(false);
   });
 
-  it("금액 버튼은 금액과 링크가 둘 다 유효한 것만 남는다", () => {
-    // 링크가 깨진 항목을 남기면 버튼이 아무 데도 못 가고,
-    // 금액이 이상한 항목을 남기면 라벨이 거짓말을 한다("5,000원"이라 써 놓고 다른 금액이 열린다).
+  it("자기 링크가 있으면 prefilled, 없으면 자유금액 링크로 폴백한다", () => {
+    // prefilled 를 화면까지 들고 가야 '1,000원' 버튼을 눌렀는데 빈 금액칸이 열리는 걸 미리 알릴 수 있다.
+    const o = donateOptions({
+      kakaoPay: { free: URL2, amounts: [{ won: 5000, url: URL1, note: "커피 한잔" }, { won: 1000, note: "PC방 한 시간" }] },
+    });
+    expect(o.kakao.amounts).toEqual([
+      { won: 1000, note: "PC방 한 시간", href: URL2, prefilled: false },
+      { won: 5000, note: "커피 한잔", href: URL1, prefilled: true },
+    ]);
+  });
+
+  it("갈 곳이 없는 금액 항목은 버린다 (자기 링크도 없고 자유금액 링크도 없다)", () => {
+    // 링크가 깨진 항목을 남기면 버튼이 아무 데도 못 가고, 금액이 이상한 항목을 남기면 라벨이 거짓말을 한다.
     const o = donateOptions({
       kakaoPay: {
         free: "",
         amounts: [
           { won: 5000, url: URL1 },
-          { won: 3000, url: "https://evil.com/x" }, // 링크 불량 → 버린다
+          { won: 3000, url: "https://evil.com/x" }, // 링크 불량 + free 없음 → 버린다
           { won: 0, url: URL2 }, // 금액 불량 → 버린다
-          { won: 10000 }, // 링크 없음 → 버린다
+          { won: 10000 }, // 링크 없음 + free 없음 → 버린다
           null,
         ],
       },
     });
-    expect(o.kakao.amounts).toEqual([{ won: 5000, url: URL1 }]);
+    expect(o.kakao.amounts).toEqual([{ won: 5000, note: "", href: URL1, prefilled: true }]);
     expect(o.any).toBe(true);
   });
 

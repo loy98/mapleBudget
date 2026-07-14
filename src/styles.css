@@ -404,14 +404,18 @@
 .dw-acc{display:flex;flex-direction:column;gap:2px;margin-bottom:9px}
 .dw-bank{font-size:12px;color:var(--sub)}
 .dw-num{font-size:16px;font-weight:800;letter-spacing:.2px;user-select:all}
-/* 금액 버튼. 금액이 박힌 카카오페이 링크로 바로 나가는 <a> 라 카카오 색을 입힌다.
-   '직접 입력'(자유 금액)은 같은 크기의 보조 톤 — 금액 버튼들과 한 줄에서 위계가 보이게. */
-.damts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
-.damt{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;
+/* 금액 버튼(카카오페이로 나가는 <a>). 금액 + 멘트 두 줄. 2열 그리드라 멘트 길이가 달라도 폭이 안 흔들린다.
+   '직접 입력'(자유 금액)은 보조 톤 — 제안 금액들과 위계가 보이게. */
+.damts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.damt{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-decoration:none;
   background:#FEE500;color:#191600;border:1px solid transparent;font-family:inherit;
-  font-size:12.5px;font-weight:800;padding:9px 13px;border-radius:9px;cursor:pointer;line-height:1;white-space:nowrap}
+  padding:9px 10px;border-radius:10px;cursor:pointer;text-align:center}
 .damt:hover{background:#f2da00}
-.damt.free{background:var(--panel);border-color:var(--line);color:var(--sub)}
+.damt .da-won{font-size:13px;font-weight:800;line-height:1}
+.damt .da-note{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;line-height:1;opacity:.72}
+/* 금액별 링크가 일부만 있을 때, 미리 입력되지 않는 버튼에만 붙는다(섞인 상태에서 버튼끼리 구분). */
+.damt .da-manual{padding:2px 5px;border-radius:5px;background:rgba(0,0,0,.14);font-size:9.5px;font-weight:800}
+.damt.free{background:var(--panel);border-color:var(--line);color:var(--sub);grid-column:1 / -1}
 .damt.free:hover{background:var(--panel);border-color:var(--accent);color:var(--accent)}
 .damt:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* 테마 선택 드롭다운 */
