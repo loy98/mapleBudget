@@ -19,6 +19,7 @@ src/
     util.js         포맷·날짜 유틸
     calc.js         계산기 파생값 (충전 배분, 플랜 등)
     ledger.js       거래 원장 통계, 13주 누적, 예측
+    items.js        카탈로그(운영자)+내 아이템(유저) 합치기, 숨김·수정본, 구 데이터 마이그레이션
     storage.js      localStorage 저장/복원, JSON 백업
   components/
     ui.jsx          숫자 스테퍼, 커스텀 셀렉트, 날짜 피커 등

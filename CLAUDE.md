@@ -30,8 +30,15 @@
 - **다인용 클라우드 동기화**: **Supabase**. `user_data` 1행(JSONB: calc/my_items/ledger) + **RLS(본인 행만)**. 인증 = **Google 로그인 + 이메일 매직링크**.
 - **데이터 계층 공유**: `storage.js`의 순수 함수(`parseCalcState`/`serializeCalcState`/`normalizeLedger`/`normalizeMyItems`)를 localStorage와 클라우드가 함께 사용. 기존 저장 키를 유지해 구버전 데이터 승계.
 - **설정 주입**: 공개 설정(`VITE_SUPABASE_URL`, publishable key)은 저장소 `.env`에 커밋(브라우저 노출이 정상, 보안은 RLS가 담당). **시크릿(service key, SMTP/앱 비밀번호 등)은 절대 커밋 금지.**
-- **앱 공용 설정(시세성 기본값)**: `app_config` 테이블(1행, JSONB `config`; RLS = 누구나 SELECT / 쓰기정책 없음)에서 `mesoRate`/`giftRatio`/`marketRatio`·`chargeMethods`·`defaultItems`를 로드(`fetchAppConfig`). **DB에서 고치면 재배포 없이 반영**, fetch 실패/오프라인은 `constants.js` 폴백. 대시보드(service role)로만 수정.
-  - **적용 규칙**: 충전 프리셋 목록은 전역(모두). 시세/기본아이템은 **저장 이력 없는 새 게스트에게만**(freshRef+configAppliedRef, auth 해석 후 게스트만). `config.force` 배열에 든 키는 **모든 유저에게 강제 덮어씀**(force). 상세는 프로젝트 메모리 `app-config-db`.
+- **앱 공용 설정(시세성 기본값)**: `app_config` 테이블(1행, JSONB `config`; RLS = 누구나 SELECT / 쓰기정책 없음)에서 `mesoRate`/`giftRatio`/`marketRatio`·`chargeMethods`·`defaultItems`·`rules`를 로드(`fetchAppConfig`). **DB에서 고치면 재배포 없이 반영**, fetch 실패/오프라인은 `constants.js` 폴백. 대시보드(service role)로만 수정.
+  - **적용 규칙**: 충전 프리셋·게임 규칙(`rules`)은 전역(모두). 시세 스칼라는 **저장 이력 없는 새 게스트에게만**(freshRef+configAppliedRef), `config.force` 배열에 든 키는 모든 유저에게 강제 덮어씀. 상세는 프로젝트 메모리 `app-config-db`.
+  - **아이템은 force 대상이 아니다** — `defaultItems`(카탈로그)는 **유저 데이터로 복사되지 않고** 화면에서 `my_items`와 합쳐 그려진다(`lib/items.js` `composeItems`). 그래서 가격을 고치거나 아이템을 넣고 빼도 **재배포도 force도 없이 전원에게 즉시 반영**되고, 유저가 추가·수정한 것은 사라지지 않는다. 상세는 아래 '아이템 소유권'.
+
+- **아이템 소유권 분리(절대 되돌리지 말 것)**: 기본 아이템(운영자)과 유저가 추가한 아이템이 예전엔 `my_items` 배열 하나에 섞여 있었다. 그래서 운영자가 기본값을 고치려면 그 배열을 통째로 덮어쓰는 수밖에 없었고(`force: ["defaultItems"]`), **그 덮어쓰기가 유저가 추가한 아이템을 삭제 표식도 없이 지웠다(실제 사고).**
+  - 카탈로그 = `app_config.defaultItems`(운영자 소유, 읽기 전용). 내 아이템 = `user_data.my_items`(유저 소유만).
+  - **동기화 로직은 새로 만들지 않는다.** 숨김·수정본을 전부 `my_items`의 '행'으로 표현해 기존 합집합 병합·tombstone·`at` 순서를 그대로 쓴다: 수정본 = 같은 이름의 행(카탈로그를 가림), 숨김 = `hidden:true` 행, 되돌리기/숨김해제 = 그 행 삭제.
+  - `origin:"user"` 표식이 붙은 행은 **마이그레이션이 절대 지우지 않는다**. 이게 없으면 유저 수정본(카탈로그와 같은 이름을 갖는 게 정상)이 다음 로드에서 지워져 수정 기능 자체가 성립하지 않는다.
+  - 마이그레이션(`planItemMigration`, 멱등)은 **값까지 같은 순수 복사본만** 지운다. 하나라도 다르면 유저가 손댄 것일 수 있으므로 '수정됨'으로 살린다 — **지우는 건 되돌릴 수 없고 배지는 되돌릴 수 있다.**
 - **동기화 불변식(깨면 데이터 꼬임 — 절대 유지)**: ① 업로드는 **단일 in-flight 직렬화**(`upsertingRef`; `upsertingRef`를 외부에서 리셋하지 말 것 — 계정 전환 복구는 `syncNonce` 재예약으로). ② 각 upsert write 직전 `liveUserIdRef.current === 캡처 userId` 확인 → **다른 계정 행에 쓰지 않음**. ③ 최초 로그인 프롬프트는 계정별 마커(`mvpCloudSyncedUid`)로 **1회만**(새로고침 X). ④ ledger는 항목 id 기준 **합집합 병합 + tombstone 차감**(추가는 손실 없음, 삭제는 전파됨). ⑤ 로컬 데이터에는 **소유자 마커**(`mvpDataOwnerUid`)가 붙는다 — 소유자가 다른 계정이면 병합하지 않고 클라우드만 채택(공용 브라우저에서 남의 원장이 섞이는 것을 막음). 로그아웃은 계정 데이터를 지운다. ⑥ 업로드는 **조건부 쓰기**(`updated_at` 버전 일치) — 무조건 upsert 금지. 충돌 시 서버 최신본을 읽어 `mergeForUpload` 로 병합 후 재시도(설정은 이 탭 우선, 원장은 합집합+tombstone 차감).
 - **삭제는 반드시 `deleteLedgerEntry`로**: 배열에서 항목만 빼면 그 항목을 아직 가진 기기가 다음 접속 때 되살린다(단일 기기도 — 디바운스 전에 탭을 닫으면 동일). `ledger.deleted = { [id]: 삭제시각 }`에 표식을 남겨야 전파된다. 병합은 **삭제 우선**(한쪽이 지우고 다른 쪽이 수정했으면 삭제가 이김). 표식은 `TOMBSTONE_TTL_DAYS`(1년) 후 만료 — 그보다 오래 오프라인이던 기기는 부활시킬 수 있다(수용된 한계).
 - 상세는 프로젝트 메모리 `supabase-multiuser-sync` 참고.
@@ -61,4 +68,7 @@
 - 렌더 함수 내부에 컴포넌트 정의(리마운트로 입력 포커스 유실) — 모듈 스코프로 둘 것.
 - **프로덕션 Supabase(app_config/user_data)에 sentinel·테스트 값 쓰기** — 모든 유저가 읽는 shared state 오염. 테스트는 로컬에서.
 - **동기화 불변식 위반**: `upsertingRef`를 이펙트에서 외부 리셋, upsert 시 `liveUserIdRef` 가드 제거, 마커 없이 매 로드 프롬프트 등.
+- **기본 아이템을 `my_items`에 심거나 force로 덮어쓰기** — 정확히 이 구조가 유저 아이템을 삭제 표식 없이 지웠다. 카탈로그는 `app_config`에서 읽어 화면에서 합친다(`composeItems`). `normalizeMyItems`가 `DEFAULT_ITEMS`를 시딩하도록 되돌리지 말 것.
+- **`origin:"user"` 가드 없이 마이그레이션이 이름만 보고 아이템 삭제** — 유저 수정본이 조용히 사라진다.
+- **불확실할 때 유저 데이터 삭제** — 삭제는 되돌릴 수 없다. 판단이 서지 않으면 표시(배지)해서 유저가 고르게 한다.
 - **DB 값을 검증 없이 렌더**: `app_config`에서 온 배열/객체(예: `chargeMethods`/`defaultItems`)는 `m && typeof m.name === "string"` 등으로 걸러 쓴다(malformed 원소 렌더 크래시 방지).

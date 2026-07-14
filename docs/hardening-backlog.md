@@ -157,6 +157,12 @@ stale 탭이 업로드하면 **다른 탭에서 추가한 아이템이 사라졌
 함께 해결: ~~`normalizeMyItems` 가 `[]` 와 '없음'을 구분 못함~~ — `[]` = 사용자가 비운 목록,
 `null`/비배열 = 데이터 없음 → 기본 목록. 이제 아이템 전체 삭제가 유지된다.
 
+> ⚠️ **2026-07-14 이후 이 절의 일부는 역사다.** `restoreDefaultMyItems`/`replaceMyItems`('기본 목록 복원'·force 덮어쓰기)는
+> **제거됐다**. 기본 아이템을 `my_items` 에 심는 구조 자체가 유저 아이템을 삭제 표식 없이 지우는 원인이었기 때문이다
+> (실제 사고). 지금 `normalizeMyItems(null)` 은 **`[]`** 이고, 기본 아이템은 `app_config.defaultItems`(카탈로그)에서
+> 읽어 화면에서 합친다(`src/lib/items.js`). 위의 `at` vs 표식 규칙은 그대로 유효하며, 숨김·수정본·되돌리기가
+> 전부 그 규칙 위에 얹혀 있다. 상세: [WORK-STATUS.md §2](WORK-STATUS.md), 메모리 `item-catalog-ownership`.
+
 Codex 재검수 4건 중 3건 반영:
 - (CRITICAL) 충돌 병합 결과의 `my_items` 를 상태에 반영하지 않아, 다음 자동 업로드가 stale 배열로 서버를
   덮어 다른 기기의 아이템을 지웠다. 반영을 `applyMergedSnapshot` 한 곳으로 묶어 키를 빠뜨릴 수 없게 했다.

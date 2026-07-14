@@ -33,7 +33,9 @@
 
 ## constants.js
 - `TIERS`(브론즈~블랙 금액), `MVP_GRADES`, `CHARGE_METHODS`(프리셋 목록, app_config가 덮을 수 있음), `DEFAULT_SETTINGS`(시세성 기본값), `DEFAULT_ITEMS`(자주 쓰는 아이템 기본), `DEFAULT_CHARGES`/`DEFAULT_CALC_ITEMS`, `SPLITS`(분할 방식), `WD_MVP`(목~수)/`WD_SUN`, `MILEAGE_ACCRUAL`(0.05).
-- **시세성 기본값(mesoRate/giftRatio/marketRatio·chargeMethods·defaultItems)은 런타임에 `app_config`(DB)가 덮을 수 있음** — [sync-backend.md](sync-backend.md), [data-layer.md](data-layer.md). constants는 폴백.
+- **시세성 기본값(mesoRate/giftRatio/marketRatio·chargeMethods·defaultItems·rules)은 런타임에 `app_config`(DB)가 덮을 수 있음** — [sync-backend.md](sync-backend.md), [data-layer.md](data-layer.md). constants는 폴백.
+- `DEFAULT_ITEMS`는 **카탈로그의 폴백**이다(유저 `my_items`에 심지 않는다). `ITEM_CATS`/`itemCat`으로 분류, 화면 조립은 `lib/items.js` `composeItems`.
+- `DEFAULT_SETTINGS.curSource` — 계산기의 '현재 누적 실적' 출처(`"manual"` 직접 입력 / `"ledger"` 거래 기록 13주 누적). 기본 `"manual"`(기록 0건인 첫 방문자가 입력칸이 잠긴 채 0원에 갇히지 않도록).
 
 ## util.js
 - 포매터: `won`(원)·`pct`(%)·`eok`(억)·`ml`(마일)·`manW`(만원) — 전부 `isFinite` 방어.

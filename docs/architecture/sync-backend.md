@@ -19,12 +19,13 @@
 - 설정: `fetchAppConfig()` → app_config.config(실패/오프라인/게스트면 null → constants 폴백).
 - **순수 병합**: `mergeSnapshots(local, cloud, {localTouched})` → `{snapshot, conflict}`. ledger는 `mergeLedger`로 **id 기준 합집합**(거래 손실 없음, 같은 id는 클라우드 우선 — 항목별 타임스탬프 없어 정밀비교 불가한 알려진 한계). calc/my_items는 클라우드 비어있지 않으면 클라우드 우선. `conflict = (cloudHasCalc||cloudHasItems) && (ledgerActive || localTouched)`.
 
-## useCloudSync 훅 — 반환 `{session, syncState, chargeOptions, conflictPrompt}`
+## useCloudSync 훅 — 반환 `{session, syncState, chargeOptions, catalog, conflictPrompt, rules, ruleHistory, ...}`
 입력: 계산기 state + 안정 세터(`setCalcState/setMyItems/setLedger`). 이펙트:
 1. **세션 구독** — 첫 콜백=auth 해석(`authResolved`).
 2. **app_config 로드** — `chargeOptions`(드롭다운, 즉시 반영)·`appConfig` 세팅.
-3. **시세/기본아이템 기본값 적용** — auth 해석 후 '저장 이력 없는 게스트'에게만 1회. `configRatePatch`(공유 키 목록 `CONFIG_RATE_KEYS`).
-4. **force 적용** — `appConfig.force` 배열의 키를 모든 유저에게 덮어씀. 컨텍스트('__guest__'/userId)별 '데이터 정착 후' 1회. 정착 신호=게스트 `authResolved`/로그인 `syncedUserRef===userId`.
+3. **시세 기본값 적용** — auth 해석 후 '저장 이력 없는 게스트'에게만 1회. `configRatePatch`(공유 키 목록 `CONFIG_RATE_KEYS`). **아이템은 여기서 안 다룬다**(카탈로그는 유저 데이터로 복사되지 않는다).
+4. **force 적용** — `appConfig.force` 배열의 키를 모든 유저에게 덮어씀(시세 스칼라만). 컨텍스트('__guest__'/userId)별 '데이터 정착 후' 1회. 정착 신호=게스트 `authResolved`/로그인 `syncedUserRef===userId`. **`defaultItems`는 force 대상이 아니다** — 아래 '아이템 소유권' 참고.
+4b. **구 아이템 마이그레이션** — `planItemMigration`(멱등). `my_items`에 남은 **기본값 순수 복사본**만 삭제 표식과 함께 제거하고, 나머지엔 `origin:"user"`를 찍어 보존. 정착 후 컨텍스트별 1회.
 5. **최초 로그인 동기화** — fetch→`mergeSnapshots`→상태 반영. conflict면 **테마 모달**(`conflictPrompt`, App이 렌더)로 선택(async 프로미스; cleanup서 안전 해소). 첫 로그인 마커는 첫 업로드 성공 후.
 6. **디바운스 업로드**(800ms) + **탭 숨김 플러시**(visibilitychange) — 둘 다 `runUpload(uid)` 단일 러너 공유.
 
@@ -37,13 +38,42 @@
 6. **`runUpload`는 `useCallback([])`** — refs+안정 setter만 읽어 안정 identity(이펙트 deps에 포함해도 재실행 없음), do-while dirty-retry로 플러시 중 변경도 소비.
 7. **렌더 본문에서 `dataRef.current`·`liveUserIdRef.current` 갱신**(의도적) — async 콜백만 읽어 '항상 최신값' 필요, 파생값 재기록이라 StrictMode에 idempotent. useEffect로 옮기면 stale 창 생김.
 
+## 아이템 소유권 — 카탈로그(운영자) / 내 아이템(유저)
+
+예전엔 기본 아이템과 유저 추가 아이템이 `my_items` 배열 하나에 섞여 있었다. 그래서 운영자가 기본값을 고치려면
+그 배열을 통째로 덮어쓰는 수밖에 없었고(`force: ["defaultItems"]`), **그 덮어쓰기가 유저가 추가한 아이템을
+삭제 표식도 없이 지웠다(2026-07-14 실제 사고).** 이제 소유자가 다르면 저장소도 다르다.
+
+| | 저장소 | 소유자 |
+|---|---|---|
+| 카탈로그(기본 아이템) | `app_config.defaultItems` | 운영자. 유저 데이터로 **복사하지 않는다** |
+| 내 아이템 | `user_data.my_items` | 유저. 운영자는 건드리지 않는다 |
+
+화면 목록은 `lib/items.js` `composeItems(catalog, myItems)`가 만든다(같은 **이름**이면 내 것이 카탈로그를 가림).
+
+**새 동기화 규칙을 만들지 않는다** — 숨김·수정본을 전부 `my_items`의 '행'으로 표현해 기존 합집합 병합·tombstone·`at` 순서를 그대로 쓴다:
+
+| 동작 | 표현 |
+|---|---|
+| 기본값 수정 | 같은 이름의 행 추가(`origin:"user"`) → 카탈로그를 가림. "수정됨" 배지 |
+| 숨기기 | `hidden:true` 행 추가 |
+| 되돌리기 / 숨김해제 | **그 행을 삭제**(`deleteMyItem`) → 카탈로그 원본이 다시 보임 |
+
+- `origin:"user"` 는 마이그레이션 가드다. 없으면 유저 수정본(카탈로그와 같은 이름을 갖는 게 정상)이 다음 로드에 지워진다.
+- `planItemMigration`은 **값까지 같은 순수 복사본만** 지운다. 하나라도 다르면 '수정됨'으로 살린다 —
+  지우는 건 되돌릴 수 없고 배지는 되돌릴 수 있다.
+- 카탈로그 이름은 trim·중복제거(`validCatalog`), 매칭은 양쪽 trim(`matchKey`)으로 비교만 한다(저장 이름은 불변 — id가 거기서 유도된다).
+
 ## app_config 운영 (재배포 없이 수정)
 Supabase SQL Editor:
 ```sql
-update app_config set config = jsonb_set(config,'{mesoRate}','3200') where id=1;          -- 시세 변경
-update app_config set config = jsonb_set(config,'{force}','["mesoRate"]') where id=1;      -- 모든 유저 강제
+update app_config set config = jsonb_set(config,'{mesoRate}','3200') where id=1;        -- 시세 변경
+update app_config set config = jsonb_set(config,'{force}','["mesoRate"]') where id=1;    -- 시세를 모든 유저에게 강제
+update app_config set config = jsonb_set(config,'{defaultItems}','[...]') where id=1;    -- 아이템: force 불필요, 즉시 반영
 ```
-반영: chargeMethods=모두(새로고침 시), 시세/기본아이템=새 게스트에게(force면 모두). 상세 [/CLAUDE.md](../../CLAUDE.md), 메모리 `app-config-db`.
+반영: chargeMethods·rules·**defaultItems=모두(새로고침 시)**, 시세 스칼라=새 게스트에게(force면 모두).
+⚠️ **`force`에 `"defaultItems"`를 넣지 말 것** — 유저 아이템을 지운다. 아이템은 force 없이도 전원에게 반영된다.
+상세 [/CLAUDE.md](../../CLAUDE.md), 메모리 `app-config-db`.
 
 ## 미해결(보류)
 - **행 단위 LWW**: 진짜 lost-update 방지엔 항목별 `updatedAt`+삭제 tombstone 인프라 필요. 현재 "같은 id 클라우드 우선"의 알려진 한계. [../hardening-backlog.md](../hardening-backlog.md) P2-3.

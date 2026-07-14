@@ -6,7 +6,7 @@
 - [frontend.md](frontend.md) — UI 컴포넌트·상태 소유·테마/CSS·커스텀 위젯·렌더 규칙
 - [domain-logic.md](domain-logic.md) — 계산(calc.js)·통계/주차/현금화(ledger.js)·상수·MVP 도메인 규칙
 - [data-layer.md](data-layer.md) — storage.js 순수 함수·localStorage 키·안정 key·touched·calMode·내보내기/가져오기
-- [sync-backend.md](sync-backend.md) — useCloudSync 훅·Supabase(user_data/app_config)·RLS·인증·동기화 불변식·충돌 모달·force
+- [sync-backend.md](sync-backend.md) — useCloudSync 훅·Supabase(user_data/app_config)·RLS·인증·동기화 불변식·충돌 모달·**아이템 소유권(카탈로그/내 아이템)**
 - [infra-and-ops.md](infra-and-ops.md) — Cloudflare Pages·커스텀 도메인·.env·CSP·schema.sql·테스트·검증 프로토콜
 
 관련: 상위 규칙은 [/CLAUDE.md](../../CLAUDE.md), 검수 백로그는 [../hardening-backlog.md](../hardening-backlog.md), 코드 개요는 [/README.md](../../README.md).
@@ -60,5 +60,5 @@ docs/                       # 이 문서들 + hardening-backlog.md
            → useEffect 자동 저장(localStorage)                (게스트/로그인 공통 캐시)
            → (로그인 시) useCloudSync: 디바운스 upsert → Supabase user_data(RLS 본인 행)
 로드/로그인 → useCloudSync: fetchUserData → mergeSnapshots(로컬↔클라우드) → 상태 반영
-앱 설정     → useCloudSync: fetchAppConfig(app_config, 공개 읽기) → 시세성 기본값/force 적용
+앱 설정     → useCloudSync: fetchAppConfig(app_config, 공개 읽기) → 시세 기본값/force + 카탈로그(defaultItems, 화면에서 합침)
 ```
