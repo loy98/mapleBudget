@@ -405,6 +405,14 @@
 .dw-bank{font-size:12px;color:var(--sub)}
 .dw-num{font-size:16px;font-weight:800;letter-spacing:.2px;user-select:all}
 .dw-links{display:flex;gap:8px;flex-wrap:wrap}
+/* 금액 프리셋 칩. 카테고리 필터(.catpill)와 같은 톤 — 새 시각 언어를 만들지 않는다. */
+.damts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.damt{background:var(--panel);border:1px solid var(--line);color:var(--sub);font-family:inherit;
+  font-size:12px;font-weight:700;padding:7px 11px;border-radius:9px;cursor:pointer;line-height:1;white-space:nowrap}
+.damt:hover{border-color:var(--accent);color:var(--accent)}
+.damt.on{background:color-mix(in srgb,var(--accent) 14%,transparent);border-color:var(--accent);color:var(--accent)}
+.dcustom{display:flex;align-items:center;gap:7px;margin-bottom:8px;max-width:190px}
+.dcustom .hint{margin-top:0;flex:none}
 /* 송금 링크는 <a> 라 .btn 의 기본 정렬(button)이 안 먹는다 → inline-flex 로 맞춘다. */
 .dw-links .btn{display:inline-flex;align-items:center;text-decoration:none}
 .dw-links .btn.kakao{background:#FEE500;color:#191600}
