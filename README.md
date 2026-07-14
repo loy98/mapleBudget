@@ -14,13 +14,19 @@ src/
   main.jsx          엔트리
   App.jsx           탭 전환, 상태 관리, 백업/복원
   styles.css        전체 스타일
-  lib/              순수 로직 (UI 없음)
-    constants.js    등급/충전방식/기본값 상수
+  lib/              순수 로직 + 훅 (UI 없음)
+    constants.js    등급/충전방식/기본값 상수, 게임 규칙(rules)
     util.js         포맷·날짜 유틸
+    tz.js           '지금'을 KST로 해석 (nowD/todayStr)
     calc.js         계산기 파생값 (충전 배분, 플랜 등)
     ledger.js       거래 원장 통계, 13주 누적, 예측
     items.js        카탈로그(운영자)+내 아이템(유저) 합치기, 숨김·수정본, 구 데이터 마이그레이션
-    storage.js      localStorage 저장/복원, JSON 백업
+    storage.js      localStorage 저장/복원, JSON 백업, 삭제 표식
+    cloud.js        Supabase 읽기/쓰기, 스냅샷 병합
+    useCloudSync.js 세션·app_config·클라우드 동기화·업로드 (동기화 수정은 여기)
+    supabaseClient.js  클라이언트 생성
+    toast.js        앱 테마 알림
+    errorLog.js     로컬 오류 기록
   components/
     ui.jsx          숫자 스테퍼, 커스텀 셀렉트, 날짜 피커 등
     CalcTab.jsx     계산기 탭

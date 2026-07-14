@@ -26,7 +26,7 @@
 ## 마커 헬퍼
 - **`markUserTouched()` / `isUserTouched()`** — 사용자 직접 편집 여부(P1-4). App의 사용자 setter에서만 mark. config 자동적용·클라우드 동기화(훅이 `setCalcState/setMyItems` 직접 호출)는 표시 안 됨. `mergeSnapshots`의 `localTouched` 힌트로 전달 → 거래 없이 설정만 바꾼 게스트 보호.
 - **`isCloudSynced(uid)` / `markCloudSynced(uid)` / `clearCloudSynced()`** — 이 기기·계정 최초 동기화 판별(최초 로그인 프롬프트를 1회만; 새로고침엔 안 뜸). 로그아웃 시 clear.
-- **`hasStoredCalc()`** — 첫 렌더에서 '저장 이력 없는 새 게스트'인지 판별(자동저장이 곧 채우므로 최초 시점에 캡처). config 시세 기본값을 '새 게스트에게만' 적용하는 데 쓰임. (아이템용 `hasStoredItems`는 카탈로그 분리로 불필요해져 제거됨.)
+- **`hasStoredCalc()`** — 첫 렌더에서 '저장 이력 없는 새 게스트'인지 판별(자동저장이 곧 채우므로 최초 시점에 캡처). config 시세 기본값을 '새 게스트에게만' 적용하는 데 쓰임. (아이템용 `hasStoredItems` 는 카탈로그 분리로 불필요해져 **제거했다** — 기본 아이템을 유저 데이터에 심지 않으므로 '새 게스트인가' 판정 자체가 필요 없다.)
 - **`loadCalMode()` / `saveCalMode(m)`** — 달력 보기 로컬 저장(동기화 안 함).
 
 ## 클라우드 스냅샷
