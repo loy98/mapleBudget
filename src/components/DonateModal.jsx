@@ -62,7 +62,8 @@ export default function DonateModal({ onClose }) {
       <>
         <div className="modal-title"><IconCoffee />개발자에게 커피 한잔</div>
         <p className="modal-body">
-          이 계산기는 무료이고 앞으로도 무료입니다. 광고도 없습니다.
+          {/* '광고도 없습니다'는 뺐다 — 나중에 광고가 붙으면 이 문장이 거짓말이 된다. 지킬 수 없는 약속은 안 한다. */}
+          이 계산기는 무료이고 앞으로도 무료입니다.
           도움이 되셨다면 커피 한잔 값으로 응원해 주세요 — 서버·도메인 유지비와 다음 기능에 씁니다.
           <br />
           <span className="muted">후원해도 추가 기능이 열리거나 데이터가 달라지지 않습니다. 순수한 응원입니다. 🙇</span>
