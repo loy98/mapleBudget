@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS, ITEM_CATS, itemCat } from "../lib/constants.js";
+import { TIERS, CHARGE_METHODS, MVP_GRADES, SPLITS, DEFAULT_SETTINGS, ITEM_CATS, itemCat, isAllowedIconUrl } from "../lib/constants.js";
 import { won, pct, eok, ml, mlN, uid } from "../lib/util.js";
 import { hasFeeBenefit } from "../lib/calc.js";
 import { NumInput, CSelect, KpiBox, CostLabel, PlLabel, MilUse, IconView, ProgressRing } from "./ui.jsx";
@@ -361,22 +361,43 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                   이 계정에서는 그 복사본이 기본 아이템을 대신합니다. 안 쓰는 건 숨길 수 있고, 언제든 되돌릴 수 있습니다.
                 </div>
                 <table className="itemedit">
+                  {/* 열 너비 고정. 기본 행은 텍스트, 내 아이템 행은 입력 컨트롤이라 열 너비를 자동으로 두면
+                      같은 열이 행마다 다른 폭을 요구해 칸 크기가 들쭉날쭉해진다. */}
+                  <colgroup>
+                    <col style={{ width: "16%" }} /><col style={{ width: "24%" }} /><col style={{ width: "15%" }} />
+                    <col style={{ width: "13%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} />
+                    <col style={{ width: "13%" }} />
+                  </colgroup>
                   <thead><tr><th>아이콘</th><th>이름</th><th>분류</th><th>캐시가(원)</th><th className="milh">마일가능</th><th>구분</th><th></th></tr></thead>
                   <tbody>
                     {listItems.map((it) => {
                       const mine = it.source === "user";
+                      // 아이콘은 행마다 **한 번만** 보여준다.
+                      // 이모지는 입력칸 안에서 그대로 이모지로 보이므로 옆에 미리보기를 또 그리면 같은 그림이 두 개가 된다.
+                      // 미리보기는 입력칸에 원문(긴 URL)만 보이는 이미지 아이콘일 때만 붙인다.
+                      // 아이콘 값은 app_config(DB)/클라우드에서 오므로 문자열이 아닐 수 있다(객체·숫자).
+                      // IconView 는 그걸 막지만, 여기서 먼저 .trim() 을 부르면 그 방어 앞에서 렌더가 깨진다.
+                      const iconText = typeof it.icon === "string" ? it.icon.trim() : "";
+                      const urlIcon = isAllowedIconUrl(iconText);
                       return (
                         <tr key={it._k} className={mine ? "row-mine" : "row-base"}>
                           <td>
-                            <span className="prev"><IconView icon={it.icon} /></span>{" "}
-                            {mine
-                              ? <input value={it.icon || ""} style={{ width: 64 }} placeholder="🫐/URL" onChange={(e) => setMyItem(it.id, { icon: e.target.value })} />
-                              : <span className="ro">{it.icon || "–"}</span>}
+                            <span className="icocell">
+                              {mine ? (
+                                <>
+                                  {/* 미리보기 칸은 이모지일 때도 자리를 비워 둔다 — 입력칸 시작점이 행마다 어긋나지 않게. */}
+                                  <span className="prev">{urlIcon ? <IconView icon={iconText} /> : null}</span>
+                                  <input value={iconText} placeholder="🫐/URL" onChange={(e) => setMyItem(it.id, { icon: e.target.value })} />
+                                </>
+                              ) : (
+                                <span className="prev">{iconText ? <IconView icon={iconText} /> : <span className="ro">–</span>}</span>
+                              )}
+                            </span>
                           </td>
                           <td>
                             {mine
                               ? <input value={it.name || ""} onChange={(e) => setMyItem(it.id, { name: e.target.value })} />
-                              : <span className="ro">{it.name}</span>}
+                              : <span className="ro name-ro" title={it.name}>{it.name}</span>}
                           </td>
                           <td>
                             {mine
@@ -385,7 +406,7 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                           </td>
                           <td>
                             {mine
-                              ? <NumInput noStepper width={100} step={100} value={it.cash || ""} onChange={(v) => setMyItem(it.id, { cash: v })} />
+                              ? <NumInput noStepper step={100} value={it.cash || ""} onChange={(v) => setMyItem(it.id, { cash: v })} />
                               : <span className="ro num">{it.cash ? (+it.cash).toLocaleString() : "–"}</span>}
                           </td>
                           <td className="mil-cell">
@@ -399,17 +420,21 @@ export default function CalcTab({ settings, setSettings, charges, setCharges, it
                               : <span className="tag base">기본</span>}
                           </td>
                           <td className="rowbtns">
-                            {/* 수정본이면 '되돌리기'(그 행을 지우면 카탈로그 원본이 다시 보인다), 내가 만든 것이면 '삭제'. */}
-                            {mine ? (
-                              it.overrides
-                                ? <button className="mini" title="기본값으로 되돌리기" onClick={() => onRevertToCatalog(it.id)}>되돌리기</button>
-                                : <button className="del" title="삭제" onClick={() => delMyItem(it.id)}>×</button>
-                            ) : (
-                              <>
-                                <button className="mini" title="내 아이템으로 복사해서 수정" onClick={() => setEditing(it)}>수정</button>
-                                <button className="mini" title="이 목록에서 숨기기" onClick={() => onHideCatalogItem(it)}>숨기기</button>
-                              </>
-                            )}
+                            {/* 플렉스는 td 가 아니라 안쪽 래퍼에 준다 — td 를 flex 로 만들면 표 셀 박스에서 빠져
+                                행 밑줄이 이 칸 앞에서 끊긴다. */}
+                            <div className="btns">
+                              {/* 수정본이면 '되돌리기'(그 행을 지우면 카탈로그 원본이 다시 보인다), 내가 만든 것이면 '삭제'. */}
+                              {mine ? (
+                                it.overrides
+                                  ? <button className="mini" title="기본값으로 되돌리기" onClick={() => onRevertToCatalog(it.id)}>되돌리기</button>
+                                  : <button className="del" title="삭제" onClick={() => delMyItem(it.id)}>×</button>
+                              ) : (
+                                <>
+                                  <button className="mini" title="내 아이템으로 복사해서 수정" onClick={() => setEditing(it)}>수정</button>
+                                  <button className="mini" title="이 목록에서 숨기기" onClick={() => onHideCatalogItem(it)}>숨기기</button>
+                                </>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

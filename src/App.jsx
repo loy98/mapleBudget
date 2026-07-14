@@ -14,14 +14,20 @@ import LogTab from "./components/LogTab.jsx";
 import ForecastTab from "./components/ForecastTab.jsx";
 import AuthBar from "./components/AuthBar.jsx";
 import ThemeMenu from "./components/ThemeMenu.jsx";
-import { IconHelp, IconChat } from "./components/ui/icons.jsx";
+import { IconHelp, IconChat, IconCoffee } from "./components/ui/icons.jsx";
 import HelpModal from "./components/HelpModal.jsx";
 import FeedbackModal from "./components/FeedbackModal.jsx";
+import DonateModal from "./components/DonateModal.jsx";
+import { DONATE, donateOptions } from "./lib/donate.js";
 import Modal from "./components/Modal.jsx";
 import StorageAlert from "./components/StorageAlert.jsx";
 import ToastHost from "./components/ui/Toast.jsx";
 import RestoreReloadModal from "./components/RestoreReloadModal.jsx";
 import { toast, queueToast, flushQueuedToast } from "./lib/toast.js";
+
+// 후원 수단이 하나도 설정돼 있지 않으면 진입점 자체를 감춘다(빈 모달을 열게 두지 않는다).
+// 설정은 상수라 렌더마다 같다 → 모듈 스코프에서 한 번만 계산.
+const DONATE_ENABLED = donateOptions(DONATE).any;
 
 const TABS = [
   { id: "calc", label: "계산기" },
@@ -233,12 +239,21 @@ export default function App() {
 
       <StorageAlert />
 
-      <div className="tabs">
-        {TABS.map((t) => (
-          <button key={t.id} className={"tab" + (tab === t.id ? " on" : "")} onClick={() => setTab(t.id)}>
-            {t.label}
+      {/* 탭 줄 오른쪽에 후원 버튼. 헤더(로그인·테마·도움말)보다 한 칸 아래라 헤더가 붐비지 않으면서도
+          첫 화면에서 바로 보인다. */}
+      <div className="tabsrow">
+        <div className="tabs">
+          {TABS.map((t) => (
+            <button key={t.id} className={"tab" + (tab === t.id ? " on" : "")} onClick={() => setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {DONATE_ENABLED && (
+          <button className="hbtn donate" onClick={() => setModal("donate")} title="개발자에게 커피 한잔">
+            <IconCoffee className="hbtn-ico" /><span className="hbtn-lbl">개발자에게 커피 한잔</span>
           </button>
-        ))}
+        )}
       </div>
 
       {tab === "calc" && (
@@ -274,6 +289,14 @@ export default function App() {
             ? "로그인하면 기기 간 자동 동기화됩니다. 로그인 없이는 이 브라우저(localStorage)에만 저장됩니다."
             : "모든 데이터는 이 브라우저(localStorage)에만 저장됩니다. 기기 변경 시 내보내기/가져오기를 사용하세요."}
         </p>
+        {DONATE_ENABLED && (
+          <p className="donate-foot">
+            <button className="linklike" onClick={() => setModal("donate")}>
+              <IconCoffee /> 개발자에게 커피 한잔
+            </button>
+            <span className="hint"> — 계산기는 계속 무료입니다. 응원은 큰 힘이 됩니다.</span>
+          </p>
+        )}
         {/* 정적 페이지(public/)라 SPA 라우팅이 아닌 전체 이동. 크롤러가 직접 읽을 수 있어야 함. */}
         <p className="legal-links">
           <a href="/guide">엠작 가이드</a>
@@ -302,6 +325,7 @@ export default function App() {
       {conflictPrompt && <ConflictModal onChoose={conflictPrompt.onChoose} />}
       {modal === "help" && <HelpModal onClose={() => setModal(null)} />}
       {modal === "feedback" && <FeedbackModal session={session} onClose={() => setModal(null)} />}
+      {modal === "donate" && <DonateModal onClose={() => setModal(null)} />}
     </div>
   );
 }

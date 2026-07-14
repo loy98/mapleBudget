@@ -51,7 +51,19 @@
     letter-spacing:.5px;box-shadow:0 2px 8px -2px color-mix(in srgb,var(--accent) 55%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
   header h1{font-size:21px;margin:0;letter-spacing:-.5px;font-weight:800}
   header .sub{color:var(--sub);font-size:12px}
-  .tabs{display:flex;gap:8px;margin:16px 0 6px;border-bottom:1px solid var(--line)}
+  /* 탭 줄 + 오른쪽 후원 버튼. 밑줄(border-bottom)은 줄 전체가 갖고, 탭 자신은 갖지 않는다
+     — 안 그러면 후원 버튼 아래만 선이 끊긴다. */
+  .tabsrow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    margin:16px 0 6px;border-bottom:1px solid var(--line)}
+  .tabsrow .donate{margin-bottom:6px;flex:none}
+  .tabs{display:flex;gap:8px}
+  /* 좁은 화면에서는 후원 버튼이 다음 줄로 내려간다 → 밑줄이 버튼 아래로 따라 내려가 탭과 어긋난다.
+     그때는 줄 전체가 아니라 탭이 밑줄을 갖는다(탭 아래에 선이 붙어 있어야 탭처럼 보인다). */
+  @media(max-width:640px){
+    .tabsrow{border-bottom:none;align-items:stretch;flex-direction:column;gap:8px}
+    .tabs{border-bottom:1px solid var(--line)}
+    .tabsrow .donate{margin-bottom:0;align-self:flex-end}
+  }
   .tab{background:none;border:none;color:var(--sub);font-size:14px;font-weight:700;padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tab.on{color:var(--accent);border-bottom-color:var(--accent)}
   .subtabs{display:flex;gap:6px;margin:14px 0}
@@ -130,10 +142,26 @@
     background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
   .chip.ghosted{opacity:.55;cursor:default}
   .chip.ghosted:hover{border-color:var(--line);background:var(--panel2)}
-  /* 목록 편집 표 */
+  /* 목록 편집 표.
+     열 너비는 colgroup 으로 고정(table-layout:fixed). 안 그러면 기본 행(텍스트)과 내 아이템 행(입력 컨트롤)이
+     같은 열에서 서로 다른 폭을 요구해 칸 크기가 행마다 달라 보인다. */
+  .itemedit{table-layout:fixed}
+  .itemedit th,.itemedit td{padding:6px 7px;vertical-align:middle;height:44px;box-sizing:border-box}
   .itemedit .ro{color:var(--sub);font-size:13px}
   .itemedit .row-base{background:color-mix(in srgb,var(--panel2) 55%,transparent)}
-  .itemedit .rowbtns{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+  /* 행 높이를 텍스트 행과 맞춘다 — 입력 컨트롤이 기본 크기면 내 아이템 행만 20px 가까이 커진다. */
+  .itemedit td input[type=text],.itemedit td input:not([type]){padding:5px 8px;font-size:13px;height:30px}
+  .itemedit td .csel{display:block}
+  .itemedit td .csel-btn{height:30px;padding-top:0;padding-bottom:0;font-size:13px}
+  .itemedit .icocell{display:flex;align-items:center;gap:6px;min-width:0}
+  /* 아이콘 미리보기 칸은 폭을 고정한다(이모지·이미지·없음이 섞여도 이름 열 시작점이 흔들리지 않게). */
+  .itemedit .icocell .prev{flex:none;width:20px;display:inline-flex;align-items:center;justify-content:center}
+  .itemedit .icocell input{min-width:0}
+  .itemedit .name-ro{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* td 에 직접 display:flex 를 주면 그 셀이 표 셀 박스에서 빠져나가 행 밑줄이 그 앞에서 끊긴다.
+     플렉스는 반드시 셀 '안쪽' 래퍼에 준다. */
+  .itemedit td.rowbtns{text-align:right}
+  .itemedit .rowbtns .btns{display:flex;gap:4px;justify-content:flex-end;align-items:center}
   .tag{display:inline-block;padding:2px 7px;border-radius:7px;font-size:10.5px;font-weight:800;line-height:1.5;white-space:nowrap}
   .tag.base{background:var(--panel2);border:1px solid var(--line);color:var(--hint)}
   .tag.own{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
@@ -374,6 +402,85 @@
 .hbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .hbtn-ico{width:16px;height:16px;flex:none}
 .hbtn-lbl{white-space:nowrap}
+/* 후원 버튼은 헤더의 다른 버튼들과 달리 **채운 알약**으로 둔다 — 눈에 띄어야 눌린다.
+   그래도 액센트 톤 안에 머물러 광고처럼 튀지는 않는다. */
+.hbtn.donate{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);
+  border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:999px;font-weight:700}
+.hbtn.donate:hover{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.hbtn.donate .hbtn-ico{width:15px;height:15px}
+/* 좁은 화면에서 헤더 라벨이 전부 숨는데(.hbtn-lbl display:none), 후원만은 글자를 남긴다.
+   아이콘만 남으면 뭘 하는 버튼인지 알 수 없어 후원 진입점으로서 죽는다. */
+@media(max-width:720px){
+  .hbtn.donate .hbtn-lbl{display:inline}
+  .hbtn.donate{padding:7px 12px}
+}
+/* 푸터 진입점 — 카드로 감싸 본문과 구분한다(그냥 링크면 약관 링크들 사이에 묻힌다). */
+.donate-foot{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;
+  margin:14px auto 0;padding:10px 16px;background:var(--panel2);border:1px solid var(--line);border-radius:999px}
+.donate-foot .linklike{display:inline-flex;align-items:center;gap:6px;font-weight:800;font-size:13px}
+.donate-foot .linklike svg{width:15px;height:15px}
+.donate-foot .hint{display:inline;margin-top:0}
+.donate-ways{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.dway{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.dw-t{font-size:11.5px;color:var(--sub);font-weight:700;margin-bottom:6px}
+.dw-acc{display:flex;flex-direction:column;gap:2px;margin-bottom:9px}
+.dw-bank{font-size:12px;color:var(--sub)}
+.dw-num{font-size:16px;font-weight:800;letter-spacing:.2px;user-select:all}
+/* 카카오페이 영역 — 카카오 브랜드 톤(노랑 #FEE500 + 카카오 브라운 #3C1E1E)을 쓴다.
+   테마(라이트/다크)와 무관하게 고정색이다. 카카오 노랑 위의 글자는 항상 브라운이어야 읽힌다. */
+.dway.kakao{background:color-mix(in srgb,#FEE500 12%,var(--panel2));border-color:color-mix(in srgb,#FEE500 45%,var(--line))}
+.dway.kakao .dw-t{display:flex;align-items:center;gap:6px;color:var(--txt)}
+/* 섹션 제목의 카카오 심볼: 라이트에선 카카오 브라운, 다크에선 노랑(각 배경에서 읽히는 쪽). */
+.kico{width:15px;height:15px;flex:none}
+.dway.kakao .dw-t .kico{color:#3C1E1E}
+[data-theme="dark"] .dway.kakao .dw-t .kico{color:#FEE500}
+
+/* 금액 제안 버튼. 링크가 아니라 **선택**이다 — 카카오 링크는 PC 에서 404 라 누르게 두면 안 된다.
+   고른 금액은 아래 QR 안내 문구에 반영된다. 2열 그리드라 멘트 길이가 달라도 폭이 안 흔들린다. */
+.damts{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px}
+.damt{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  background:#FEE500;color:#3C1E1E;border:2px solid transparent;font-family:inherit;
+  padding:10px;border-radius:14px;cursor:pointer;text-align:center;
+  box-shadow:0 1px 0 rgba(0,0,0,.06);transition:transform .1s,box-shadow .12s,filter .12s}
+.damt:hover{filter:brightness(1.03);transform:translateY(-1px);box-shadow:0 4px 10px rgba(254,229,0,.35)}
+.damt:active{transform:translateY(0)}
+.damt.on{border-color:#3C1E1E;box-shadow:0 4px 12px rgba(254,229,0,.45)}
+/* '직접 입력'(자유금액)은 금액 제안들과 위계가 보이게 보조 톤. 한 줄을 다 쓴다. */
+.damt.free{grid-column:1 / -1;background:var(--panel);color:var(--sub);border-color:var(--line);box-shadow:none}
+.damt.free:hover{background:var(--panel);border-color:var(--accent);color:var(--accent);filter:none;box-shadow:none}
+.damt.free.on{background:var(--panel);border-color:var(--accent);color:var(--accent)}
+.damt .da-won{font-size:14px;font-weight:900;line-height:1;letter-spacing:-.2px}
+.damt .da-note{font-size:11px;font-weight:700;line-height:1;opacity:.66}
+.damt:focus-visible{outline:2px solid #3C1E1E;outline-offset:2px}
+
+/* QR — PC 에서 링크 대신 이걸 찍는다. 흰 바탕은 QR 인식률 때문에 필수(다크 테마에서도 흰 바탕 유지). */
+.qr-wrap{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.qr-box{flex:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;box-sizing:content-box;
+  display:flex;align-items:center;justify-content:center}
+.qr-box{position:relative}
+.qr-box img{display:block;border-radius:4px}
+/* 가운데 카카오 심볼. QR 은 오류정정 H(30% 복원)라 이 정도 가림은 인식에 지장이 없다. */
+.qr-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;
+  background:#FEE500;color:#3C1E1E;box-shadow:0 0 0 3px #fff}
+.qr-center svg{width:19px;height:19px}
+.qr-fail{font-size:11px;color:var(--hint);word-break:break-all;background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:10px}
+.qr-guide{flex:1;min-width:150px;display:flex;flex-direction:column;gap:5px}
+.qr-guide b{font-size:13px;color:var(--txt)}
+.qr-guide .hint{margin-top:0}
+.kakao-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;
+  align-self:flex-start;margin-top:4px;background:#FEE500;color:#3C1E1E;font-weight:800}
+.kakao-btn:hover{background:#f2da00}
+.kakao-btn .kico{color:#3C1E1E}
+
+/* 계좌번호 옆 복사 아이콘 버튼(보편적인 겹친 종이 기호). 라벨 버튼보다 줄이 짧아진다. */
+.dw-numrow{display:flex;align-items:center;gap:8px}
+.icobtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;
+  background:var(--panel);border:1px solid var(--line);color:var(--sub);border-radius:8px;cursor:pointer;padding:0}
+.icobtn svg{width:15px;height:15px}
+.icobtn:hover{border-color:var(--accent);color:var(--accent)}
+.icobtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* 테마 선택 드롭다운 */
 .thememenu{position:relative;display:inline-flex}
 .thememenu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:1000;min-width:158px;

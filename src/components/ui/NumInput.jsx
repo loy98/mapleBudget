@@ -4,7 +4,8 @@ import { IconChevron } from "./icons.jsx";
 // ===== 숫자 입력 (테마 스테퍼) =====
 // 편집 중에는 자유롭게 지울 수 있고(완전 삭제 가능), 다 지운 채 포커스를 벗어나면 0으로,
 // 다 지우고 숫자를 입력하면 그 값으로 확정된다. 값은 문자열로 전달(계산부는 +x||0로 처리).
-export function NumInput({ value, onChange, step = 1, width, noStepper, placeholder }) {
+// ariaLabel: 옆에 <label> 을 둘 수 없는 자리(표 안, 칩 옆)에서 스크린리더용 이름을 준다.
+export function NumInput({ value, onChange, step = 1, width, noStepper, placeholder, ariaLabel }) {
   const [focused, setFocused] = useState(false);
   const [draft, setDraft] = useState("");
   const display = value === "" || value == null ? "" : String(value);
@@ -28,6 +29,7 @@ export function NumInput({ value, onChange, step = 1, width, noStepper, placehol
       inputMode="decimal"
       value={shown}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       style={width ? { width } : undefined}
       onFocus={() => { setDraft(display); setFocused(true); }}
       onBlur={onBlur}
