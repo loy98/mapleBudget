@@ -1,24 +1,30 @@
 // ===== 후원('개발자에게 커피 한잔') 설정 =====
-// 결제 연동은 하지 않는다. 송금 수단(계좌·카카오페이·토스)만 보여주고 **보내는 사람이 직접** 자기 앱에서 보낸다.
+// 결제 연동은 하지 않는다. 송금 수단(계좌·카카오페이)만 보여주고 **보내는 사람이 직접** 자기 앱에서 보낸다.
 // 서버도, 결제사 심사도, 개인정보 수집도 필요 없다.
 //
-// 금액 버튼(프리셋/직접 입력)은 **토스에만** 붙는다. 토스는 `toss.me/{아이디}/{금액}` 으로 금액이 링크에 실린다.
-// 카카오페이 링크(qr.kakaopay.com)는 금액을 URL 로 넘기는 공식 형식이 확인되지 않았다 →
-// 금액은 카카오페이 앱에서 직접 넣게 두고, 링크에 금액을 억지로 붙이지 않는다(틀린 금액이 실리면 돈 문제가 된다).
+// 금액은 **URL 로 조립하지 않는다.** 카카오페이 송금 링크(qr.kakaopay.com/XXXX)의 뒷부분은
+// "유저와 금액 등을 식별하려고 생성된 값"이고 그 생성 방식·파라미터는 공개돼 있지 않다(카카오페이 개발자센터 공식 답변).
+// → 금액 버튼을 만들려면 **카카오페이 앱에서 금액별로 링크를 따로 발급**받아 amounts 에 넣는다.
+//   금액을 비우고 만든 링크(free)는 보내는 사람이 앱에서 금액을 직접 넣는다.
+//
+// (토스아이디 `toss.me/{아이디}/{금액}` 은 금액을 링크에 실을 수 있었지만 **서비스가 종료**됐다. 되살리지 말 것.)
 //
 // 값을 비우면 그 수단은 화면에 나오지 않고, 전부 비면 진입점(헤더·푸터)까지 숨는다.
 export const DONATE = {
   bank: { name: "신한", holder: "ㅈㅈㅎ", account: "110-472-965110" },
-  tossId: "", // 토스아이디 (토스 앱 → 송금 → 내 토스아이디). "abc" → https://toss.me/abc
-  kakaoPayUrl: "", // 카카오페이 송금 링크 (https://qr.kakaopay.com/... )
-  amounts: [3000, 5000, 10000], // 금액 프리셋(원)
+  kakaoPay: {
+    free: "", // 금액 없이 만든 카카오페이 송금 링크 (https://qr.kakaopay.com/... )
+    amounts: [
+      // { won: 3000, url: "https://qr.kakaopay.com/..." },  ← 앱에서 3,000원 고정 QR 을 만들고 그 링크를 넣는다
+    ],
+  },
 };
 
 // 링크는 신뢰 호스트의 https 만 허용한다. 설정이 잘못 들어가도(오타·http·낯선 도메인)
 // 사용자를 엉뚱한 곳으로 보내지 않는다 — 돈이 오가는 링크라 아이콘 URL 보다 보수적으로 막는다.
-const ALLOWED_HOSTS = { kakaoPayUrl: ["qr.kakaopay.com", "link.kakaopay.com"] };
+const KAKAO_HOSTS = ["qr.kakaopay.com", "link.kakaopay.com"];
 
-export function safeDonateUrl(kind, raw) {
+export function safeKakaoUrl(raw) {
   if (typeof raw !== "string" || !raw.trim()) return "";
   let u;
   try {
@@ -27,33 +33,17 @@ export function safeDonateUrl(kind, raw) {
     return "";
   }
   if (u.protocol !== "https:") return "";
-  return (ALLOWED_HOSTS[kind] || []).includes(u.hostname) ? u.href : "";
+  return KAKAO_HOSTS.includes(u.hostname) ? u.href : "";
 }
 
-// 토스아이디는 URL 경로에 그대로 들어간다 → 경로를 깨거나 다른 곳으로 튀지 않는 문자만 허용한다.
-// (`../`, `//evil.com`, 공백 등을 인코딩으로 덮지 않고 아예 거부한다 — 애초에 토스아이디에 없는 문자다.)
-// `.` 과 `..` 은 문자 자체는 허용 범위지만 경로에서 특별한 뜻(현재/상위 디렉터리)이라 따로 막는다.
-const TOSS_ID_RE = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,30}$/;
-
-// 금액은 **정수 원 단위만**. 링크에 실리는 값이라 입력과 조금이라도 다르면 안 된다 —
-// `5000.7` 을 5000 으로 조용히 잘라 넣으면 사용자가 의도하지 않은 금액이 송금 화면에 뜬다.
-// 이상한 값은 0 → 금액 없는 링크(앱에서 직접 입력)로 폴백한다. 토스 1회 한도는 200만원.
+// 금액은 버튼 **라벨**로만 쓰인다(링크에는 이미 금액이 박혀 있다). 그래도 표시가 틀리면 안 되므로
+// 정수 원 단위만 받는다 — `+v` 강제변환은 "1e3"·[5000] 같은 값까지 통과시킨다.
 export const MAX_DONATE_AMOUNT = 2000000;
 const inRange = (n) => (n >= 100 && n <= MAX_DONATE_AMOUNT ? n : 0);
 export function safeAmount(v) {
   if (typeof v === "number") return Number.isInteger(v) ? inRange(v) : 0;
-  // 문자열은 숫자만으로 이뤄진 것만 받는다(`+v` 강제변환은 "1e3"·" 5000 "·[5000] 까지 통과시킨다).
   if (typeof v === "string" && /^\d+$/.test(v.trim())) return inRange(Number(v.trim()));
   return 0;
-}
-
-// 금액이 유효하지 않으면 **금액 없는 링크**를 준다 → 토스 앱에서 직접 금액을 넣게 된다.
-// (금액을 못 붙인다고 송금 자체를 막을 이유는 없다.)
-export function tossUrl(tossId, amount) {
-  const id = typeof tossId === "string" ? tossId.trim() : "";
-  if (!TOSS_ID_RE.test(id)) return "";
-  const n = safeAmount(amount);
-  return `https://toss.me/${id}${n ? `/${n}` : ""}`;
 }
 
 // 화면이 쓰는 형태로 정리. 유효한 수단이 하나도 없으면 any === false → 진입점을 숨긴다.
@@ -72,10 +62,20 @@ export function donateOptions(cfg = DONATE) {
         copyText: [name, account, holder].filter(Boolean).join(" "),
       }
     : null;
-  const kakao = safeDonateUrl("kakaoPayUrl", cfg && cfg.kakaoPayUrl);
-  const tossId = tossUrl(cfg && cfg.tossId, 0) ? str(cfg.tossId) : "";
-  // 프리셋은 유효한 금액만, 중복 없이, 오름차순으로.
-  const amounts = [...new Set((Array.isArray(cfg && cfg.amounts) ? cfg.amounts : []).map(safeAmount).filter(Boolean))]
-    .sort((x, y) => x - y);
-  return { bank, kakao, tossId, amounts, any: Boolean(bank || kakao || tossId) };
+
+  const kp = (cfg && cfg.kakaoPay) || {};
+  const free = safeKakaoUrl(kp.free);
+  // 금액과 링크가 **둘 다** 유효한 것만 남긴다. 링크가 깨졌으면 버튼이 아무 데도 못 가고,
+  // 금액이 이상하면 라벨이 거짓말을 한다(5,000원이라 써 놓고 다른 금액이 열린다) — 둘 다 위험하다.
+  const seen = new Set();
+  const amounts = (Array.isArray(kp.amounts) ? kp.amounts : [])
+    .map((a) => ({ won: safeAmount(a && a.won), url: safeKakaoUrl(a && a.url) }))
+    .filter((a) => {
+      if (!a.won || !a.url || seen.has(a.won)) return false;
+      seen.add(a.won);
+      return true;
+    })
+    .sort((x, y) => x.won - y.won);
+
+  return { bank, kakao: { free, amounts }, any: Boolean(bank || free || amounts.length) };
 }
