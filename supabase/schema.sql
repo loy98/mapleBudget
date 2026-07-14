@@ -491,7 +491,8 @@ begin
   --
   -- 첨부 경로에는 uid 가 박혀 있다(`<uid>/…`). 그것까지 남기면 "작성자를 익명화했다"는 말이
   -- 절반만 참이 된다 — 탈퇴한 사람의 문의들을 uid 로 다시 한 줄에 꿸 수 있기 때문이다(Codex 지적).
-  -- 실물 파일은 클라이언트가 Storage API 로 먼저 지운다(cloud.js deleteAccount).
+  -- 실물 파일은 **이 RPC 가 성공한 뒤** 클라이언트가 Storage API 로 지운다(cloud.js deleteAccount).
+  -- 클라이언트는 그 경로 목록을 이 RPC 를 부르기 전에 미리 읽어 둔다(여기서 비워지므로).
   update public.feedback
      set user_id = null, email = null, attachments = '[]'::jsonb, updated_at = now()
    where user_id = v_uid;
