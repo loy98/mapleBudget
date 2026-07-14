@@ -7,9 +7,13 @@
 
 ## 0. 30초 요약
 
-**미병합 브랜치 없음. `dev` = `main` = 프로덕션 배포 완료.** 테스트 **482건**(20파일) 전부 통과.
+**`dev` 가 `main` 보다 앞서 있다 — 배포되지 않은 기능이 `dev` 에 있다.** 테스트 **521건**(23파일) 전부 통과.
 
-2026-07-14 은 두 세션이었다.
+> 🔴 **다음 세션이 가장 먼저 볼 것:** `dev` 의 새 기능(계정 삭제 · 내 문의 · 첨부 · 메일)은
+> **사람이 Supabase 대시보드에서 SQL 을 적용해야 동작한다.** 적용 전에 `main` 에 병합(=배포)하면
+> '내 문의'와 첨부가 실패한다(계산기·문의 전송 자체는 정상). 절차와 체크리스트는 **§8**.
+
+2026-07-14 은 세 세션이었다(A·B·C). C 는 §8.
 
 **세션 A** — 발단은 "원더베리 가격을 DB에서 고쳤는데 반영이 안 된다"는 리포트였다.
 파고 보니 **아이템 데이터 모델 자체가 잘못**돼 있었고, 그걸 고치는 데까지 갔다.
@@ -30,8 +34,9 @@
 ## 1. 브랜치 상태
 
 ```
-main = dev = 7452e30   (프로덕션 https://maplemvpcalculator.com, Cloudflare 자동배포)
-feature/account-and-feedback   ← 미병합. 계정 삭제 · 내 문의(상태/답변) · 이미지 첨부 · 메일 알림
+main = 7452e30   (프로덕션 https://maplemvpcalculator.com, Cloudflare 자동배포)
+dev  = e84532b   ← main 보다 5커밋 앞섬. 계정 삭제 · 내 문의(상태/답변) · 이미지 첨부 · 메일 알림 (§8)
+                   feature/account-and-feedback 은 dev 에 병합 완료(브랜치는 남겨 둠)
 ```
 
 `dev` 는 다른 워크트리(`C:\Users\82108\Documents\Claude\Projects\MVP작`)에 체크아웃돼 있어
@@ -39,8 +44,12 @@ orca 트리에서 `git checkout dev` 가 안 된다 → `git checkout -b <featur
 `main` 병합은 detached HEAD 에서:
 `git checkout --detach origin/main && git merge --no-ff origin/dev && git push origin HEAD:main`
 
-**다음 액션**: `feature/account-and-feedback` 은 **사람이 대시보드 작업(§8)을 해야 완성된다.**
-SQL 을 적용하기 전에 병합·배포하면 '내 문의'와 첨부가 실패한다(문의 전송·계산기는 정상).
+**다음 액션 (순서대로)**:
+
+1. 사용자에게 **§8 의 대시보드 작업(① SQL 적용)을 했는지 확인**한다. 안 했으면 배포하지 않는다.
+2. 했다면 **로그인 상태로 실측**: 첨부해서 문의 전송 → '내 문의'에 접수됨 배지 → 대시보드에서 `reply` 채우기
+   → 앱에서 답변 확인 → (테스트 계정으로) 계정 삭제. 체크리스트는 [setup-feedback-account.md](setup-feedback-account.md) 맨 아래.
+3. 실측이 끝나면 **사용자 확인을 받고** `dev` → `main` 병합(=배포).
 
 ---
 
@@ -170,7 +179,7 @@ update app_config set config = jsonb_set(config,'{mesoRate}','3200'::jsonb), upd
 
 ### 기본
 ```bash
-npm test          # 482건. "Tests" 줄만 보지 말고 "Test Files" 줄도 볼 것(아래 참고)
+npm test          # 521건. "Tests" 줄만 보지 말고 "Test Files" 줄도 볼 것(아래 참고)
 npm run build     # PWA precache 생성까지 확인
 npm audit         # 0건이어야 함
 ```
@@ -348,8 +357,36 @@ npm test && npm run build            # 482건 통과가 기준선
 - **뮤테이션 2건** — ① 첨부 경로 소유자 검사 제거 ② 탈퇴가 `where` 없이 전원 삭제 → **둘 다 테스트가 잡았다.**
   (하네스 자체의 거짓 초록불도 이 과정에서 발견했다: `must_fail` 의 예외 핸들러가 자기가 던진 실패까지 삼켰다.)
 
-### 사람이 해야 할 것 (배포 전)
+### Codex 재검수에서 잡힌 것 (3회 반복 → PASS)
 
-[docs/setup-feedback-account.md](setup-feedback-account.md) — ① `schema.sql` 실행(필수) ② 답변하는 법
-③ Resend 키 ④ Edge Function 배포 + 웹훅. **①만 해도 계정 삭제·내 문의·상태/답변은 동작한다.**
-④의 도메인 인증 전에는 **운영자 알림만** 가고 문의자 답변 메일은 나가지 않는다(Resend 샌드박스 제한).
+같은 실수를 다시 하지 않도록 남긴다.
+
+| # | 지적 | 왜 위험한가 |
+|---|---|---|
+| HIGH | Edge Function 이 `WEBHOOK_SECRET` 없이도 동작 | `--no-verify-jwt` 배포라 그 헤더가 유일한 문지기다. 없으면 **누구나 POST 하나로 임의 주소에 메일을 쏘는 릴레이**가 된다 → fail-closed(500) |
+| MED | 탈퇴가 첨부 경로(`<uid>/…`)를 남김 | uid 로 탈퇴자의 문의를 다시 꿸 수 있다 → 익명화가 절반만 참 |
+| MED | storage INSERT 정책이 첫 폴더만 검사 | Storage API 직접 호출로 규약 밖 객체를 쌓을 수 있다 → 정책에도 트리거와 **같은 정규식** |
+| MED | 업로드 후 INSERT 실패 시 고아 파일 + 정리 불가 | 삭제 정책이 없어 클라이언트가 못 지웠다 → 본인 파일 삭제 정책 추가 |
+| MED | 전송 중 '취소'가 모달만 닫음 | `send()` 는 계속 살아 문의가 전송된다 → 전송 중 취소·×·Esc·탭 전부 잠금 |
+| MED | **파일 먼저 삭제 → RPC 실패** | "삭제 실패"를 보는데 첨부는 이미 없다 → **되돌릴 수 없는 쪽(RPC)을 먼저** |
+| LOW | 예외 시 `status="sending"` 고착 | 잠금이 안 풀려 모달이 영영 안 닫힌다 → `try/catch/finally` |
+
+### 사람이 해야 할 것 (배포 전) · 그다음 이어서 할 일
+
+**사람(사용자):** [docs/setup-feedback-account.md](setup-feedback-account.md) — ① `schema.sql` 실행(필수)
+② 답변하는 법 ③ Resend 키 ④ Edge Function 배포 + 웹훅.
+**①만 해도 계정 삭제·내 문의·상태/답변은 동작한다.** ④의 도메인 인증 전에는 **운영자 알림만** 가고
+문의자 답변 메일은 나가지 않는다(Resend 샌드박스 제한).
+
+**다음 세션(Claude):**
+
+- [ ] 사용자에게 **①을 했는지 먼저 묻는다.** 안 했으면 배포 금지(그 상태로 배포하면 '내 문의'·첨부가 실패).
+- [ ] ① 이 끝났으면 **로그인 상태 실측** — 첨부 전송 → '내 문의' 접수됨 → 대시보드에서 `reply` 채움 →
+      앱에서 답변 확인 → 테스트 계정으로 계정 삭제(재로그인 시 데이터 비었는지, `feedback` 행은 남고
+      `user_id`/`email`/`attachments` 가 비었는지).
+- [ ] ④ 까지 했으면 메일 2종(새 문의 → 운영자 / 답변 → 문의자) 도착 확인.
+- [ ] **사용자 확인을 받고** `dev` → `main` 병합(=배포). 배포 후 서비스워커 캐시 함정 주의(§6).
+- [ ] 배포 후: `feedback_throttle` 의 `anon:__all__` 카운터와 스토리지 사용량을 한 번 본다(B-9, 고아 첨부).
+
+**SQL 을 또 건드리게 되면** `supabase/tests/` 의 스텁·실측 스크립트를 그대로 다시 쓴다
+(일회용 PostgreSQL 클러스터 세우는 법은 §6).
