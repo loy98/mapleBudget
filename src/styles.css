@@ -433,6 +433,10 @@
 .damt:hover{filter:brightness(1.03);transform:translateY(-1px);box-shadow:0 4px 10px rgba(254,229,0,.35)}
 .damt:active{transform:translateY(0)}
 .damt.on{border-color:#3C1E1E;box-shadow:0 4px 12px rgba(254,229,0,.45)}
+/* '직접 입력'(자유금액)은 금액 제안들과 위계가 보이게 보조 톤. 한 줄을 다 쓴다. */
+.damt.free{grid-column:1 / -1;background:var(--panel);color:var(--sub);border-color:var(--line);box-shadow:none}
+.damt.free:hover{background:var(--panel);border-color:var(--accent);color:var(--accent);filter:none;box-shadow:none}
+.damt.free.on{background:var(--panel);border-color:var(--accent);color:var(--accent)}
 .damt .da-won{font-size:14px;font-weight:900;line-height:1;letter-spacing:-.2px}
 .damt .da-note{font-size:11px;font-weight:700;line-height:1;opacity:.66}
 .damt:focus-visible{outline:2px solid #3C1E1E;outline-offset:2px}
@@ -441,7 +445,13 @@
 .qr-wrap{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
 .qr-box{flex:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;box-sizing:content-box;
   display:flex;align-items:center;justify-content:center}
+.qr-box{position:relative}
 .qr-box img{display:block;border-radius:4px}
+/* 가운데 카카오 심볼. QR 은 오류정정 H(30% 복원)라 이 정도 가림은 인식에 지장이 없다. */
+.qr-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;
+  background:#FEE500;color:#3C1E1E;box-shadow:0 0 0 3px #fff}
+.qr-center svg{width:19px;height:19px}
 .qr-fail{font-size:11px;color:var(--hint);word-break:break-all;background:var(--panel);border:1px solid var(--line);
   border-radius:9px;padding:10px}
 .qr-guide{flex:1;min-width:150px;display:flex;flex-direction:column;gap:5px}

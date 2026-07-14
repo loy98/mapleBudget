@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 //
 // 생성은 비동기(canvas)라 실패할 수 있다. 실패를 조용히 삼키면 빈 네모만 남으므로,
 // 그때는 링크 원문을 대신 보여준다(주소를 직접 폰에 칠 수 있게).
-export function QrCode({ value, size = 168, label = "QR 코드" }) {
+export function QrCode({ value, size = 168, label = "QR 코드", center = null }) {
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
 
@@ -17,7 +17,9 @@ export function QrCode({ value, size = 168, label = "QR 코드" }) {
     setSrc("");
     setFailed(false);
     if (!value) return undefined;
-    QRCode.toDataURL(value, { width: size * 2, margin: 1, errorCorrectionLevel: "M" })
+    // 가운데에 심볼을 얹으므로 오류정정을 최고 등급(H, 30% 복원)으로 올린다.
+    // 안 그러면 심볼이 가린 모듈만큼 인식률이 떨어진다.
+    QRCode.toDataURL(value, { width: size * 2, margin: 1, errorCorrectionLevel: "H" })
       .then((url) => {
         if (alive) setSrc(url);
       })
@@ -37,6 +39,8 @@ export function QrCode({ value, size = 168, label = "QR 코드" }) {
   return (
     <div className="qr-box" style={{ width: size, height: size }}>
       {src && <img src={src} width={size} height={size} alt={label} />}
+      {/* 가운데 심볼(선택). 스캐너가 읽는 건 QR 모듈이고 이건 장식이라 aria 에서 감춘다. */}
+      {src && center && <span className="qr-center" aria-hidden="true">{center}</span>}
     </div>
   );
 }

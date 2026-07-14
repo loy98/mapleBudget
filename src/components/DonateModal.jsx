@@ -83,11 +83,23 @@ export default function DonateModal({ onClose }) {
                       {a.note && <span className="da-note">{a.note}</span>}
                     </button>
                   ))}
+                  {/* 금액을 고르지 않은 상태(= 자유금액 QR)도 하나의 선택지로 보여 준다.
+                      선택을 해제할 방법이 버튼 재클릭뿐이면 그걸 아무도 모른다. */}
+                  {kakao.free && (
+                    <button type="button" aria-pressed={pick === null}
+                      className={"damt free" + (pick === null ? " on" : "")} onClick={() => setPick(null)}>
+                      <span className="da-won">직접 입력</span>
+                      <span className="da-note">원하는 만큼</span>
+                    </button>
+                  )}
                 </div>
               )}
 
               <div className="qr-wrap">
-                <QrCode value={qrTarget} label="카카오페이 송금 QR 코드" />
+                {/* QR 은 고른 금액에 따라 바뀐다. 가운데 카카오 심볼은 장식이고 개인정보가 없다
+                    (앱이 준 QR 에는 실명·얼굴이 박혀 있어 그대로 쓰지 않는다 — donate.js 참고). */}
+                <QrCode value={qrTarget} label={`카카오페이 송금 QR 코드${chosen ? ` (${won(chosen.won)})` : ""}`}
+                  center={<IconKakaoBubble />} />
                 <div className="qr-guide">
                   <b>휴대폰 카메라로 QR을 찍어 주세요.</b>
                   <span className="hint">
