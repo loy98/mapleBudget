@@ -51,7 +51,19 @@
     letter-spacing:.5px;box-shadow:0 2px 8px -2px color-mix(in srgb,var(--accent) 55%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
   header h1{font-size:21px;margin:0;letter-spacing:-.5px;font-weight:800}
   header .sub{color:var(--sub);font-size:12px}
-  .tabs{display:flex;gap:8px;margin:16px 0 6px;border-bottom:1px solid var(--line)}
+  /* 탭 줄 + 오른쪽 후원 버튼. 밑줄(border-bottom)은 줄 전체가 갖고, 탭 자신은 갖지 않는다
+     — 안 그러면 후원 버튼 아래만 선이 끊긴다. */
+  .tabsrow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    margin:16px 0 6px;border-bottom:1px solid var(--line)}
+  .tabsrow .donate{margin-bottom:6px;flex:none}
+  .tabs{display:flex;gap:8px}
+  /* 좁은 화면에서는 후원 버튼이 다음 줄로 내려간다 → 밑줄이 버튼 아래로 따라 내려가 탭과 어긋난다.
+     그때는 줄 전체가 아니라 탭이 밑줄을 갖는다(탭 아래에 선이 붙어 있어야 탭처럼 보인다). */
+  @media(max-width:640px){
+    .tabsrow{border-bottom:none;align-items:stretch;flex-direction:column;gap:8px}
+    .tabs{border-bottom:1px solid var(--line)}
+    .tabsrow .donate{margin-bottom:0;align-self:flex-end}
+  }
   .tab{background:none;border:none;color:var(--sub);font-size:14px;font-weight:700;padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tab.on{color:var(--accent);border-bottom-color:var(--accent)}
   .subtabs{display:flex;gap:6px;margin:14px 0}

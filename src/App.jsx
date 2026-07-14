@@ -233,23 +233,27 @@ export default function App() {
           <button className="hbtn" onClick={() => setModal("feedback")} aria-label="피드백" title="피드백">
             <IconChat className="hbtn-ico" /><span className="hbtn-lbl">피드백</span>
           </button>
-          {DONATE_ENABLED && (
-            <button className="hbtn donate" onClick={() => setModal("donate")} aria-label="개발자에게 커피 한잔" title="개발자에게 커피 한잔">
-              <IconCoffee className="hbtn-ico" /><span className="hbtn-lbl">커피 한잔</span>
-            </button>
-          )}
           <AuthBar session={session} syncState={syncState} flushPendingUpload={flushPendingUpload} />
         </div>
       </header>
 
       <StorageAlert />
 
-      <div className="tabs">
-        {TABS.map((t) => (
-          <button key={t.id} className={"tab" + (tab === t.id ? " on" : "")} onClick={() => setTab(t.id)}>
-            {t.label}
+      {/* 탭 줄 오른쪽에 후원 버튼. 헤더(로그인·테마·도움말)보다 한 칸 아래라 헤더가 붐비지 않으면서도
+          첫 화면에서 바로 보인다. */}
+      <div className="tabsrow">
+        <div className="tabs">
+          {TABS.map((t) => (
+            <button key={t.id} className={"tab" + (tab === t.id ? " on" : "")} onClick={() => setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {DONATE_ENABLED && (
+          <button className="hbtn donate" onClick={() => setModal("donate")} title="개발자에게 커피 한잔">
+            <IconCoffee className="hbtn-ico" /><span className="hbtn-lbl">개발자에게 커피 한잔</span>
           </button>
-        ))}
+        )}
       </div>
 
       {tab === "calc" && (
