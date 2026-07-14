@@ -63,6 +63,21 @@ export const IconCoffee = (p) => (
   </svg>
 );
 
+// 복사(계좌번호 등). 보편적인 '겹친 종이' 모양 — 아이콘만으로 뜻이 통하는 몇 안 되는 기호다.
+export const IconCopy = (p) => (
+  <svg {...base} {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+  </svg>
+);
+
+// 카카오 말풍선(채움). stroke 아이콘들과 달리 면으로 채운다 — 카카오 버튼 위에 얹는 심볼이라.
+export const IconKakaoBubble = (p) => (
+  <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden focusable="false" {...p}>
+    <path d="M12 3.6C6.9 3.6 2.8 6.9 2.8 10.9c0 2.6 1.7 4.8 4.3 6.1l-1 3.6c-.1.3.3.6.6.4l4.3-2.8c.3 0 .7.1 1 .1 5.1 0 9.2-3.3 9.2-7.4S17.1 3.6 12 3.6z" />
+  </svg>
+);
+
 // 스테퍼용 얇은 셰브론(위/아래). rotate 는 CSS 로.
 export const IconChevron = (p) => (
   <svg {...base} {...p}>

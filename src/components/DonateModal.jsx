@@ -3,10 +3,14 @@
 // 결제를 대신 처리하지 않는다. 송금 수단을 보여줄 뿐이고 실제 송금은 사용자가 자기 앱에서 한다.
 // 그래서 이 화면은 어떤 개인정보·결제정보도 받지 않는다.
 //
-// 금액 버튼은 **금액이 이미 박힌 카카오페이 링크**로 바로 나간다(금액을 URL 로 조립하지 않는다 — donate.js 참고).
+// **QR 이 중심이다.** 카카오페이 송금 링크(qr.kakaopay.com/...)는 모바일/QR 스캔 전용이라
+// PC 브라우저로 열면 404 가 뜬다 → PC 에서는 링크를 누르게 하지 않고 QR 을 폰으로 찍게 한다.
+// 링크로 바로 여는 버튼은 **터치 기기에서만** 보여준다.
+import { useState, useEffect } from "react";
 import Modal from "./Modal.jsx";
 import { DONATE, donateOptions } from "../lib/donate.js";
-import { IconCoffee } from "./ui/icons.jsx";
+import { QrCode } from "./ui/QrCode.jsx";
+import { IconCoffee, IconCopy, IconKakaoBubble } from "./ui/icons.jsx";
 import { toast } from "../lib/toast.js";
 
 // 클립보드는 https(또는 localhost)에서만 동작하고 권한이 거부될 수도 있다.
@@ -22,17 +26,36 @@ async function copy(text) {
 
 const won = (n) => n.toLocaleString() + "원";
 
+// 터치 기기(=카카오페이 앱이 있는 기기)에서만 '앱으로 열기' 버튼을 낸다.
+// PC 에서 그 링크를 누르면 404 라, 없는 버튼이 있는 버튼보다 낫다.
+function useCanOpenApp() {
+  const [can, setCan] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCan(mq.matches);
+    sync();
+    // 한 번만 읽으면 입력장치가 바뀌었을 때(태블릿 키보드 도킹/분리 등) 낡은 값이 남는다.
+    // 구형 사파리는 addEventListener 가 없어 addListener 를 쓴다.
+    if (mq.addEventListener) {
+      mq.addEventListener("change", sync);
+      return () => mq.removeEventListener("change", sync);
+    }
+    mq.addListener(sync);
+    return () => mq.removeListener(sync);
+  }, []);
+  return can;
+}
+
 export default function DonateModal({ onClose }) {
   const { bank, kakao } = donateOptions(DONATE);
-  const hasKakao = Boolean(kakao.free || kakao.amounts.length);
-  // 금액이 미리 입력되는 버튼과 그렇지 않은 버튼이 **섞일 수 있다**(금액별 링크를 일부만 발급한 경우).
-  // 안내를 하나로 뭉뚱그리면 그 상태에서 반드시 거짓말이 된다 → 세 경우를 갈라서 말한다.
-  const nPre = kakao.amounts.filter((a) => a.prefilled).length;
-  const allPrefilled = kakao.amounts.length > 0 && nPre === kakao.amounts.length;
-  const mixed = nPre > 0 && nPre < kakao.amounts.length;
-  // 금액 버튼이 전부 자유금액 링크로 간다면 '직접 입력' 버튼은 그 버튼들과 목적지가 똑같다 → 감춘다.
-  // (금액별 링크가 설정되는 순간 목적지가 갈리므로 자동으로 다시 나타난다.)
-  const showFree = Boolean(kakao.free) && (kakao.amounts.length === 0 || nPre > 0);
+  const canOpenApp = useCanOpenApp();
+  // 제안 금액 선택. 링크에 금액이 박힌 항목(prefilled)을 고르면 QR 도 그 링크로 바뀐다.
+  // 그렇지 않으면 QR 은 자유금액 링크 그대로이고, 금액은 카카오페이에서 직접 넣는다 — 화면이 그렇게 말한다.
+  const [pick, setPick] = useState(null);
+  const chosen = kakao.amounts.find((a) => a.won === pick) || null;
+  const qrTarget = chosen ? chosen.href : kakao.free;
+  const hasKakao = Boolean(qrTarget);
 
   return (
     <Modal onClose={onClose} label="개발자에게 커피 한잔" cardClass="donate">
@@ -47,35 +70,40 @@ export default function DonateModal({ onClose }) {
 
         <div className="donate-ways">
           {hasKakao && (
-            <div className="dway">
-              <div className="dw-t">카카오페이로 보내기</div>
-              {/* 외부 사이트로 나간다 → noopener/noreferrer (탭 탈취·리퍼러 유출 차단). */}
-              <div className="damts" role="group" aria-label="후원 금액 선택">
-                {kakao.amounts.map((a) => (
-                  <a key={a.won} className="damt" href={a.href} target="_blank" rel="noopener noreferrer"
-                    // 섞인 상태에서는 이 버튼이 어느 쪽인지 버튼 자신이 말해야 한다(공용 안내문으로는 구분이 안 된다).
-                    aria-label={`${won(a.won)}${a.note ? ` · ${a.note}` : ""}${a.prefilled ? "" : " — 금액은 카카오페이에서 직접 입력"}`}>
-                    <span className="da-won">{won(a.won)}</span>
-                    <span className="da-note">
-                      {a.note}
-                      {mixed && !a.prefilled && <span className="da-manual">앱에서 입력</span>}
-                    </span>
-                  </a>
-                ))}
-                {showFree && (
-                  <a className="damt free" href={kakao.free} target="_blank" rel="noopener noreferrer">
-                    <span className="da-won">직접 입력</span>
-                    <span className="da-note">원하는 만큼</span>
-                  </a>
-                )}
-              </div>
-              {/* 금액이 미리 입력되는지 아닌지를 숨기지 않는다 — '1,000원'을 눌렀는데 빈 금액칸이 열리면
-                  라벨이 거짓말을 한 꼴이 된다. 어느 쪽인지 먼저 말해 준다. */}
-              <div className="hint">
-                카카오페이가 새 창에서 열립니다.{" "}
-                {allPrefilled && "금액 버튼을 누르면 그 금액이 입력된 채로 열려요."}
-                {mixed && "'앱에서 입력'이 붙은 금액은 카카오페이에서 직접 넣어 주세요. 나머지는 금액이 입력된 채로 열립니다."}
-                {!allPrefilled && !mixed && "금액은 카카오페이에서 직접 입력해 주세요."}
+            <div className="dway kakao">
+              <div className="dw-t"><IconKakaoBubble className="kico" />카카오페이</div>
+
+              {kakao.amounts.length > 0 && (
+                <div className="damts" role="group" aria-label="후원 금액 선택">
+                  {kakao.amounts.map((a) => (
+                    <button key={a.won} type="button" aria-pressed={pick === a.won}
+                      className={"damt" + (pick === a.won ? " on" : "")}
+                      onClick={() => setPick(pick === a.won ? null : a.won)}>
+                      <span className="da-won">{won(a.won)}</span>
+                      {a.note && <span className="da-note">{a.note}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="qr-wrap">
+                <QrCode value={qrTarget} label="카카오페이 송금 QR 코드" />
+                <div className="qr-guide">
+                  <b>휴대폰 카메라로 QR을 찍어 주세요.</b>
+                  <span className="hint">
+                    {chosen
+                      ? chosen.prefilled
+                        ? `${won(chosen.won)}이 입력된 채로 카카오페이가 열립니다.`
+                        : `카카오페이가 열리면 ${won(chosen.won)}${chosen.note ? ` (${chosen.note})` : ""}을 입력해 주세요.`
+                      : "카카오페이가 열리면 원하는 금액을 입력해 주세요."}
+                  </span>
+                  {/* PC 에서 이 링크는 404 다 → 터치 기기에서만 노출. 외부 이동이라 noopener/noreferrer. */}
+                  {canOpenApp && (
+                    <a className="btn sm kakao-btn" href={qrTarget} target="_blank" rel="noopener noreferrer">
+                      <IconKakaoBubble className="kico" />카카오페이 앱으로 열기
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -85,9 +113,14 @@ export default function DonateModal({ onClose }) {
               <div className="dw-t">계좌 이체</div>
               <div className="dw-acc">
                 <span className="dw-bank">{[bank.name, bank.holder].filter(Boolean).join(" · ")}</span>
-                <span className="dw-num num">{bank.account}</span>
+                <span className="dw-numrow">
+                  <span className="dw-num num">{bank.account}</span>
+                  <button className="icobtn" onClick={() => copy(bank.copyText)}
+                    aria-label="계좌번호 복사" title="계좌번호 복사">
+                    <IconCopy />
+                  </button>
+                </span>
               </div>
-              <button className="btn ghost sm" onClick={() => copy(bank.copyText)}>계좌번호 복사</button>
             </div>
           )}
         </div>
