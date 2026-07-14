@@ -18,6 +18,7 @@
 - **LogTab** — 서브탭 "달력&통계"/"거래 입력". 통계(13주 누적·과금·현금화·주차별), 달력(월력 `MonthCal` / MVP 주간 `MvpCal`), 일자 상세 편집(`DayDetail`), 드래프트 입력 폼(`EntryForm`). 하위 컴포넌트는 **모듈 스코프**로 정의.
 - **ForecastTab** — 예상 & 추천.
 - **AuthBar** — 비로그인: 로그인 팝업(Google/이메일 링크). 로그인: 동기화 상태(`☁ 동기화됨/중/오류`)·이메일·로그아웃. `cloudEnabled` false면 렌더 안 함.
+- **DonateModal** — 후원('개발자에게 커피 한잔'). 진입점은 탭 줄 오른쪽 버튼 + 푸터 링크(`DONATE_ENABLED` 가드 — `lib/donate.js` 설정이 비면 진입점 자체가 사라진다). 결제 연동 없음: 카카오페이 **QR** 과 계좌만 보여주고 송금은 사용자가 자기 앱에서 한다. 상세·금지사항은 [WORK-STATUS §7](../WORK-STATUS.md).
 - **ui.jsx** — 테마 위젯 라이브러리(아래).
 
 ## 커스텀 위젯 (ui.jsx) — 브라우저 기본 금지, 반드시 재사용
@@ -26,12 +27,15 @@
 - **`ItemCombo`** — 자유 입력 + 항상 열리는 목록(자주 쓰는 아이템 빠른 교체). `datalist` 금지. `createPortal`로 팝업.
 - **`DateInput`/`YMPicker`/`WeekPicker`** — 커스텀 날짜/연월/주차 피커(모두 portal 팝업).
 - **`KpiBox`, `CostLabel`, `PlLabel`, `MilUse`, `IconView`** — 수치/라벨 헬퍼. `IconView`는 이모지 또는 http(s) 이미지 URL(트래킹 리퍼러 차단 위해 `referrerPolicy="no-referrer"`, `loading="lazy"`).
+- **`QrCode`** (`ui/QrCode.jsx`) — 링크를 QR 로 그린다(`qrcode` 의존성). 생성이 비동기라 `alive` 가드로 늦게 온 결과가 새 값을 덮지 않게 막고, 실패하면 링크 원문을 대신 보여준다. 가운데 심볼(`center`)을 얹으므로 **오류정정 H** 고정.
 
 ## 렌더·React 규칙 (지키지 않으면 버그)
 - **컴포넌트는 모듈 스코프에 정의** — 렌더 함수 내부 정의 금지(리마운트로 입력 포커스 유실). `Sec/MonthCal/MvpCal/DayDetail/EntryForm/ConflictModal` 모두 모듈 스코프.
 - **리스트 key는 `_k`(또는 항목 id)** — index key 금지. 저장/생성은 `withRowKeys`가, 원장 항목은 `id`가 담당.
 - **DB에서 온 배열/객체는 렌더 전 검증** — `chargeMethods`는 `m && typeof m.name === "string"`으로 필터, `defaultItems`(카탈로그)는 `validCatalog`(빈 이름·중복 이름 제거, 모르는 `cat`은 "기타")로 거른다. 이름은 React key이자 `my_items`와의 매칭 키라 빈 이름/중복이 통과하면 key 충돌과 엉뚱한 숨김/수정이 생긴다.
 - **자주 쓰는 아이템(3번 카드)** — 카탈로그+내 아이템을 `composeItems`로 합쳐 그린다. 기본 행은 읽기 전용("기본" 배지 + 수정/숨기기), 내 행은 편집 가능("내 아이템"/"수정됨" 배지 + 삭제/되돌리기). 기본값 수정은 `ItemEditModal`(모듈 스코프)로 '내 아이템 복사' 동의를 받고, **이름은 잠근다**(이름이 매칭 키라 바꾸면 원본을 못 가리고 별개 아이템이 생긴다).
+
+- **목록 편집 표(`.itemedit`)** — 기본 행은 텍스트, 내 아이템 행은 입력 컨트롤이라 열 너비를 자동으로 두면 같은 열이 행마다 다른 폭을 요구한다 → `colgroup` + `table-layout:fixed` + 컨트롤 높이 통일(행 44px). 아이콘은 **행당 하나만** 그린다(이모지는 입력칸 안에서 이미 보이므로 미리보기는 이미지 URL 일 때만). `<td>` 에 `display:flex` 를 주면 그 셀이 표 셀 박스에서 빠져 **행 밑줄이 그 앞에서 끊긴다** — 플렉스는 셀 안쪽 래퍼에.
 
 ## 테마·CSS (styles.css)
 - CSS 변수 팔레트(`--bg/--panel/--line/--txt/--accent/...`), 다크 테마.
