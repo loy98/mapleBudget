@@ -193,14 +193,14 @@ export function parseCalcState(d) {
 export function loadCalcState() {
   return parseCalcState(readJSON(KEY));
 }
-// 이 브라우저에 계산기/아이템 저장 이력이 있는지(=기존 유저인지) 판별.
-// 첫 렌더에서 캡처해 두고, DB 시세성 기본값을 "새 유저에게만" 적용하는 데 쓴다.
+// 이 브라우저에 계산기 저장 이력이 있는지(=기존 유저인지) 판별.
+// 첫 렌더에서 캡처해 두고, DB 시세 기본값을 "새 유저에게만" 적용하는 데 쓴다.
 // (자동 저장 이펙트가 곧 localStorage를 채우므로 반드시 최초 시점에 읽어야 함)
+//
+// 아이템용 짝(`hasStoredItems`)은 없다 — 기본 아이템은 유저 데이터에 심지 않고 카탈로그에서 그리므로
+// '새 게스트에게만 심어 준다'는 판정 자체가 필요 없다(items.js 참고).
 export function hasStoredCalc() {
   try { return localStorage.getItem(KEY) != null; } catch { return false; }
-}
-export function hasStoredItems() {
-  try { return localStorage.getItem(ITEMS_KEY) != null; } catch { return false; }
 }
 // save* 는 성공 여부(boolean)를 반환한다. 호출측이 useEffect 축약형으로 쓰면 그 값이
 // cleanup 으로 해석되므로 반드시 블록 본문으로 감쌀 것(App.jsx 참고).

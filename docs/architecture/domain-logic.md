@@ -8,7 +8,7 @@
 - **현금화**: 메소(억) + **억당(원/억, `rate`)** 입력 → 판매 현금 자동 산정(`cashWonOf`). 구 데이터(`won` 직접 입력)는 `rate`로 승계하되 `meso=0`이면 rate를 못 만드니 `won` 폴백(손실 방지) — 이 승계는 `normalizeLedger`(storage.js)에서.
 - **숫자 입력 규약**: 값은 문자열 저장, 계산부는 `+x || 0`. (프론트 NumInput과 짝)
 
-## calc.js — `computeCalc(settings, charges, items)`
+## calc.js — `computeCalc(settings, charges, items, rules = DEFAULT_RULES)`
 계산기 탭의 모든 파생값을 만드는 **단일 순수 함수**. 반환 객체(`calc`)를 App이 useMemo로 캐시해 전 탭에 전달.
 - **기초 방식 비교**: 선물식 vs 메소마켓 — 1만원 실적당 순현금(`gift`/`market`), 더 싼 쪽(`giftBest`).
 - **충전 배분**: 여러 충전 방식(`charges`: 이름/할인율/월한도)을 할인 높은 순으로 한도만큼 배분 → 평균 충전 할인(`effD`)·배분 내역(`alloc`).
@@ -33,7 +33,9 @@
 
 ## constants.js
 - `TIERS`(브론즈~블랙 금액), `MVP_GRADES`, `CHARGE_METHODS`(프리셋 목록, app_config가 덮을 수 있음), `DEFAULT_SETTINGS`(시세성 기본값), `DEFAULT_ITEMS`(자주 쓰는 아이템 기본), `DEFAULT_CHARGES`/`DEFAULT_CALC_ITEMS`, `SPLITS`(분할 방식), `WD_MVP`(목~수)/`WD_SUN`, `MILEAGE_ACCRUAL`(0.05).
-- **시세성 기본값(mesoRate/giftRatio/marketRatio·chargeMethods·defaultItems)은 런타임에 `app_config`(DB)가 덮을 수 있음** — [sync-backend.md](sync-backend.md), [data-layer.md](data-layer.md). constants는 폴백.
+- **시세성 기본값(mesoRate/giftRatio/marketRatio·chargeMethods·defaultItems·rules)은 런타임에 `app_config`(DB)가 덮을 수 있음** — [sync-backend.md](sync-backend.md), [data-layer.md](data-layer.md). constants는 폴백.
+- `DEFAULT_ITEMS`는 **카탈로그의 폴백**이다(유저 `my_items`에 심지 않는다). `ITEM_CATS`/`itemCat`으로 분류, 화면 조립은 `lib/items.js` `composeItems`.
+- `DEFAULT_SETTINGS.curSource` — 계산기의 '현재 누적 실적' 출처(`"manual"` 직접 입력 / `"ledger"` 거래 기록 13주 누적). 기본 `"manual"`(기록 0건인 첫 방문자가 입력칸이 잠긴 채 0원에 갇히지 않도록).
 
 ## util.js
 - 포매터: `won`(원)·`pct`(%)·`eok`(억)·`ml`(마일)·`manW`(만원) — 전부 `isFinite` 방어.

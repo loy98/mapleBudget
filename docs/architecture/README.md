@@ -6,7 +6,7 @@
 - [frontend.md](frontend.md) — UI 컴포넌트·상태 소유·테마/CSS·커스텀 위젯·렌더 규칙
 - [domain-logic.md](domain-logic.md) — 계산(calc.js)·통계/주차/현금화(ledger.js)·상수·MVP 도메인 규칙
 - [data-layer.md](data-layer.md) — storage.js 순수 함수·localStorage 키·안정 key·touched·calMode·내보내기/가져오기
-- [sync-backend.md](sync-backend.md) — useCloudSync 훅·Supabase(user_data/app_config)·RLS·인증·동기화 불변식·충돌 모달·force
+- [sync-backend.md](sync-backend.md) — useCloudSync 훅·Supabase(user_data/app_config)·RLS·인증·동기화 불변식·충돌 모달·**아이템 소유권(카탈로그/내 아이템)**
 - [infra-and-ops.md](infra-and-ops.md) — Cloudflare Pages·커스텀 도메인·.env·CSP·schema.sql·테스트·검증 프로토콜
 
 관련: 상위 규칙은 [/CLAUDE.md](../../CLAUDE.md), 검수 백로그는 [../hardening-backlog.md](../hardening-backlog.md), 코드 개요는 [/README.md](../../README.md).
@@ -32,15 +32,18 @@ src/
   App.jsx                   # 루트: 계산기 상태 소유·탭 렌더·useCloudSync 호출·충돌 모달
   styles.css                # 테마(다크)·전 컴포넌트 스타일·반응형(@media 900/600)
   lib/
-    calc.js                 # 순수 계산 computeCalc(엠작 방식·총비용·경매장·마일리지·플랜)
-    ledger.js               # 거래 통계·주차(목~수)·현금화·달력 집계·예상
-    constants.js            # TIERS/CHARGE_METHODS/MVP_GRADES/DEFAULT_*/SPLITS/요일/적립률
+    calc.js                 # 순수 계산 computeCalc(settings, charges, items, rules)
+    ledger.js               # 거래 통계·주차(목~수)·현금화·달력 집계·예상·13주 누적(cumNow)
+    items.js                # 카탈로그(운영자)+내 아이템(유저) 합치기·숨김/수정본·구 데이터 마이그레이션
+    constants.js            # TIERS/CHARGE_METHODS/MVP_GRADES/DEFAULT_*/ITEM_CATS/SPLITS/rules
     util.js                 # 포매터(won/pct/eok/ml)·날짜(weekStartThu 등)·uid·estGrade
-    storage.js              # 순수 parse/serialize/normalize·localStorage·withRowKeys·touched·calMode·export/import
-    cloud.js                # Supabase 인증·user_data·app_config·mergeSnapshots
-    useCloudSync.js         # 동기화 훅(세션·config·초기동기화·업로드·충돌모달)
-    supabaseClient.js       # Supabase 클라이언트 생성(공개 .env 값)
-    pure.test.js            # vitest: 순수 함수 회귀(22건)
+    tz.js                   # '지금'을 KST로 해석(nowD/tzDateStr) — 주차·달력의 유일한 진입점
+    storage.js              # 순수 parse/serialize/normalize·localStorage·삭제 표식·export/import
+    cloud.js                # Supabase 인증·user_data·app_config·mergeSnapshots/mergeMyItems
+    useCloudSync.js         # 세션·app_config·동기화·업로드 (동기화 수정은 여기)
+    supabaseClient.js       # 클라이언트 생성·keepalive
+    toast.js                # 앱 테마 알림
+    errorLog.js             # 로컬 오류 기록
   components/
     CalcTab.jsx             # 계산기 탭(시세·조건·방식비교·총비용·경매장·마일리지·플랜)
     LogTab.jsx              # 거래 기록(통계·달력 월력/MVP주간·거래 입력·일자 상세)
@@ -60,5 +63,5 @@ docs/                       # 이 문서들 + hardening-backlog.md
            → useEffect 자동 저장(localStorage)                (게스트/로그인 공통 캐시)
            → (로그인 시) useCloudSync: 디바운스 upsert → Supabase user_data(RLS 본인 행)
 로드/로그인 → useCloudSync: fetchUserData → mergeSnapshots(로컬↔클라우드) → 상태 반영
-앱 설정     → useCloudSync: fetchAppConfig(app_config, 공개 읽기) → 시세성 기본값/force 적용
+앱 설정     → useCloudSync: fetchAppConfig(app_config, 공개 읽기) → 시세 기본값/force + 카탈로그(defaultItems, 화면에서 합침)
 ```

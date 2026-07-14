@@ -3,8 +3,9 @@
 ## 상태 소유 (single source)
 - **App.jsx**가 계산기 상태를 소유: `{settings, charges, items}`(한 useState 객체), `myItems`, `ledger`, `tab`.
   - 초기값은 `loadCalcState/loadMyItems/loadLedger`(localStorage). 변경 시 `useEffect`로 자동 저장.
-  - 파생값 `calc = useMemo(computeCalc(settings,charges,items))` — 순수 계산, 모든 탭이 prop으로 받음.
-- **useCloudSync 훅**이 세션·동기화 상태(`session/syncState/chargeOptions/conflictPrompt`)를 소유하고 App에 반환. 계산기 상태는 App→훅으로 주입(setter 포함). → 컴포넌트는 클라우드를 모른다.
+  - 파생값 `calc = useMemo(computeCalc(calcSettings, charges, items, rules))` — 순수 계산, 모든 탭이 prop으로 받음.
+    `calcSettings` 는 `curSource==='ledger'` 면 `curAchieved` 를 원장 13주 누적으로 갈아끼운 것(원본 `settings.curAchieved` 는 보존).
+- **useCloudSync 훅**이 세션·동기화 상태(`session/syncState/chargeOptions/catalog/conflictPrompt/rules/ruleHistory`)를 소유하고 App에 반환. 계산기 상태는 App→훅으로 주입(setter 포함). → 컴포넌트는 클라우드를 모른다.
 - **LogTab**만 로컬 UI state를 자체 소유(달력 커서·선택 날짜·서브탭·달력 모드 등 뷰 상태). `calMode`는 기기별 로컬(동기화 안 함).
 
 ## 사용자 setter (App.jsx)
@@ -29,7 +30,8 @@
 ## 렌더·React 규칙 (지키지 않으면 버그)
 - **컴포넌트는 모듈 스코프에 정의** — 렌더 함수 내부 정의 금지(리마운트로 입력 포커스 유실). `Sec/MonthCal/MvpCal/DayDetail/EntryForm/ConflictModal` 모두 모듈 스코프.
 - **리스트 key는 `_k`(또는 항목 id)** — index key 금지. 저장/생성은 `withRowKeys`가, 원장 항목은 `id`가 담당.
-- **DB에서 온 배열/객체는 렌더 전 검증** — `chargeMethods`/`defaultItems`는 `m && typeof m.name === "string"`으로 필터(malformed 원소 크래시 방지).
+- **DB에서 온 배열/객체는 렌더 전 검증** — `chargeMethods`는 `m && typeof m.name === "string"`으로 필터, `defaultItems`(카탈로그)는 `validCatalog`(빈 이름·중복 이름 제거, 모르는 `cat`은 "기타")로 거른다. 이름은 React key이자 `my_items`와의 매칭 키라 빈 이름/중복이 통과하면 key 충돌과 엉뚱한 숨김/수정이 생긴다.
+- **자주 쓰는 아이템(3번 카드)** — 카탈로그+내 아이템을 `composeItems`로 합쳐 그린다. 기본 행은 읽기 전용("기본" 배지 + 수정/숨기기), 내 행은 편집 가능("내 아이템"/"수정됨" 배지 + 삭제/되돌리기). 기본값 수정은 `ItemEditModal`(모듈 스코프)로 '내 아이템 복사' 동의를 받고, **이름은 잠근다**(이름이 매칭 키라 바꾸면 원본을 못 가리고 별개 아이템이 생긴다).
 
 ## 테마·CSS (styles.css)
 - CSS 변수 팔레트(`--bg/--panel/--line/--txt/--accent/...`), 다크 테마.

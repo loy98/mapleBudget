@@ -1,172 +1,161 @@
 # 작업 현황 · 인수인계
 
-> 2026-07-10 기준. **세션이 끊겨도 이 문서만 읽고 이어갈 수 있게** 쓴다.
+> **2026-07-14 기준.** 세션이 끊겨도 이 문서만 읽고 이어갈 수 있게 쓴다.
 > 상세한 결함 목록·근거는 [hardening-backlog.md](hardening-backlog.md), 아키텍처는 [architecture/](architecture/README.md).
 
 ---
 
 ## 0. 30초 요약
 
-전체 검수(분야별 에이전트 5종 + Codex) → 발견 → 수정 → Codex 재검수를 반복했다.
-테스트 **52건 → 359건**(12파일), `npm audit` **5건(critical 1·high 1) → 0건**.
+**미병합 브랜치 없음. `dev` = `main` = 프로덕션 배포 완료.** 테스트 **466건**(19파일) 전부 통과.
 
-- `main`: 프로덕션. **2026-07-11 배포 완료** (`main=6021d1d`, dev→main --no-ff 병합·push). Cloudflare 빌드가
-  `assets/index-V_1jke0q.js` 로 라이브 확인, 브라우저 스모크(렌더·로그인·app_config 라이브값·콘솔 0 에러) 통과.
-- `dev`: 미병합 브랜치 **없음**. 하드닝 백로그를 **B-9 하나 빼고 전부** 해결했다 —
-  B-3(저장소 손상) · B-5(거래별 요율) · B-4(주 경계 KST) · B-7(결정적 행 id) · B-6(백업 검증) ·
-  B-2b(아이템 병합) · B-8 LOW 전부(keepalive 플러시 · 포맷 -0 · 수수료 판정 단일화 · 아이콘 allowlist ·
-  오류 기록 · ui.jsx 분할 · 키보드 접근성).
-  전 항목 Codex PASS. 테스트 359건 · 빌드 통과 · `npm audit` 0건.
-- **남은 것은 B-9 하나**: feedback rate limit 의 IP 버킷은 프로덕션에 요청을 보내야 판단할 수 있다.
+2026-07-14 세션의 발단은 "원더베리 가격을 DB에서 고쳤는데 반영이 안 된다"는 리포트였다.
+파고 보니 **아이템 데이터 모델 자체가 잘못**돼 있었고, 그걸 고치는 데까지 갔다.
 
-**§5 배포 전 세 항목 모두 충족 → 2026-07-11 프로덕션 배포 완료. 남은 관찰 항목은 B-9뿐.**
+1. **캐시 가격 정정** — 원더베리 3,900 → **5,400** 및 **마일리지 불가**(공식 고지 확인).
+   가격 오류보다 마일리지 쪽이 계산에 더 큰 영향이었다 — 있지도 않은 30% 절감을 반영해 실비용을 과소평가하고 있었다.
+   프리미엄 성형 5,500 → 3,500. 아이템 기본 목록 7종 → **23종**.
+2. **계산기 '현재 누적 실적' 모드 분리** — `직접 입력`(시나리오) / `내 기록 사용`(원장 13주 누적). §3
+   진행률 링이 늘 0%로 보이던 원인이었다(링은 `curAchieved/tierAmt` 인데 기본값 0, 사이드바 'MVP 등급'은 수수료 전용).
+3. **자주 쓰는 아이템 카테고리 UI** — 헤어·성형/코디·스타일/카르마/펫/기타 필터 탭.
+4. **🔴 아이템 소유권 분리 (가장 중요)** — §2.
+5. 가이드(`public/guide.html`) 전면 재작성 + 앱 내 설명 문체 정비.
 
 ---
 
 ## 1. 브랜치 상태
 
 ```
-main ──────────────── (프로덕션, https://maplemvpcalculator.com)
-  └─ dev (34 commits ahead)          worktree: C:\Users\82108\Documents\Claude\Projects\MVP작
-       ├─ cb7c203  merge: 전체 검수
-       ├─ 37fd1bc  merge: tombstone + 낙관적 동시성 제어
-       ├─ 4dd6ec3  merge: 저장소 손상 방어 (B-3)
-       ├─ fedf954  merge: 거래별 요율 스냅샷 + 발효일 규칙 이력 (B-5)
-       ├─ e8dabe0  merge: 주 경계·'오늘'을 KST 로 고정 (B-4)
-       ├─ ...      merge: 구버전 원장 행에 결정적 id (B-7)
-       ├─ ...      merge: 백업 파일 검증 + 전부-아니면-전무 복원 (B-6)
-       └─ ...      merge: 자주 쓰는 아이템도 진짜 병합 (B-2b)
+main = dev = 7ea30d9   (프로덕션 https://maplemvpcalculator.com, Cloudflare 자동배포 확인 완료)
 ```
 
-`dev`는 다른 워크트리에 체크아웃돼 있어 이쪽(`C:\Users\82108\orca\workspaces\MVP작\dev`)에서
-`git checkout dev` 가 안 된다. 병합은 `git -C "C:/Users/82108/Documents/Claude/Projects/MVP작" merge --no-ff <branch>`.
-⚠️ **`git checkout dev -- .` 을 쓰지 말 것** — 브랜치 전환이 아니라 dev 의 파일 내용을 현재 워크트리에 덮어쓴다.
-새 작업은 `git checkout -b <feature> dev` 로 딴다.
+미병합 브랜치 없음. `dev` 는 다른 워크트리(`C:\Users\82108\Documents\Claude\Projects\MVP작`)에 체크아웃돼 있어
+orca 트리에서 `git checkout dev` 가 안 된다 → `git checkout -b <feature> origin/dev` 로 딴다.
+`main` 병합은 detached HEAD 에서:
+`git checkout --detach origin/main && git merge --no-ff origin/dev && git push origin HEAD:main`
 
-**다음 액션**: §4 백로그에서 고를 것. 미병합 브랜치는 없다.
-
----
-
-## 2. 해결한 것 (요약)
-
-### 공개 서비스·수익화 준비
-- `public/privacy.html` · `terms.html` — 코드에서 확정한 실제 수집 항목 기반. 위탁·국외이전 명시.
-- `public/robots.txt` · `sitemap.xml`, 넥슨 무관 고지(푸터+양 페이지), canonical/og 절대 URL.
-
-### 보안
-- **`feedback` rate limit** — RLS는 "누가"만 통제하고 "얼마나 자주"는 통제하지 않았다.
-  DB 트리거로 출처당 10분/5건 + 위조 불가능한 전역 익명 백스톱 100건/10분.
-  `x-forwarded-for`는 신뢰 프록시가 **뒤에 덧붙이므로 마지막 항목**을 읽는다(첫 항목은 공격자가 심은 값).
-- `security definer` 함수의 `search_path` 축소, dev 의존성 취약점 0건.
-
-### 데이터 정합 (가장 중요)
-- **계정 간 원장 유입(CRITICAL)** — 로그아웃이 로컬을 안 지우고 병합이 소유자를 무시해,
-  공용 브라우저에서 A의 거래가 B 계정으로 영구 유입됐다. `mvpDataOwnerUid` 마커로 병합 게이팅.
-- **삭제 전파(tombstone)** — `ledger.deleted = { 항목id: 삭제시각 }`. 삭제 우선 병합.
-- **낙관적 동시성 제어** — 서버 `updated_at`을 버전으로 쓰는 조건부 쓰기.
-  무조건 upsert였을 때 stale 탭이 남의 거래와 삭제 표식을 통째로 덮어썼다.
-- **업로드 유실·무재시도** — 플러시 부채를 payload 캡처 시점에 털고, 지수 백오프 + `online` 재시도.
-- **손상된 localStorage 원본 파괴(B-3)** — 파싱 실패 시 백업 후에만 덮어쓰고, 백업 못하면 안 쓴다.
-
-### 도메인
-- **예측 '이번 주 포함' 오답** — 이번 주 실제 과금이 계획값으로 대체돼 사라졌다.
-  체크박스를 켤수록 도달이 늦어지는 역설(골드 9주후 → 무등급 12주후). 지평도 14주→13주.
-- 게임 규칙(수수료·마일리지 적립률·등급 기준) 하드코딩 → `app_config.rules`(순수 함수엔 인자 주입).
-
-### 구조·접근성
-- LogTab 718줄 → 85줄 조립부 + 패널 4개. 분할 전후 SSR 마크업 13,506B 동일 확인.
-- 모달 Esc·포커스 트랩, `CSelect` 키보드 조작, Error Boundary.
+**다음 액션**: §5 백로그. 미병합 브랜치는 없다.
 
 ---
 
-## 3. 최근에 끝낸 것 (B-5 · B-4 · B-7 · B-6 · B-2b)
+## 2. 🔴 아이템 소유권 분리 — 사고와 그 수습
 
-### B-5 — 과거 거래에 현재 설정을 소급 적용
+### 무슨 일이 있었나
 
-근본 원인의 절반은 **넥슨 규칙을 사용자 설정으로 모델링한 것**이었다. `mileageRate`(마일리지 결제 비율)가
-계산기에서 편집 가능해서, 바꾸면 13주 누적 과금(`cum`)이 재계산되고 **표시 등급까지 흔들렸다**
-(실측 41,300 → 47,200원). `app_config.rules` 로 옮겨 편집 불가로 만드니 증상이 통째로 사라졌다.
+기본 아이템(운영자)과 유저가 추가한 아이템이 **`user_data.my_items` 배열 하나에 섞여** 있었다.
+그래서 운영자가 기본값(가격 등)을 고치려면 그 배열을 **통째로 덮어쓰는** 수밖에 없었다 —
+`app_config.config.force` 에 `"defaultItems"` 를 넣는 방식.
 
-나머지는 요율 성격별로:
-- **게임 규칙**(수수료·마일리지 비율) — `rules` 가 발효일 배열 `[{effectiveFrom, ...}]` 을 받는다.
-  거래 날짜에 유효한 규칙을 고른다(`resolveRuleHistory`/`rulesAt`). **규칙 값을 고치지 말고 이력을 추가할 것.**
-  가장 이른 항목은 *이미 발효했을 때만* EPOCH 로 내려간다(미래 발효 규칙은 소급되지 않는다).
-- **사용자 상태**(등급→수수료, 충전 방식→할인) — 거래 행에 스냅샷(`sells._fee`, `buys._effD`).
-  `cashes.rate` 폴백과 같은 패턴. 병합에서 잃지 않는다(`keepSnapshots`).
-- **구 데이터** — 과거 요율이 어디에도 없어 복원 불가. 현재 설정 폴백 + 통계 화면에 '추정치' 명시(`hasLegacyRows`).
+그 덮어쓰기가 **유저가 직접 추가한 아이템을 삭제 표식도 없이 지웠다.**
+2026-07-14 실제로 사고가 났고 사용자의 커스텀 아이템 2종이 사라졌다.
+(거래 기록의 품목명으로 역추적해 이름·가격을 복원했다. 원장은 force 대상이 아니라 무사했다.)
 
-Codex 재검수에서 나온 것들(모두 반영): malformed 스냅샷이 '수수료 0%'로 새던 문제(`hasSnapshot`),
-malformed 값이 **유효한 스냅샷을 덮어쓰던** 병합 결함, 미래 발효 규칙이 지금·과거에 소급되던 결함,
-`rules` 를 state 로 굳혀 자정 경계를 못 넘던 문제(`useToday` 파생으로 전환).
+### 어떻게 고쳤나 — 소유자가 다르면 저장소도 다르다
 
-### B-4 — 주 경계가 브라우저 로컬 타임존 기준
+| | 저장소 | 소유자 |
+|---|---|---|
+| 카탈로그(기본 아이템) | `app_config.defaultItems` | 운영자. **유저 데이터로 복사하지 않는다** |
+| 내 아이템 | `user_data.my_items` | 유저. 운영자는 건드리지 않는다 |
 
-`weekStartThu(dt, tz)` 로 고치지 **않았다**. 주차 함수들은 민간 날짜(Y/M/D) 연산이라 시간대를 몰라도 되고,
-해석이 필요한 건 '지금이 며칠인가' 하나뿐이다. 진입점을 `src/lib/tz.js` 로 모았다 —
-`tzDateStr` / `dateOf`(정오 고정) / **`nowD()`**. 주차·달력 계산부의 `new Date()` 를 전부 `nowD()` 로 바꿨다.
-새 코드에서 주차·달력에 `new Date()` 를 직접 쓰지 말 것.
+화면 목록은 `src/lib/items.js` 의 `composeItems(catalog, myItems)` 가 만든다(같은 **이름**이면 내 것이 카탈로그를 가림).
+
+→ **아이템에서 `force` 라는 개념 자체가 사라졌다.** 이제 `app_config.defaultItems` 만 고치면
+재배포도 force 도 없이 전원에게 즉시 반영되고, 유저가 추가·수정한 것은 사라지지 않는다.
+
+### 설계의 핵심: 새 동기화 규칙을 만들지 않았다
+
+숨김도 수정본도 전부 **`my_items` 의 '행'** 으로 표현했다. 그래서 기존 합집합 병합·tombstone·`at` 순서 규칙이
+그대로 적용된다(`cloud.js mergeMyItems` 무수정). 새 병합 규칙을 만들었다면 그게 새로운 데이터 손실 경로가 됐을 것이다.
+
+| 동작 | 표현 |
+|---|---|
+| 기본값 수정 | 같은 이름의 행 추가(`origin:"user"`) → 카탈로그를 가림. "수정됨" 배지 |
+| 숨기기 | `hidden:true` 행 추가 |
+| 되돌리기 / 숨김해제 | **그 행을 삭제**(`deleteMyItem`) → 카탈로그 원본이 다시 보임 |
+
+### 절대 되돌리지 말아야 할 두 가지
+
+1. **`normalizeMyItems` 가 `DEFAULT_ITEMS` 를 시딩하게 만들지 말 것.** 그게 사고의 근원이다.
+   지금은 데이터가 없으면 `[]` 를 반환한다.
+2. **`origin:"user"` 가드를 빼지 말 것.** 마이그레이션이 이름만 보고 지우면,
+   유저가 만든 수정본(카탈로그와 **같은 이름을 갖는 게 정상**)이 다음 로드에서 지워진다 → 수정 기능 자체가 성립하지 않는다.
+
+### 마이그레이션 (`planItemMigration`, 멱등)
+
+`my_items` 에 남은 옛 기본값 복사본을 걷어낸다. **판정은 값으로 한다:**
+
+- 카탈로그와 **값이 같은** 행(`cash`/`mAllowed`/`cat`/`icon` 비교 — `differsFromBase`) → 정보 없는 순수 복사본.
+  삭제 표식과 함께 제거(다른 기기의 복사본까지 정리).
+- 하나라도 **다른** 행 → 유저가 손댔을 수 있다. **지우지 않고** `origin:"user"` 를 찍어 '수정됨'으로 살린다.
+
+> 처음엔 이름만 보고 지웠는데 Codex 가 잡았다. 구버전 UI 는 기본 아이템을 직접 편집할 수 있었으므로
+> 그렇게 고쳐 둔 행은 이름이 같아도 **유저의 의도가 담긴 데이터**다. 이름만 보고 지우면 그 편집이 조용히 사라진다 —
+> **마이그레이션이 같은 사고를 한 번 더 반복할 뻔했다.**
+>
+> **원칙: 지우는 건 되돌릴 수 없고 배지는 되돌릴 수 있다. 확신이 없으면 지우지 않는다.**
+
+### 실측 검증 (프로덕션)
+
+배포 전 실제 클라우드 데이터로 드라이런 → 배포 후 결과 확인 → 숨기기/다시표시/수정/되돌리기를 **실제로 클릭**해 확인.
+
+- 클라우드 `my_items`: **25 → 2개**(커스텀만, 둘 다 `origin:"user"`), 아이템 삭제 표식 23개
+- 화면은 그대로 **25개**(카탈로그 23 + 내 것 2)
+- 새로고침해도 유령 '수정됨' 행 없음 → **멱등성 실전 확인**
 
 ---
 
-### B-7 — 구버전 원장 행의 id 재발급 → 동기화 후 중복
+## 3. 계산기 '현재 누적 실적' 모드 (`settings.curSource`)
 
-로드할 때마다 랜덤 `uid()` 를 붙여, 같은 백업을 연 두 기기가 같은 거래를 두 건으로 만들었다.
-내용에서 유도한 결정적 id(`legacyRowId`)를 준다. **내용만 해시하면 안 된다** — "같은 날 같은 값에 두 번 산 것"이
-하나로 합쳐진다(중복보다 나쁜 소실). 같은 내용의 등장 순번을 함께 넣는다.
-정규화 순서가 계약이다: **날짜 zero-pad → 파생값(won→rate) → id 부여**(`canonicalizeRows`). `mergeLedger` 도 이걸 쓴다
-(예전엔 id 없는 클라우드 행을 조용히 버렸다).
+- `"manual"`(기본) — 직접 입력. 시나리오만 돌려보는 순수 계산.
+- `"ledger"` — 거래 기록의 13주 누적(`cumNow`)을 실적으로 사용. 입력칸은 읽기 전용.
 
-### B-6 — 백업 파일 검증
+기본이 `"manual"` 인 이유: 기록이 0건인 첫 방문자가 `"ledger"` 로 시작하면 **입력칸이 잠긴 채 0원**이라
+계산기를 시험해 볼 수가 없다. 기록이 쌓이면 UI 가 전환을 안내한다.
 
-`data.app` 문자열 하나만 보고 그대로 썼다. 크래시는 없었지만 형태가 깨진 값은 다음 로드에서 조용히 기본값이 됐다.
-`validateBackup` 이 **거절(아무것도 안 씀)** 과 **경고(복원하되 알림)** 를 구분한다.
-복원은 **전부 아니면 전무** — 쓰기 전에 원본을 잡아 두고 실패 시 되돌린다. 원본을 못 읽으면 아예 쓰지 않는다.
-
-### B-2b — 자주 쓰는 아이템도 진짜 병합
-
-아이템에 결정적 id, 삭제 표식은 `ledger.deleted` 의 `item:<id>` 네임스페이스에.
-`at`(목록에 들어온 시각)으로 '지웠다가 다시 추가'를 표현한다(표식보다 나중이면 살아남는다).
-`[]` = 사용자가 비운 목록, `null` = 데이터 없음. **충돌 병합 결과는 `applyMergedSnapshot` 한 곳에서 전부 반영한다** —
-하나라도 빠뜨리면 다음 업로드가 stale 값으로 서버를 덮는다.
+화면과 계산이 갈라지지 않게 **CalcTab 은 `c.cur` 를 읽는다**(분기를 UI 에서 재구현하지 않는다 — `hasFeeBenefit` 과 같은 규칙).
+App 이 `calcSettings` 에서 `curAchieved` 를 원장 누적으로 갈아끼워 `computeCalc` 에 넘긴다.
+`settings.curAchieved`(직접 입력값)는 지우지 않고 **보존**한다 — 모드를 되돌리면 그대로 돌아온다.
 
 ---
 
-## 4. 남은 백로그 (우선순위)
+## 4. app_config 운영 (재배포 없이 수정)
 
-상세는 [hardening-backlog.md](hardening-backlog.md).
+```sql
+-- 아이템 추가/가격 수정: force 불필요. 새로고침이면 전원 반영
+update app_config set config = jsonb_set(config,'{defaultItems}','[...]'::jsonb), updated_at=now() where id=1;
+
+-- 시세 변경
+update app_config set config = jsonb_set(config,'{mesoRate}','3200'::jsonb), updated_at=now() where id=1;
+```
+
+현재 `force = ["mesoRate","giftRatio","marketRatio"]` (시세 스칼라만).
+
+> ⚠️ **`force` 에 `"defaultItems"` 를 넣지 말 것 — 유저 아이템을 지운다.**
+> 그리고 force 는 1회성 플래그가 **아니다**. 페이지를 열 때마다 매번 적용된다.
+
+### 아이템 가격의 출처 규칙
+
+넥슨은 상시 판매가를 공개 웹으로 내놓지 않는다. **판매 공지(`maplestory.nexon.com/News/CashShop/Sale/NNN`)에
+가격이 적힌 것만 '공식'** 이고, 나머지는 커뮤니티 출처다(`constants.js` 의 `DEFAULT_ITEMS` 주석에 항목별로 표기).
+
+**근거 없는 가격을 추측으로 채우지 말 것** — 계산기가 조용히 틀린 답을 낸다.
+아직 미확인: 로얄 스타일 쿠폰 45개(99,000 으로 넣었으나 **묶음 할인 여부 미확인** — 개당가 배수로 추정하지 않았다).
+
+---
+
+## 5. 남은 백로그
 
 | ID | 내용 | 심각도 | 비고 |
 |---|---|---|---|
-| **B-9** | feedback rate limit의 IP 버킷은 best-effort | MEDIUM | **여기서 더 할 수 있는 게 없다.** Supabase 앞단의 XFF 정규화는 프로덕션에 요청을 보내야 확인된다. 배포 후 `feedback_throttle` 의 `anon:__all__` 카운터를 관찰해 상한을 조정할 것. 근본해법 = Turnstile + Edge Function(외부 서비스 결정) |
+| **B-9** | feedback rate limit 의 IP 버킷은 best-effort | MEDIUM | 프로덕션 관찰 항목. `feedback_throttle` 의 `anon:__all__` 카운터를 보고 상한 조정. 근본해법 = Turnstile + Edge Function |
 
 ### 오탐으로 판단해 고치지 않은 것 (다시 제기되면 이 근거를 보라)
 
-- **`allocateCharge`의 `C=0` 폴백이 불연속이라는 지적** — 아니다. `C→0+`이면 전액이 최고 할인 방식
-  한도 안에 들어가 `dRate → topRate`로 **연속 수렴**한다. 폴백값이 바로 그 극한이다.
-- **`divisor`(격주 6, 월간 3)가 `SPLITS`와 불일치라는 지적** — 아니다. 이 값은 "13주 롤링 창에
+- **`allocateCharge` 의 `C=0` 폴백이 불연속이라는 지적** — 아니다. `C→0+` 이면 전액이 최고 할인 방식
+  한도 안에 들어가 `dRate → topRate` 로 **연속 수렴**한다. 폴백값이 바로 그 극한이다.
+- **`divisor`(격주 6, 월간 3)가 `SPLITS` 와 불일치라는 지적** — 아니다. 이 값은 "13주 롤링 창에
   최소 몇 번의 과금이 들어가는가"이므로 창 유지에 필요한 회당 금액의 분모로는 올바르다.
 - **"등급을 올리면 과거 손익이 뛴다"** — 실측 결과 손익은 0원 변동. 판매 실수령 메소만 바뀐다.
-
----
-
-## 5. 배포 전 반드시 해야 할 것
-
-> 2026-07-11 갱신: 세 항목 전부 확인 완료. 아래는 검증 근거.
-
-1. ✅ **`PRIVACY_CONTACT_EMAIL` 치환** — `public/privacy.html`·`public/terms.html` 에 실제 연락처
-   (`yesfine13@gmail.com`) 반영됨(커밋 `f451769`).
-2. ✅ **`supabase/schema.sql` 프로덕션 적용 — 이미 완료(확인함)**. 이전 세션에서 이미 적용돼 있었고,
-   2026-07-11 Chrome 으로 프로덕션 Supabase(`maplebudget/main`)를 **읽기 전용** 전수 검사해 확인했다:
-   - 테이블 4종(`user_data`·`app_config`·`feedback`·`feedback_throttle`), 함수 2종, 트리거 3종(rate-limit 포함) 존재.
-   - `feedback_rate_limit` 함수 본문이 **현재 hardened 버전**과 일치: cf-connecting-ip · XFF 마지막 항목 ·
-     전역 백스톱(`anon:__all__`) · 솔트 해시 · `search_path` 가드 · `security definer` · 상한 100/5 전부 반영.
-   - 정책 최신판 확인: `feedback` = 역할 분리 위조방지(`anon→user_id null / authenticated→본인`),
-     `own_data` using/check = `auth.uid()=user_id`.
-   - `app_config` 1행에 `rules`(발효 규칙)와 **라이브 시세값**(mesoRate 등)이 이미 있음 — schema 시드의
-     `on conflict do nothing` 이 이 값을 덮지 않으므로 재적용해도 안전(하지만 재적용 자체가 불필요).
-   - ⚠️ 위 검사는 전부 SELECT/카탈로그 조회였고 **프로덕션 DB에 아무것도 쓰지 않았다**.
-3. ⏸️ **광고 CSP 개방 — 해당 없음(광고 계획 없음)**. `public/_headers` 의 `script-src 'self'` 유지.
-   광고 도입이 정해지면 그때 해당 도메인만 추가할 것(비차단 항목).
 
 ---
 
@@ -174,79 +163,81 @@ malformed 값이 **유효한 스냅샷을 덮어쓰던** 병합 결함, 미래 �
 
 ### 기본
 ```bash
-npm test          # 144건
+npm test          # 466건. "Tests" 줄만 보지 말고 "Test Files" 줄도 볼 것(아래 참고)
 npm run build     # PWA precache 생성까지 확인
 npm audit         # 0건이어야 함
 ```
 
-### PostgreSQL 실측 (SQL/RLS를 바꿨다면 필수)
+### 프로덕션 데이터를 건드리는 변경(마이그레이션 등)은 반드시 드라이런
 
-사용자 클러스터(PostgreSQL 18, 포트 5432)는 비밀번호가 필요하고 **건드리지 않는다.**
-스크래치패드에 **일회용 클러스터**를 띄워 검증했다. 재현 방법:
+배포 전에 **실제 클라우드 데이터를 읽어(읽기 전용) 판정만 재현**해 결과를 확인한다.
+아이템 마이그레이션은 이 방식으로 "순수 복사본 23개 삭제 / 커스텀 2개 보존"을 배포 전에 확인했다.
+테스트가 아무리 많아도 **실제 데이터 형태와 다르면 아무것도 보장하지 않는다.**
+
+### 서비스워커(PWA) 캐시 — 배포 확인의 함정
+
+새 번들을 배포해도 **서비스워커가 옛 번들을 캐시에서 준다.** "배포했는데 화면이 안 바뀐다"가 정상이다.
+
+- 프로덕션 확인: `curl https://maplemvpcalculator.com/` → `assets/index-*.js` 해시를 뽑아
+  **그 파일 안에 새 문자열이 있는지** grep. (배포 중이면 에셋이 404 → SPA 폴백으로 `index.html`(~4.6KB)이 온다. 크기로 구분된다.)
+- 브라우저 강제 갱신: `getRegistrations().unregister()` + `caches.delete()` 후 reload.
+  ⚠️ **그 직후의 그 탭은 CSS 가 안 먹은 것처럼 보일 수 있다(일시적).** 새 탭에서 다시 볼 것 — 한 번 헛다리를 짚었다.
+
+### 브라우저 실측 (Chrome MCP)
+
+DOM 을 직접 조회하는 편이 스크린샷보다 정확하다(스크롤 아티팩트에 속지 않는다).
+⚠️ **버튼을 `querySelector('button')` 로 잡지 말 것** — 유저 행에는 분류 `CSelect` 가 `<button>` 이라
+되돌리기 대신 드롭다운이 눌린다. **버튼은 텍스트로 찾는다.**
+
+### PostgreSQL 실측 (SQL/RLS 를 바꿨다면 필수)
+
+사용자 클러스터(PostgreSQL 18, 포트 5432)는 **건드리지 않는다.** 스크래치패드에 일회용 클러스터를 띄운다:
 
 ```bash
 export PATH="/c/Program Files/PostgreSQL/18/bin:$PATH"
-PGDATA="<scratchpad>/pgdata"
-initdb -D "$PGDATA" -U postgres -A trust -E UTF8     # 비밀번호 없음
+initdb -D "$PGDATA" -U postgres -A trust -E UTF8
 pg_ctl -D "$PGDATA" -o "-p 55432" -l "<scratchpad>/pg.log" start
 # auth.uid()/auth.role()/anon/authenticated 를 스텁으로 만든 뒤 schema.sql 적용
 pg_ctl -D "$PGDATA" stop -m fast                      # 끝나면 반드시 정리
 ```
 
-이 방식으로 실측 확인한 것: 트리거의 `updated_at` 증가, stale 조건부 UPDATE 0행,
-ISO 문자열 왕복 일치, 중복 INSERT 23505, RLS 교차계정 거부, JSONB ms 정밀도 보존,
-rate limit의 per-IP 5건 / XFF 위조 우회 차단 / 전역 백스톱 100건.
-
 ### 뮤테이션 검증 (데이터 손실 방어 코드에는 반드시)
 
 **테스트가 통과하는 것과 테스트가 결함을 잡는 것은 다르다.**
-B-3 작업 중 처음 쓴 속성 테스트는 가드를 통째로 제거해도 초록불이었다
-(LCG 하위 비트의 주기가 짧아 위험 분기가 실행되지 않았다).
+B-3 작업 중 처음 쓴 속성 테스트는 가드를 통째로 제거해도 초록불이었다.
 방어 코드를 일부러 부수고 테스트가 잡는지 확인할 것.
 
 **`npm test` 의 "Tests passed" 줄만 보면 안 된다.** 테스트 파일이 **파싱 에러로 통째로 수집되지 않아도**
 그 줄은 초록불이다(실제로 `ui.test.jsx` 가 그렇게 6건을 조용히 빼먹었다). **`Test Files` 줄을 함께 확인한다.**
 
-**SSR 마크업 비교는 그 코드를 실제로 렌더할 때만 의미가 있다.** `App` 의 SSR 은 계산기 탭만 그리므로
-달력 셀·팝오버는 한 번도 거치지 않는다 — "바이트 동일"이 아무것도 보장하지 않는다.
-바뀐 컴포넌트를 직접 렌더하는 테스트를 쓸 것(`CalendarPanel.test.jsx` 참고).
+**포커스·이벤트는 jsdom 으로 검증한다**(`*.dom.test.jsx` + `// @vitest-environment jsdom` + `act`).
 
-**포커스·이벤트는 jsdom 으로 검증한다.** `jsdom` 은 devDependency 로 들어 있다(`npm audit` 0건 유지).
-`*.dom.test.jsx` 에 `// @vitest-environment jsdom` 을 붙이고 `act` 로 감싼다.
-Codex 가 잡은 a11y 결함(키보드로 연 팝오버가 격자에 도달하지 못함)은 DOM 테스트 없이는 잡히지 않았다.
-
-**타임존(B-4)도 같은 함정이다.** 개발 기계가 KST 라 로컬 기준 코드와 KST 기준 코드가 같은 답을 낸다.
-게다가 **Windows 의 Node 는 `TZ=... npm test` 셸 프리픽스를 무시한다**(실측: 여전히 GMT+0900).
-`src/lib/tz.test.js` 처럼 **프로세스 안에서** `process.env.TZ` 를 할당하고 `vi.setSystemTime` 으로
-시계를 고정해야 결함이 드러난다.
+**타임존도 같은 함정이다.** 개발 기계가 KST 라 로컬 기준 코드와 KST 기준 코드가 같은 답을 낸다.
+게다가 **Windows 의 Node 는 `TZ=... npm test` 셸 프리픽스를 무시한다.**
+`src/lib/tz.test.js` 처럼 **프로세스 안에서** `process.env.TZ` 를 할당하고 `vi.setSystemTime` 으로 시계를 고정해야 한다.
 
 ### Codex 재검수 (CLAUDE.md 프로토콜)
 
-코드 변경은 예외 없이 재검수 → **PASS 받을 때까지 반복**.
+코드 변경은 예외 없이 재검수 → **PASS 받을 때까지 반복**. 이번 세션에서 Codex 가 잡은 것:
+카테고리 폴백 시 탭 강조 누락, **마이그레이션이 유저의 옛 편집을 지우는 문제(중대)**, 빈/중복 이름 미검증,
+수정 모달의 이름 변경이 별개 아이템을 만드는 문제, 공백만 다른 복사본이 매칭에서 빠지는 문제.
 
-⚠️ **`codex:rescue` 서브에이전트가 "검수 불가"를 뱉으면 코드 문제가 아니다.**
-`~/.codex/config.toml` 의 `[windows] sandbox = "elevated"` 때문에 셸을 못 띄우고
-`CreateProcessWithLogonW failed: 1326` 으로 죽는다. 우회해서 직접 실행할 것:
+⚠️ **`codex:rescue` 가 "검수 불가"를 뱉으면 코드 문제가 아니다** — Windows 샌드박스(`CreateProcessWithLogonW 1326`).
+그리고 **한글 경로 때문에 Codex 의 `git diff` 가 cp949 로 깨진다** →
+`git diff origin/dev...HEAD > <scratchpad>/x.diff` 로 **UTF-8 파일에 뽑아 주고 "이 파일을 직접 읽어라"** 라고 지시할 것.
 
-```bash
-codex exec --cd "<repo>"   -c windows.sandbox="unelevated" -c sandbox_mode="danger-full-access"   --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check   - < prompt.txt          # 프롬프트는 stdin 으로. 인자로 주면 stdin 대기로 멈춘다.
-```
-
-한글 경로라 `git diff` 출력이 cp949 로 깨진다 → 프롬프트에 "파일 원문을 Read 로 직접 읽어라"를 명시.
-Codex의 지적이 항상 옳지는 않다 — 근거가 있으면 반박하고 그 근거를 커밋 메시지에 남긴다
-(`setLedger` 무조건 호출 건, B-5 의 EPOCH 강등 유지 건 모두 반박이 받아들여졌다).
+Codex 의 지적이 항상 옳지는 않다 — 근거가 있으면 반박하고 그 근거를 커밋 메시지에 남긴다.
 
 ---
 
 ## 7. 이어서 시작하려면
 
 ```bash
-cd "C:/Users/82108/orca/workspaces/MVP작/dev"
-git checkout -b <feature> dev        # dev 는 다른 워크트리에 있다 (checkout dev 불가)
-npm test && npm run build            # 200건 통과가 기준선
+cd "C:/Users/82108/orca/workspaces/MVP작/dev-2"
+git checkout -b <feature> origin/dev
+npm test && npm run build            # 466건 통과가 기준선
 ```
 
-1. §4 백로그에서 항목을 고른다(미병합 브랜치는 없다).
-2. 작업 → **Claude 자체 검수**(빌드 + 테스트 + 뮤테이션 검증) → **Codex 재검수 PASS 까지 반복**.
-3. `git -C "C:/Users/82108/Documents/Claude/Projects/MVP작" merge --no-ff <feature>` 로 `dev` 병합.
-4. `main` 병합(=프로덕션 배포)은 **반드시 사용자 확인 후**. §5의 세 가지가 선행돼야 한다.
+1. §5 백로그에서 항목을 고른다(미병합 브랜치는 없다).
+2. 작업 → **Claude 자체 검수**(빌드 + 테스트 + 가능하면 dev 서버 런타임) → **Codex 재검수 PASS 까지 반복**.
+3. `dev` 병합 → 최종 검증 → **`main` 병합(=프로덕션 배포)은 반드시 사용자 확인 후**.
