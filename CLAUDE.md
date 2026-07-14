@@ -40,6 +40,13 @@
   - `origin:"user"` 표식이 붙은 행은 **마이그레이션이 절대 지우지 않는다**. 이게 없으면 유저 수정본(카탈로그와 같은 이름을 갖는 게 정상)이 다음 로드에서 지워져 수정 기능 자체가 성립하지 않는다.
   - 마이그레이션(`planItemMigration`, 멱등)은 **값이 같은 순수 복사본만** 지운다(`cash`/`mAllowed`/`cat`/`icon` 비교 — `differsFromBase`). 하나라도 다르면 유저가 손댄 것일 수 있으므로 '수정됨'으로 살린다 — **지우는 건 되돌릴 수 없고 배지는 되돌릴 수 있다.**
 - **동기화 불변식(깨면 데이터 꼬임 — 절대 유지)**: ① 업로드는 **단일 in-flight 직렬화**(`upsertingRef`; `upsertingRef`를 외부에서 리셋하지 말 것 — 계정 전환 복구는 `syncNonce` 재예약으로). ② 각 upsert write 직전 `liveUserIdRef.current === 캡처 userId` 확인 → **다른 계정 행에 쓰지 않음**. ③ 최초 로그인 프롬프트는 계정별 마커(`mvpCloudSyncedUid`)로 **1회만**(새로고침 X). ④ ledger는 항목 id 기준 **합집합 병합 + tombstone 차감**(추가는 손실 없음, 삭제는 전파됨). ⑤ 로컬 데이터에는 **소유자 마커**(`mvpDataOwnerUid`)가 붙는다 — 소유자가 다른 계정이면 병합하지 않고 클라우드만 채택(공용 브라우저에서 남의 원장이 섞이는 것을 막음). 로그아웃은 계정 데이터를 지운다. ⑥ 업로드는 **조건부 쓰기**(`updated_at` 버전 일치) — 무조건 upsert 금지. 충돌 시 서버 최신본을 읽어 `mergeForUpload` 로 병합 후 재시도(설정은 이 탭 우선, 원장은 합집합+tombstone 차감).
+- **문의(피드백) · 계정 삭제**: `feedback` 테이블 1행 = 문의 1건. 상태(`status`)·답변(`reply`)은 **운영자만** 정한다 —
+  클라이언트에 UPDATE 권한이 없고, INSERT 시 트리거(`feedback_validate`)가 클라이언트가 보낸 상태·답변을 덮어쓴다.
+  로그인 유저는 **본인 문의만** 조회(RLS `feedback_select_own`), 게스트 문의는 주인을 증명할 수 없어 내역에 안 나온다.
+  첨부는 **이미지 5MB × 5장**(비공개 버킷 `feedback-attachments`, 경로 `<uid>/<uuid>.<ext>` — 첫 폴더가 소유자라는 규약 위에 RLS 가 선다).
+  **업로드가 먼저, INSERT 가 나중**(뒤집으면 첨부 없는 행이 남고 유저는 고칠 권한이 없다).
+  탈퇴는 `delete_account()` RPC(인자 없음 = 본인만) — 동기화 데이터는 지우고 **문의는 내용을 남긴 채 작성자만 익명화**한다.
+  대시보드 절차는 [docs/setup-feedback-account.md](docs/setup-feedback-account.md).
 - **삭제는 반드시 `deleteLedgerEntry`로**: 배열에서 항목만 빼면 그 항목을 아직 가진 기기가 다음 접속 때 되살린다(단일 기기도 — 디바운스 전에 탭을 닫으면 동일). `ledger.deleted = { [id]: 삭제시각 }`에 표식을 남겨야 전파된다. 병합은 **삭제 우선**(한쪽이 지우고 다른 쪽이 수정했으면 삭제가 이김). 표식은 `TOMBSTONE_TTL_DAYS`(1년) 후 만료 — 그보다 오래 오프라인이던 기기는 부활시킬 수 있다(수용된 한계).
 - 상세는 프로젝트 메모리 `supabase-multiuser-sync` 참고.
 

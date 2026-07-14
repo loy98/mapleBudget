@@ -1,9 +1,13 @@
 import { supabase, cloudEnabled } from "./supabaseClient.js";
 import { clearAccountData, mergeDeleted, isDeleted, canonicalizeRows, canonicalizeMyItems, isItemDeleted } from "./storage.js";
 import { LEDGER_BUCKETS } from "./constants.js";
-import { hasSnapshot } from "./util.js";
+import { hasSnapshot, uid } from "./util.js";
+import { ATTACH_MAX_FILES, attachmentPath } from "./feedback.js";
 
 export { cloudEnabled };
+
+// 문의 첨부 이미지 버킷(비공개). supabase/schema.sql 의 버킷 id 와 같아야 한다.
+export const ATTACH_BUCKET = "feedback-attachments";
 
 // ===== 인증 =====
 export function onAuthChange(cb) {
@@ -53,10 +57,11 @@ export async function fetchAppConfig() {
   }
 }
 
-// ===== 피드백 (feedback 테이블, INSERT 전용) =====
+// ===== 피드백 (feedback 테이블) =====
 // 게스트/로그인 모두 제출 가능. user_id 는 DB default(auth.uid())가 채우므로 클라이언트가 보내지 않는다.
+// 상태(status)·답변(reply)도 보내지 않는다 — DB 트리거가 덮어쓴다(위조 방지).
 // 반환: { error } — 성공이면 error=null. 클라우드 비활성이면 error에 사유를 담아 호출부가 안내.
-export async function submitFeedback({ message, category, email } = {}) {
+export async function submitFeedback({ message, category, email, attachments } = {}) {
   if (!supabase) return { error: new Error("cloud-disabled") };
   const msg = String(message ?? "").trim();
   if (!msg) return { error: new Error("empty") };
@@ -65,13 +70,97 @@ export async function submitFeedback({ message, category, email } = {}) {
     category: category ? String(category).slice(0, 40) : null,
     email: email ? String(email).trim().slice(0, 200) : null,
     user_agent: (typeof navigator !== "undefined" ? navigator.userAgent : "").slice(0, 500),
+    attachments: Array.isArray(attachments) ? attachments.slice(0, ATTACH_MAX_FILES) : [],
   };
   const { error } = await supabase.from("feedback").insert(row);
   // DB 트리거(feedback_rate_limit)가 던지는 토큰을 안정적인 사유 코드로 바꿔 UI에 넘긴다.
   if (error && String(error.message || "").includes("feedback_rate_limited")) {
     return { error: new Error("rate-limited") };
   }
+  if (error && String(error.message || "").includes("feedback_bad_attachment")) {
+    return { error: new Error("bad-attachment") };
+  }
   return { error };
+}
+
+// ===== 문의 첨부 (Storage: feedback-attachments, 비공개) =====
+// 로그인 유저만. 경로는 `<uid>/<uuid>.<ext>` — 첫 폴더가 소유자라는 규약 위에 RLS 가 서 있다.
+//
+// **업로드가 먼저, INSERT 가 나중이다.** 순서를 뒤집으면 첨부 없는 문의 행이 먼저 생기고,
+// 업로드가 실패했을 때 그 행을 고칠 방법이 없다(유저에게 UPDATE 권한이 없다).
+// 반대로 이 순서에서는 업로드만 성공하고 INSERT 가 실패해도 고아 파일이 남을 뿐,
+// 사용자는 "전송 실패"를 보고 다시 보낼 수 있다 — 데이터가 어긋나지 않는다.
+export async function uploadFeedbackAttachments(files, userId, onProgress) {
+  if (!supabase) return { paths: [], error: new Error("cloud-disabled") };
+  if (!userId) return { paths: [], error: new Error("login-required") };
+  const paths = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const path = attachmentPath(userId, f, uid());
+    const { error } = await supabase.storage
+      .from(ATTACH_BUCKET)
+      .upload(path, f, { contentType: f.type, upsert: false });
+    if (error) {
+      // 이미 올라간 것들은 지운다 — 문의에 매달리지 못한 파일은 쓰레기다(스토리지 요금).
+      // 지우기가 실패해도 무시한다: 사용자에게 보여줄 결과는 '전송 실패' 하나뿐이다.
+      if (paths.length) await supabase.storage.from(ATTACH_BUCKET).remove(paths).catch(() => {});
+      const rateLimited = String(error.message || "").includes("row-level security");
+      return { paths: [], error: new Error(rateLimited ? "attach-rejected" : "upload-failed") };
+    }
+    paths.push(path);
+    onProgress?.(i + 1, files.length);
+  }
+  return { paths, error: null };
+}
+
+// 비공개 버킷이라 공개 URL 이 없다. 짧은 수명의 서명 URL 로만 본다.
+// 실패한 경로는 null 로 남긴다(한 장이 깨져도 나머지는 보여준다).
+export async function signedAttachmentUrls(paths, expiresIn = 600) {
+  if (!supabase || !Array.isArray(paths) || !paths.length) return {};
+  const { data, error } = await supabase.storage.from(ATTACH_BUCKET).createSignedUrls(paths, expiresIn);
+  if (error || !Array.isArray(data)) return {};
+  const map = {};
+  data.forEach((d) => {
+    if (d && d.path && d.signedUrl) map[d.path] = d.signedUrl;
+  });
+  return map;
+}
+
+// ===== 내 문의 내역 =====
+// RLS(feedback_select_own)가 본인 행만 돌려준다. 게스트로 보낸 문의(user_id=null)는 나오지 않는다 —
+// 누구 것인지 증명할 방법이 없기 때문이다(로그인 후 문의해야 내역에 남는다는 것을 UI 가 안내한다).
+export async function fetchMyFeedback(limit = 50) {
+  if (!supabase) return { rows: [], error: new Error("cloud-disabled") };
+  const { data, error } = await supabase
+    .from("feedback")
+    .select("id,created_at,category,message,status,reply,replied_at,attachments")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) return { rows: [], error };
+  // DB 값을 그대로 믿지 않는다(malformed 원소 렌더 크래시 방지 — CLAUDE.md).
+  const rows = (data || [])
+    .filter((r) => r && typeof r.message === "string")
+    .map((r) => ({
+      ...r,
+      attachments: Array.isArray(r.attachments) ? r.attachments.filter((p) => typeof p === "string") : [],
+    }));
+  return { rows, error: null };
+}
+
+// ===== 계정 삭제(탈퇴) =====
+// 서버의 delete_account() RPC 가 지운다: user_data(동기화 데이터) + auth 계정.
+// 피드백은 내용을 남기고 작성자·회신 이메일만 지운다(방침: 접수일로부터 1년 보관).
+//
+// 인자가 없다 — 대상은 언제나 JWT 의 본인이다. 남의 계정을 지정할 방법이 아예 없다.
+// 성공하면 이 기기의 로컬 데이터도 지우고(공용 브라우저), 세션을 끊는다.
+// signOut 이 실패해도 계정은 이미 서버에서 사라졌으므로 성공으로 본다 — 남은 토큰은 무효다.
+export async function deleteAccount() {
+  if (!supabase) return { error: new Error("cloud-disabled") };
+  const { error } = await supabase.rpc("delete_account");
+  if (error) return { error };
+  try { await supabase.auth.signOut(); } catch { /* 계정은 이미 없다 */ }
+  clearAccountData();
+  return { error: null };
 }
 
 // ===== 데이터 (user_data 1행) =====

@@ -270,3 +270,218 @@ drop trigger if exists feedback_rate_limit_trg on public.feedback;
 create trigger feedback_rate_limit_trg
   before insert on public.feedback
   for each row execute function public.feedback_rate_limit();
+
+-- ============================================================
+-- feedback · 문의 내역 열람 (상태 · 운영자 답변 · 첨부)
+--
+-- 로그인 유저가 자기가 보낸 문의의 처리 상태와 답변을 앱에서 볼 수 있게 한다.
+-- 게스트 문의는 user_id 가 null 이라 열람 대상이 아니다(누구 것인지 증명할 방법이 없다).
+--
+-- 상태·답변은 **운영자만** 정한다: authenticated 에 UPDATE 권한을 주지 않고,
+-- INSERT 시에는 아래 feedback_validate 트리거가 클라이언트가 보낸 값을 무시하고 덮어쓴다.
+-- (권한이 없어도 트리거로 한 번 더 막는다 — 권한 설정이 흔들려도 상태가 위조되지 않는다.)
+-- ============================================================
+
+alter table public.feedback
+  add column if not exists status      text        not null default 'received',
+  add column if not exists reply       text,
+  add column if not exists replied_at  timestamptz,
+  -- 첨부 이미지의 storage 경로 배열: ["<user_id>/<uuid>.png", ...]. 파일 자체는 storage 에 있다.
+  add column if not exists attachments jsonb       not null default '[]'::jsonb,
+  add column if not exists updated_at  timestamptz not null default now();
+
+-- received=접수됨 · in_progress=확인 중 · answered=답변 완료 · closed=종료
+alter table public.feedback drop constraint if exists feedback_status_valid;
+alter table public.feedback add  constraint feedback_status_valid
+  check (status in ('received', 'in_progress', 'answered', 'closed'));
+
+alter table public.feedback drop constraint if exists feedback_reply_len;
+alter table public.feedback add  constraint feedback_reply_len
+  check (reply is null or char_length(reply) <= 4000);
+
+-- 형태만 여기서 막고(배열·개수), 경로의 소유자 검사는 트리거에서 한다(auth.uid() 는 check 에서 못 쓴다).
+alter table public.feedback drop constraint if exists feedback_attachments_shape;
+alter table public.feedback add  constraint feedback_attachments_shape
+  check (jsonb_typeof(attachments) = 'array' and jsonb_array_length(attachments) <= 5);
+
+-- 본인 문의만 조회. anon 에는 SELECT 권한 자체가 없다(위쪽 revoke) → 게스트는 목록을 볼 수 없다.
+grant select on public.feedback to authenticated;
+
+drop policy if exists "feedback_select_own" on public.feedback;
+create policy "feedback_select_own" on public.feedback
+  for select
+  to authenticated
+  using (user_id = auth.uid());
+
+-- INSERT 정화 트리거.
+--  ① 상태·답변은 클라이언트가 정하지 못한다(무조건 접수됨 · 답변 없음).
+--  ② 첨부 경로는 반드시 **본인 폴더**(`<uid>/…`)여야 한다. 남의 경로를 적어 넣어도
+--     storage RLS 가 읽기를 막지만, 남의 파일을 자기 문의에 매달아 두는 것 자체를 여기서 끊는다.
+--  ③ 게스트(uid null)는 첨부할 수 없다 — 익명 업로드는 스토리지 남용의 문이 된다.
+create or replace function public.feedback_validate()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, pg_temp
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_el  jsonb;
+  v_p   text;
+begin
+  new.status      := 'received';
+  new.reply       := null;
+  new.replied_at  := null;
+  new.updated_at  := now();
+  if new.attachments is null then
+    new.attachments := '[]'::jsonb;
+  end if;
+  if jsonb_typeof(new.attachments) <> 'array' or jsonb_array_length(new.attachments) > 5 then
+    raise exception 'feedback_bad_attachment' using errcode = 'P0001';
+  end if;
+  if jsonb_array_length(new.attachments) > 0 then
+    if v_uid is null then
+      raise exception 'feedback_bad_attachment' using errcode = 'P0001';
+    end if;
+    for v_el in select * from jsonb_array_elements(new.attachments) loop
+      if jsonb_typeof(v_el) <> 'string' then
+        raise exception 'feedback_bad_attachment' using errcode = 'P0001';
+      end if;
+      v_p := v_el #>> '{}';
+      -- 정확히 `<uid>/<파일명>` 한 단계. 상위 경로 탈출(`..`)과 남의 폴더를 모두 막는다.
+      if v_p !~ ('^' || v_uid::text || '/[A-Za-z0-9._-]{1,120}$') then
+        raise exception 'feedback_bad_attachment' using errcode = 'P0001';
+      end if;
+    end loop;
+  end if;
+  return new;
+end $$;
+
+-- 운영자 답변이 달리면 상태·시각을 자동으로 맞춘다(대시보드에서 reply 만 채우면 된다).
+create or replace function public.feedback_touch_reply()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, pg_temp
+as $$
+begin
+  new.updated_at := now();
+  if new.reply is distinct from old.reply and new.reply is not null then
+    new.replied_at := now();
+    -- 운영자가 상태를 직접 지정했다면 존중한다(예: 답변하며 바로 closed 로).
+    if new.status = old.status then
+      new.status := 'answered';
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists feedback_validate_trg on public.feedback;
+create trigger feedback_validate_trg
+  before insert on public.feedback
+  for each row execute function public.feedback_validate();
+
+drop trigger if exists feedback_touch_reply_trg on public.feedback;
+create trigger feedback_touch_reply_trg
+  before update on public.feedback
+  for each row execute function public.feedback_touch_reply();
+
+-- ============================================================
+-- feedback-attachments · 문의 첨부 이미지 (Storage, 비공개 버킷)
+--
+-- 경로 규약: `<user_id>/<uuid>.<ext>` — 첫 폴더가 소유자다. 정책은 전부 이 규약 위에 선다.
+-- 비공개 버킷이라 URL 을 알아도 읽을 수 없다. 앱은 signed URL(단기)로 자기 첨부만 본다.
+-- 영상은 받지 않는다(무료 1GB 를 몇 개로 채운다) — 이미지 5MB × 5장.
+-- ============================================================
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'feedback-attachments', 'feedback-attachments', false, 5242880,
+  array['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+)
+on conflict (id) do update set
+  public             = false,
+  file_size_limit    = 5242880,
+  allowed_mime_types = array['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+-- 자기 폴더만 읽는다. 수정·삭제 정책은 두지 않는다 —
+-- 문의에 매단 증거를 나중에 지우거나 바꿀 수 있으면 첨부의 의미가 없다.
+drop policy if exists "fb_attach_select_own" on storage.objects;
+create policy "fb_attach_select_own" on storage.objects
+  for select
+  to authenticated
+  using (
+    bucket_id = 'feedback-attachments'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- 자기 폴더에만 올린다 + **업로드 상한을 정책 안에 둔다**.
+-- 로그인만 하면 5MB 를 무한히 올릴 수 있고(매직링크로 계정은 쉽게 만든다), 그건 스토리지 요금이 된다.
+-- 계정당 1시간 20개 — 사람이 문의에 붙일 양(최대 5장)보다 넉넉하고 스크립트에는 좁다.
+-- 트리거가 아니라 정책에 넣는 이유: storage.objects 는 관리형 스키마라 트리거 생성(테이블 소유권)이
+-- 막힐 수 있다. 정책은 대시보드도 쓰는 정식 경로다. 세는 SELECT 는 위의 select 정책 덕에 본인 것만 보인다.
+drop policy if exists "fb_attach_insert_own" on storage.objects;
+create policy "fb_attach_insert_own" on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'feedback-attachments'
+    and (storage.foldername(name))[1] = auth.uid()::text
+    and (
+      select count(*)
+        from storage.objects o
+       where o.bucket_id = 'feedback-attachments'
+         and o.owner = auth.uid()
+         and o.created_at > now() - interval '1 hour'
+    ) < 20
+  );
+
+-- ============================================================
+-- delete_account · 회원 탈퇴 (앱의 '계정 삭제' 버튼이 호출)
+--
+-- 약관 제3조 4항("이용자는 언제든지 탈퇴를 요청할 수 있으며, 요청 시 서버에 보관된 데이터는
+-- 지체 없이 삭제된다")을 앱 안에서 바로 이행한다.
+--
+-- security definer 인 이유: auth.users 삭제는 service role 권한이 필요한데, 그 키를 브라우저에
+-- 둘 수는 없다. 대신 **자기 자신만** 지울 수 있는 함수를 두고(대상은 JWT 의 auth.uid() 뿐 —
+-- 인자가 없으므로 남의 계정을 지정할 방법이 아예 없다) authenticated 에만 실행 권한을 준다.
+--
+-- 피드백은 **내용을 남기고 작성자만 익명화**한다(방침: 접수일로부터 1년 보관).
+-- 회신 이메일은 함께 지운다 — 떠난 사람의 연락처를 붙들고 있을 이유가 없다.
+-- ============================================================
+
+create or replace function public.delete_account()
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog, pg_temp
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated' using errcode = 'P0001';
+  end if;
+
+  -- 동기화 데이터. auth.users 삭제의 on delete cascade 로도 지워지지만, 의도를 코드에 남긴다.
+  delete from public.user_data where user_id = v_uid;
+
+  -- 문의 글: 작성자·회신 이메일만 지우고 내용은 남긴다.
+  update public.feedback
+     set user_id = null, email = null, updated_at = now()
+   where user_id = v_uid;
+
+  -- 첨부 파일의 소유자 링크를 끊는다. auth.users 를 지울 때 storage.objects.owner 의 FK 가
+  -- 걸릴 수 있고, 남겨 두더라도 '없는 유저'를 가리키는 소유자는 의미가 없다.
+  -- (구버전 프로젝트에는 owner_id 컬럼이 없다 → 그 경우 owner 만 끊는다.)
+  begin
+    update storage.objects set owner = null, owner_id = null
+     where bucket_id = 'feedback-attachments' and owner = v_uid;
+  exception when undefined_column then
+    update storage.objects set owner = null
+     where bucket_id = 'feedback-attachments' and owner = v_uid;
+  end;
+
+  delete from auth.users where id = v_uid;
+end $$;
+
+revoke all on function public.delete_account() from public, anon;
+grant execute on function public.delete_account() to authenticated;

@@ -204,3 +204,17 @@ export const IconInfo = (p) => (
     <path d="M12 16v-4M12 8h.01" />
   </svg>
 );
+
+export const IconImage = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <path d="M21 15l-5-5L5 21" />
+  </svg>
+);
+
+export const IconTrash = (p) => (
+  <svg {...base} {...p}>
+    <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+  </svg>
+);
