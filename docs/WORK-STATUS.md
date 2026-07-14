@@ -30,15 +30,17 @@
 ## 1. 브랜치 상태
 
 ```
-main = dev = 7642816   (프로덕션 https://maplemvpcalculator.com, Cloudflare 자동배포 + 번들 실측 확인 완료)
+main = dev = 7452e30   (프로덕션 https://maplemvpcalculator.com, Cloudflare 자동배포)
+feature/account-and-feedback   ← 미병합. 계정 삭제 · 내 문의(상태/답변) · 이미지 첨부 · 메일 알림
 ```
 
-미병합 브랜치 없음. `dev` 는 다른 워크트리(`C:\Users\82108\Documents\Claude\Projects\MVP작`)에 체크아웃돼 있어
+`dev` 는 다른 워크트리(`C:\Users\82108\Documents\Claude\Projects\MVP작`)에 체크아웃돼 있어
 orca 트리에서 `git checkout dev` 가 안 된다 → `git checkout -b <feature> origin/dev` 로 딴다.
 `main` 병합은 detached HEAD 에서:
 `git checkout --detach origin/main && git merge --no-ff origin/dev && git push origin HEAD:main`
 
-**다음 액션**: §5 백로그. 미병합 브랜치는 없다.
+**다음 액션**: `feature/account-and-feedback` 은 **사람이 대시보드 작업(§8)을 해야 완성된다.**
+SQL 을 적용하기 전에 병합·배포하면 '내 문의'와 첨부가 실패한다(문의 전송·계산기는 정상).
 
 ---
 
@@ -305,3 +307,49 @@ npm test && npm run build            # 482건 통과가 기준선
 1. §5 백로그에서 항목을 고른다(미병합 브랜치는 없다).
 2. 작업 → **Claude 자체 검수**(빌드 + 테스트 + 가능하면 dev 서버 런타임) → **Codex 재검수 PASS 까지 반복**.
 3. `dev` 병합 → 최종 검증 → **`main` 병합(=프로덕션 배포)은 반드시 사용자 확인 후**.
+
+---
+
+## 8. 계정 삭제 · 문의 내역 · 첨부 · 메일 알림 — 2026-07-14 세션 C
+
+`feature/account-and-feedback` (미병합). 발단은 세 가지 점검 요청이었다:
+내보내기/가져오기가 아직 동작하는지(→ **동작함**, 왕복 실측), 피드백이 어떻게 흘러가는지(→ **동작함**,
+프로덕션 INSERT 실측), 약관의 '탈퇴 요청'은 어디서 하는지(→ **앱에 없었다. 전부 수동 처리였다**).
+세 번째가 이 작업의 시작이다.
+
+### 무엇이 생겼나
+
+| 기능 | 어디 |
+|---|---|
+| 계정 삭제(탈퇴) 버튼 | `AuthBar.jsx` → `AccountDeleteModal.jsx` → `delete_account()` RPC |
+| 내 문의(상태·답변) | `FeedbackModal.jsx` 탭 구조 + RLS `feedback_select_own` |
+| 이미지 첨부 | 비공개 버킷 `feedback-attachments` (5MB × 5장, 이미지만) |
+| 메일 알림 | `supabase/functions/feedback-notify` (Resend) — 새 문의→운영자, 답변→문의자 |
+
+### 반드시 지킬 것
+
+- **상태·답변은 운영자만.** 클라이언트에 UPDATE 권한이 없고, INSERT 트리거가 클라이언트가 보낸
+  `status`/`reply` 를 덮어쓴다. **둘 중 하나만 믿지 말 것** — 권한 설정이 흔들려도 트리거가 막는다.
+- **첨부 경로 규약 `<uid>/<uuid>.<ext>`** 위에 DB 트리거의 정규식과 storage RLS 가 함께 서 있다.
+  `lib/feedback.js` 의 `attachmentPath` 를 바꾸면 **서버가 문의를 거절한다.** 같이 고칠 것.
+- **업로드 → INSERT 순서.** 뒤집으면 첨부 없는 문의 행이 먼저 생기고, 유저에게는 UPDATE 권한이 없어
+  그 행을 고칠 수 없다. 지금 순서에서는 최악이 '고아 파일'이고 사용자는 다시 보내면 된다.
+- **탈퇴는 문의를 지우지 않는다** — 작성자·회신 이메일만 지우고 내용은 남긴다(방침: 1년 보관).
+- 사용자에게 보이는 **탭 이름과 버튼 이름을 겹치지 말 것**. 처음에 탭도 '보내기', 전송 버튼도 '보내기'라
+  jsdom 테스트의 클릭이 탭으로 갔다(스크린리더에서도 같은 이름의 조작이 둘). → 탭을 '문의하기'로.
+
+### 검증
+
+- 테스트 **514건**(+32: `feedback.test.js` 15, `FeedbackModal.dom.test.jsx` 12, AuthBar 계정삭제 5).
+- **로컬 PostgreSQL 18 실측 17항목 통과** — 스텁(`auth`/`storage`/역할)을 세우고 `schema.sql` 을 그대로 적용:
+  상태 위조 차단, 남의 폴더 첨부·경로 탈출(`..`)·6장·게스트 첨부 차단, 본인 문의만 조회,
+  게스트 조회 차단(42501), reply→answered 자동, 운영자 지정 상태 존중, 남의 폴더 업로드 차단,
+  시간당 20개 상한, 게스트의 탈퇴 호출 차단, 탈퇴 시 **남의 계정·데이터 무사**.
+- **뮤테이션 2건** — ① 첨부 경로 소유자 검사 제거 ② 탈퇴가 `where` 없이 전원 삭제 → **둘 다 테스트가 잡았다.**
+  (하네스 자체의 거짓 초록불도 이 과정에서 발견했다: `must_fail` 의 예외 핸들러가 자기가 던진 실패까지 삼켰다.)
+
+### 사람이 해야 할 것 (배포 전)
+
+[docs/setup-feedback-account.md](setup-feedback-account.md) — ① `schema.sql` 실행(필수) ② 답변하는 법
+③ Resend 키 ④ Edge Function 배포 + 웹훅. **①만 해도 계정 삭제·내 문의·상태/답변은 동작한다.**
+④의 도메인 인증 전에는 **운영자 알림만** 가고 문의자 답변 메일은 나가지 않는다(Resend 샌드박스 제한).

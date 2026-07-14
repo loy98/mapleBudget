@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { cloudEnabled, signInWithGoogle, signInWithEmail, signOut } from "../lib/cloud.js";
 import { IconCloud } from "./ui/icons.jsx";
 import Modal from "./Modal.jsx";
+import AccountDeleteModal from "./AccountDeleteModal.jsx";
 import { toast } from "../lib/toast.js";
 
 // 아직 클라우드에 못 올린 변경이 있는데 로그아웃하려 할 때. 로그아웃은 이 기기의 계정 데이터를 지우므로
@@ -31,6 +32,7 @@ export default function AuthBar({ session, syncState, flushPendingUpload }) {
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [askUnsynced, setAskUnsynced] = useState(false);
+  const [askDelete, setAskDelete] = useState(false);
 
   const userId = session?.user?.id ?? null;
   const userIdRef = useRef(null);
@@ -97,7 +99,14 @@ export default function AuthBar({ session, syncState, flushPendingUpload }) {
         <button className="btn ghost sm" onClick={logout} disabled={busy}>
           {busy ? "저장 중…" : "로그아웃"}
         </button>
+        {/* 탈퇴. 약관 제3조 4항의 '탈퇴 요청'을 앱 안에서 바로 이행한다(메일 요청 없이). */}
+        <button className="linklike danger sm" onClick={() => setAskDelete(true)} disabled={busy}>
+          계정 삭제
+        </button>
         {askUnsynced && <UnsyncedLogoutModal onChoose={resolvePending} />}
+        {askDelete && (
+          <AccountDeleteModal email={label} onClose={() => setAskDelete(false)} />
+        )}
       </div>
     );
   }
