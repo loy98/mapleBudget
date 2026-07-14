@@ -130,10 +130,26 @@
     background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
   .chip.ghosted{opacity:.55;cursor:default}
   .chip.ghosted:hover{border-color:var(--line);background:var(--panel2)}
-  /* 목록 편집 표 */
+  /* 목록 편집 표.
+     열 너비는 colgroup 으로 고정(table-layout:fixed). 안 그러면 기본 행(텍스트)과 내 아이템 행(입력 컨트롤)이
+     같은 열에서 서로 다른 폭을 요구해 칸 크기가 행마다 달라 보인다. */
+  .itemedit{table-layout:fixed}
+  .itemedit th,.itemedit td{padding:6px 7px;vertical-align:middle;height:44px;box-sizing:border-box}
   .itemedit .ro{color:var(--sub);font-size:13px}
   .itemedit .row-base{background:color-mix(in srgb,var(--panel2) 55%,transparent)}
-  .itemedit .rowbtns{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+  /* 행 높이를 텍스트 행과 맞춘다 — 입력 컨트롤이 기본 크기면 내 아이템 행만 20px 가까이 커진다. */
+  .itemedit td input[type=text],.itemedit td input:not([type]){padding:5px 8px;font-size:13px;height:30px}
+  .itemedit td .csel{display:block}
+  .itemedit td .csel-btn{height:30px;padding-top:0;padding-bottom:0;font-size:13px}
+  .itemedit .icocell{display:flex;align-items:center;gap:6px;min-width:0}
+  /* 아이콘 미리보기 칸은 폭을 고정한다(이모지·이미지·없음이 섞여도 이름 열 시작점이 흔들리지 않게). */
+  .itemedit .icocell .prev{flex:none;width:20px;display:inline-flex;align-items:center;justify-content:center}
+  .itemedit .icocell input{min-width:0}
+  .itemedit .name-ro{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* td 에 직접 display:flex 를 주면 그 셀이 표 셀 박스에서 빠져나가 행 밑줄이 그 앞에서 끊긴다.
+     플렉스는 반드시 셀 '안쪽' 래퍼에 준다. */
+  .itemedit td.rowbtns{text-align:right}
+  .itemedit .rowbtns .btns{display:flex;gap:4px;justify-content:flex-end;align-items:center}
   .tag{display:inline-block;padding:2px 7px;border-radius:7px;font-size:10.5px;font-weight:800;line-height:1.5;white-space:nowrap}
   .tag.base{background:var(--panel2);border:1px solid var(--line);color:var(--hint)}
   .tag.own{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
@@ -374,6 +390,27 @@
 .hbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .hbtn-ico{width:16px;height:16px;flex:none}
 .hbtn-lbl{white-space:nowrap}
+/* 후원 버튼만 살짝 눈에 띄게(액센트 글자). 광고처럼 요란해지지 않도록 배경은 hover 때만. */
+.hbtn.donate{color:var(--accent)}
+.hbtn.donate:hover{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+/* 후원 모달 */
+.donate-foot{margin-top:10px}
+.donate-foot .linklike{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.donate-foot .linklike svg{width:14px;height:14px}
+.donate-foot .hint{display:inline;margin-left:2px}
+.donate-ways{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.dway{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.dw-t{font-size:11.5px;color:var(--sub);font-weight:700;margin-bottom:6px}
+.dw-acc{display:flex;flex-direction:column;gap:2px;margin-bottom:9px}
+.dw-bank{font-size:12px;color:var(--sub)}
+.dw-num{font-size:16px;font-weight:800;letter-spacing:.2px;user-select:all}
+.dw-links{display:flex;gap:8px;flex-wrap:wrap}
+/* 송금 링크는 <a> 라 .btn 의 기본 정렬(button)이 안 먹는다 → inline-flex 로 맞춘다. */
+.dw-links .btn{display:inline-flex;align-items:center;text-decoration:none}
+.dw-links .btn.kakao{background:#FEE500;color:#191600}
+.dw-links .btn.kakao:hover{background:#f2da00}
+.dw-links .btn.toss{background:#0064FF;color:#fff}
+.dw-links .btn.toss:hover{background:#0057dd}
 /* 테마 선택 드롭다운 */
 .thememenu{position:relative;display:inline-flex}
 .thememenu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:1000;min-width:158px;
