@@ -27,11 +27,13 @@ src/
     supabaseClient.js  클라이언트 생성
     toast.js        앱 테마 알림
     errorLog.js     로컬 오류 기록
+    donate.js       후원 수단(카카오페이 QR·계좌) 설정 + 링크/금액 검증
   components/
-    ui.jsx          숫자 스테퍼, 커스텀 셀렉트, 날짜 피커 등
+    ui.jsx          숫자 스테퍼, 커스텀 셀렉트, 날짜 피커, QR 등
     CalcTab.jsx     계산기 탭
     LogTab.jsx      거래 기록 탭 (통계/달력/입력)
     ForecastTab.jsx 예상 & 추천 탭
+    DonateModal.jsx 후원('개발자에게 커피 한잔') 모달
 ```
 
 ## 개발
