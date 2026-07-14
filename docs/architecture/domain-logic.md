@@ -8,7 +8,7 @@
 - **현금화**: 메소(억) + **억당(원/억, `rate`)** 입력 → 판매 현금 자동 산정(`cashWonOf`). 구 데이터(`won` 직접 입력)는 `rate`로 승계하되 `meso=0`이면 rate를 못 만드니 `won` 폴백(손실 방지) — 이 승계는 `normalizeLedger`(storage.js)에서.
 - **숫자 입력 규약**: 값은 문자열 저장, 계산부는 `+x || 0`. (프론트 NumInput과 짝)
 
-## calc.js — `computeCalc(settings, charges, items)`
+## calc.js — `computeCalc(settings, charges, items, rules = DEFAULT_RULES)`
 계산기 탭의 모든 파생값을 만드는 **단일 순수 함수**. 반환 객체(`calc`)를 App이 useMemo로 캐시해 전 탭에 전달.
 - **기초 방식 비교**: 선물식 vs 메소마켓 — 1만원 실적당 순현금(`gift`/`market`), 더 싼 쪽(`giftBest`).
 - **충전 배분**: 여러 충전 방식(`charges`: 이름/할인율/월한도)을 할인 높은 순으로 한도만큼 배분 → 평균 충전 할인(`effD`)·배분 내역(`alloc`).

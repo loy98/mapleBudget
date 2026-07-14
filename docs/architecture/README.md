@@ -32,12 +32,18 @@ src/
   App.jsx                   # 루트: 계산기 상태 소유·탭 렌더·useCloudSync 호출·충돌 모달
   styles.css                # 테마(다크)·전 컴포넌트 스타일·반응형(@media 900/600)
   lib/
-    calc.js                 # 순수 계산 computeCalc(엠작 방식·총비용·경매장·마일리지·플랜)
-    ledger.js               # 거래 통계·주차(목~수)·현금화·달력 집계·예상
-    constants.js            # TIERS/CHARGE_METHODS/MVP_GRADES/DEFAULT_*/SPLITS/요일/적립률
+    calc.js                 # 순수 계산 computeCalc(settings, charges, items, rules)
+    ledger.js               # 거래 통계·주차(목~수)·현금화·달력 집계·예상·13주 누적(cumNow)
+    items.js                # 카탈로그(운영자)+내 아이템(유저) 합치기·숨김/수정본·구 데이터 마이그레이션
+    constants.js            # TIERS/CHARGE_METHODS/MVP_GRADES/DEFAULT_*/ITEM_CATS/SPLITS/rules
     util.js                 # 포매터(won/pct/eok/ml)·날짜(weekStartThu 등)·uid·estGrade
-    storage.js              # 순수 parse/serialize/normalize·localStorage·withRowKeys·touched·calMode·export/import
-    cloud.js                # Supabase 인증·user_data·app_config·mergeSnapshots
+    tz.js                   # '지금'을 KST로 해석(nowD/tzDateStr) — 주차·달력의 유일한 진입점
+    storage.js              # 순수 parse/serialize/normalize·localStorage·삭제 표식·export/import
+    cloud.js                # Supabase 인증·user_data·app_config·mergeSnapshots/mergeMyItems
+    useCloudSync.js         # 세션·app_config·동기화·업로드 (동기화 수정은 여기)
+    supabaseClient.js       # 클라이언트 생성·keepalive
+    toast.js                # 앱 테마 알림
+    errorLog.js             # 로컬 오류 기록
     useCloudSync.js         # 동기화 훅(세션·config·초기동기화·업로드·충돌모달)
     supabaseClient.js       # Supabase 클라이언트 생성(공개 .env 값)
     pure.test.js            # vitest: 순수 함수 회귀(22건)

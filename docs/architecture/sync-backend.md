@@ -25,7 +25,7 @@
 2. **app_config 로드** — `chargeOptions`(드롭다운, 즉시 반영)·`appConfig` 세팅.
 3. **시세 기본값 적용** — auth 해석 후 '저장 이력 없는 게스트'에게만 1회. `configRatePatch`(공유 키 목록 `CONFIG_RATE_KEYS`). **아이템은 여기서 안 다룬다**(카탈로그는 유저 데이터로 복사되지 않는다).
 4. **force 적용** — `appConfig.force` 배열의 키를 모든 유저에게 덮어씀(시세 스칼라만). 컨텍스트('__guest__'/userId)별 '데이터 정착 후' 1회. 정착 신호=게스트 `authResolved`/로그인 `syncedUserRef===userId`. **`defaultItems`는 force 대상이 아니다** — 아래 '아이템 소유권' 참고.
-4b. **구 아이템 마이그레이션** — `planItemMigration`(멱등). `my_items`에 남은 **기본값 순수 복사본**만 삭제 표식과 함께 제거하고, 나머지엔 `origin:"user"`를 찍어 보존. 정착 후 컨텍스트별 1회.
+4b. **구 아이템 마이그레이션** — `planItemMigration`(멱등). `my_items`에 남은 **기본값 순수 복사본**(값이 카탈로그와 같은 행)만 삭제 표식과 함께 제거하고, 나머지엔 `origin:"user"`를 찍어 보존. 정착 후 컨텍스트별 1회.
 5. **최초 로그인 동기화** — fetch→`mergeSnapshots`→상태 반영. conflict면 **테마 모달**(`conflictPrompt`, App이 렌더)로 선택(async 프로미스; cleanup서 안전 해소). 첫 로그인 마커는 첫 업로드 성공 후.
 6. **디바운스 업로드**(800ms) + **탭 숨김 플러시**(visibilitychange) — 둘 다 `runUpload(uid)` 단일 러너 공유.
 
@@ -60,8 +60,8 @@
 | 되돌리기 / 숨김해제 | **그 행을 삭제**(`deleteMyItem`) → 카탈로그 원본이 다시 보임 |
 
 - `origin:"user"` 는 마이그레이션 가드다. 없으면 유저 수정본(카탈로그와 같은 이름을 갖는 게 정상)이 다음 로드에 지워진다.
-- `planItemMigration`은 **값까지 같은 순수 복사본만** 지운다. 하나라도 다르면 '수정됨'으로 살린다 —
-  지우는 건 되돌릴 수 없고 배지는 되돌릴 수 있다.
+- `planItemMigration`은 **값이 같은 순수 복사본만** 지운다(`cash`/`mAllowed`/`cat`/`icon` 비교 — `differsFromBase`).
+  하나라도 다르면 '수정됨'으로 살린다 — 지우는 건 되돌릴 수 없고 배지는 되돌릴 수 있다.
 - 카탈로그 이름은 trim·중복제거(`validCatalog`), 매칭은 양쪽 trim(`matchKey`)으로 비교만 한다(저장 이름은 불변 — id가 거기서 유도된다).
 
 ## app_config 운영 (재배포 없이 수정)

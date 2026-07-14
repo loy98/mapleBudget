@@ -3,8 +3,9 @@
 ## 상태 소유 (single source)
 - **App.jsx**가 계산기 상태를 소유: `{settings, charges, items}`(한 useState 객체), `myItems`, `ledger`, `tab`.
   - 초기값은 `loadCalcState/loadMyItems/loadLedger`(localStorage). 변경 시 `useEffect`로 자동 저장.
-  - 파생값 `calc = useMemo(computeCalc(settings,charges,items))` — 순수 계산, 모든 탭이 prop으로 받음.
-- **useCloudSync 훅**이 세션·동기화 상태(`session/syncState/chargeOptions/conflictPrompt`)를 소유하고 App에 반환. 계산기 상태는 App→훅으로 주입(setter 포함). → 컴포넌트는 클라우드를 모른다.
+  - 파생값 `calc = useMemo(computeCalc(calcSettings, charges, items, rules))` — 순수 계산, 모든 탭이 prop으로 받음.
+    `calcSettings` 는 `curSource==='ledger'` 면 `curAchieved` 를 원장 13주 누적으로 갈아끼운 것(원본 `settings.curAchieved` 는 보존).
+- **useCloudSync 훅**이 세션·동기화 상태(`session/syncState/chargeOptions/catalog/conflictPrompt/rules/ruleHistory`)를 소유하고 App에 반환. 계산기 상태는 App→훅으로 주입(setter 포함). → 컴포넌트는 클라우드를 모른다.
 - **LogTab**만 로컬 UI state를 자체 소유(달력 커서·선택 날짜·서브탭·달력 모드 등 뷰 상태). `calMode`는 기기별 로컬(동기화 안 함).
 
 ## 사용자 setter (App.jsx)
