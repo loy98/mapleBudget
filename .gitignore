@@ -7,6 +7,9 @@ dev-dist
 .env.local
 .env*.local
 
+# Supabase CLI 로컬 캐시(연결 프로젝트 ref·서비스 버전 등) — 기기별, 커밋 금지
+supabase/.temp/
+
 # Dev scaffolding / orchestration state
 .omc
 _archive
