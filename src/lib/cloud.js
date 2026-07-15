@@ -147,6 +147,28 @@ export async function fetchMyFeedback(limit = 50) {
   return { rows, error: null };
 }
 
+// 탈퇴 시 파기할 첨부 경로를 모은다 — **내 폴더(`<uid>/`) 전체를 연다.**
+// feedback.attachments(문의에 달린 경로)만으론 부족하다: "업로드 성공 → INSERT 실패"(레이트리밋·네트워크)나
+// Storage API 직접 업로드로 생긴, 어떤 문의에도 안 달린 고아 파일이 `<uid>/` 아래 남을 수 있다. 그것까지
+// 지우지 않으면 탈퇴 후에도 실물 이미지가 백엔드에 남아 "탈퇴 시 첨부 파기" 약속이 깨진다(Codex 지적).
+// RLS(fb_attach_select_own)로 어차피 본인 폴더만 보인다. `.emptyFolderPlaceholder` 같은 것도 함께 지운다.
+async function listOwnAttachmentPaths(userId) {
+  if (!userId || !supabase) return [];
+  const paths = [];
+  const pageSize = 100;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.storage
+      .from(ATTACH_BUCKET)
+      .list(userId, { limit: pageSize, offset });
+    if (error || !Array.isArray(data)) break;
+    for (const o of data) {
+      if (o && typeof o.name === "string") paths.push(`${userId}/${o.name}`);
+    }
+    if (data.length < pageSize) break; // 마지막 페이지
+  }
+  return paths;
+}
+
 // ===== 계정 삭제(탈퇴) =====
 // 서버의 delete_account() RPC 가 지운다: user_data(동기화 데이터) + auth 계정.
 // 피드백은 **내용을 남기고** 작성자·회신 이메일·첨부 참조를 지운다(방침: 접수일로부터 1년 보관).
@@ -170,14 +192,13 @@ export async function fetchMyFeedback(limit = 50) {
 export async function deleteAccount() {
   if (!supabase) return { error: new Error("cloud-disabled") };
 
-  // 지울 파일 목록을 **먼저 읽어 둔다.** RPC 가 끝나면 attachments 가 비워져 경로를 알 수 없다.
-  // 읽기 실패는 치명적이지 않다(고아 파일이 남을 뿐) → 탈퇴를 막지 않는다.
+  // 지울 파일 목록을 **먼저 모아 둔다.** RPC 가 끝나면 attachments 가 비워지고 세션도 곧 무효화된다.
+  // feedback.attachments 만 보지 않고 내 폴더(`<uid>/`) 전체를 열거한다 — 문의에 안 달린 고아 파일까지 파기한다.
+  // 읽기 실패는 치명적이지 않다(고아 파일이 남을 뿐, RPC 가 owner=null 로 만들어 운영자가 찾을 수 있다) → 탈퇴를 막지 않는다.
   let paths = [];
   try {
-    const { data } = await supabase.from("feedback").select("attachments"); // RLS: 본인 문의만
-    paths = (data || [])
-      .flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []))
-      .filter((p) => typeof p === "string");
+    const { data: u } = await supabase.auth.getUser();
+    paths = await listOwnAttachmentPaths(u?.user?.id ?? null);
   } catch (e) {
     console.warn("[account] 첨부 목록을 읽지 못했다 — 파일이 남을 수 있다", e);
   }
