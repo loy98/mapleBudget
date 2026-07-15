@@ -11,9 +11,11 @@ beforeAll(() => {
 });
 
 const signOut = vi.fn();
+const deleteAccount = vi.fn();
 vi.mock("../lib/cloud.js", () => ({
   cloudEnabled: true,
   signOut: (...a) => signOut(...a),
+  deleteAccount: (...a) => deleteAccount(...a),
   signInWithGoogle: vi.fn(),
   signInWithEmail: vi.fn(),
 }));
@@ -38,6 +40,7 @@ const hasText = (t) => container.textContent.includes(t);
 beforeEach(() => {
   vi.clearAllMocks();
   signOut.mockResolvedValue({ error: null });
+  deleteAccount.mockResolvedValue({ error: null });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -129,5 +132,67 @@ describe("AuthBar 로그아웃 — 지우기 전에 플러시", () => {
 
     expect(signOut).not.toHaveBeenCalled();
     expect(hasText("아직 저장되지 않은 변경이 있어요")).toBe(true);
+  });
+});
+
+// 계정 삭제(탈퇴)는 되돌릴 수 없다 → 확인 단어를 받기 전에는 절대 실행되지 않아야 한다.
+describe("AuthBar 계정 삭제", () => {
+  const typeConfirm = async (value) => {
+    const input = container.querySelector(".fb-input");
+    const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, "value").set;
+    setter.call(input, value);
+    await act(async () => { input.dispatchEvent(new Event("input", { bubbles: true })); });
+  };
+  const deleteBtn = () =>
+    [...container.querySelectorAll("button")].filter((b) => b.textContent.trim() === "계정 삭제").pop();
+
+  it("로그인 상태에서만 버튼이 보인다", async () => {
+    await render({ session: null, flushPendingUpload: vi.fn() });
+    expect(hasText("계정 삭제")).toBe(false);
+    await render({ session: SESSION_A, flushPendingUpload: vi.fn() });
+    expect(hasText("계정 삭제")).toBe(true);
+  });
+
+  it("확인 단어를 넣기 전에는 삭제 버튼이 잠겨 있다", async () => {
+    await render({ session: SESSION_A, flushPendingUpload: vi.fn() });
+    await click("계정 삭제");
+    expect(hasText("계정을 삭제할까요?")).toBe(true);
+    expect(deleteBtn().disabled).toBe(true);
+
+    await typeConfirm("삭제하지마");          // 비슷한 말로는 안 열린다
+    expect(deleteBtn().disabled).toBe(true);
+
+    await typeConfirm("삭제");
+    expect(deleteBtn().disabled).toBe(false);
+    expect(deleteAccount).not.toHaveBeenCalled(); // 여기까지 아무것도 지우지 않았다
+  });
+
+  it("확인 후 누르면 삭제하고 새로고침한다", async () => {
+    await render({ session: SESSION_A, flushPendingUpload: vi.fn() });
+    await click("계정 삭제");
+    await typeConfirm("삭제");
+    await act(async () => { deleteBtn().click(); });
+
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(window.location.reload).toHaveBeenCalled();
+  });
+
+  it("삭제가 실패하면 알리고 새로고침하지 않는다 (세션을 함부로 끊지 않는다)", async () => {
+    deleteAccount.mockResolvedValue({ error: new Error("boom") });
+    await render({ session: SESSION_A, flushPendingUpload: vi.fn() });
+    await click("계정 삭제");
+    await typeConfirm("삭제");
+    await act(async () => { deleteBtn().click(); });
+
+    expect(hasText("계정 삭제에 실패했어요")).toBe(true);
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it("취소하면 아무것도 지우지 않는다", async () => {
+    await render({ session: SESSION_A, flushPendingUpload: vi.fn() });
+    await click("계정 삭제");
+    await click("취소");
+    expect(hasText("계정을 삭제할까요?")).toBe(false);
+    expect(deleteAccount).not.toHaveBeenCalled();
   });
 });
